@@ -3,7 +3,7 @@
 ## D1 - Audience and deployment model (2026-11-17)
 
 **Decision:** open source, for anyone to use. Self-hosted and bring-your-own-model first
-(each user runs the app and chooses a provider: local Ollama, or their own API key).
+(each user runs the app and uses their own provider API key).
 Hosted with per-user encrypted keys can follow with the UI step. A hosted service where we
 supply and pay for the model is not planned.
 
@@ -26,17 +26,18 @@ supply and pay for the model is not planned.
 - Review docs for personal or employer information.
 - Confirm that publishing is allowed under your employment / IP terms.
 
-## D2 - Zero-cost by default (2026-11-17)
+## D2 - Provider: bring your own API key, OpenAI first (2026-11-17)
 
-**Decision:** the default setup must cost nothing and need no account: local Ollama with a small open
-model (`qwen2.5:7b`). Hosted providers (Ollama Cloud, Anthropic, others) are optional extras.
+**Decision:** the first provider is OpenAI, using the project owner's own API key. Anthropic stays
+supported as a second adapter. This replaces an earlier idea of a free local-model default.
 
 **Consequences**
 
-- `.env.example` defaults to local Ollama. A local base URL needs no API key.
+- Usage is billed by the provider to whoever owns the key. This repo ships no key, no bundled model and
+  no hosted service, so the project itself has no running cost.
+- `.env.example` defaults to `LLM_PROVIDER=openai`. `LLM_MODEL` has no default, because the model a
+  key can use depends on the account.
 - Automated tests use a mock provider, never a paid or hosted model.
-- No hosted demo or paid infrastructure is planned.
-- Small local models are slower and weaker, so validation and retries are part of the design, and the
-  README states the hardware needed (about 5 GB of RAM for the 7B model).
+- People without a paid API key have no free path in the default setup.
 - Docker Desktop is not assumed, because it needs a paid license at larger companies. Docker Engine or
   Podman are the free options for the sandbox.

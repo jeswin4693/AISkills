@@ -15,28 +15,18 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
 
 ## LLM provider
 
-- Default: **local Ollama** (free, no account, no key). Installed with `winget install Ollama.Ollama`
-  (version 0.40.16, per-user, no admin). Model: `qwen2.5:7b` (4.7 GB), pulled with `ollama pull`.
-- The app talks to Ollama through its OpenAI-compatible endpoint (`http://localhost:11434/v1`) with the
-  `openai` client. The same code works for Ollama Cloud and other OpenAI-compatible providers by changing
-  `OLLAMA_BASE_URL`, key and model.
-- Keys, when needed, come only from `.env` (git-ignored). A local Ollama needs no key.
-- `backend/scripts/hello_structured.py` is the smoke test. `LLM_PROVIDER` selects `ollama` or `anthropic`.
+- First provider: **OpenAI**, using the project owner's own API key. Anthropic is the second adapter.
+- Keys come only from `.env` (git-ignored). `LLM_MODEL` has no default; set a model your key can use.
+- `backend/scripts/hello_structured.py` is the smoke test. `LLM_PROVIDER` selects `openai` or `anthropic`.
   Both branches request schema-constrained output from a Pydantic model.
 
-### Verified live
+### Verification status
 
-- Local Ollama, `qwen2.5:7b`: structured output validated against the Pydantic model. About 22 s on CPU
-  including model load (50 tokens in, 42 out).
-- The first model download dropped at 81% (`unexpected EOF`). Re-running `ollama pull` resumed it.
-
-### Not verified live
-
-- Ollama Cloud: the key authenticates and lists models, but chat calls return **402 Payment Required**
-  (no usage credits on the account). Not used.
-- Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback): checked only with a mocked HTTP
-  transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured output
-  must not be built on forced tool calls.
+- OpenAI branch: request construction and response parsing checked only with a mocked HTTP transport.
+  Not yet run live, because no key is in `.env` yet.
+- Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback): also checked only with a mocked
+  HTTP transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured
+  output must not be built on forced tool calls.
 
 ## Docker: Linux containers are NOT available yet
 

@@ -36,7 +36,7 @@ Next.js + React + TypeScript + Tailwind. Pages: Dashboard, Skill Builder Chat (p
 
 ## 4. Stack (to evaluate, not to assume)
 
-Backend Python + FastAPI + Pydantic. PostgreSQL + SQLAlchemy (SQLite or JSON files are acceptable for the first slice). Provider-independent LLM abstraction with adapters for Anthropic, OpenAI, Gemini, later Ollama. Isolated script execution. Do not add libraries without clear value. Do not assume a skill format or provider throughout the codebase; keep it extensible.
+Backend Python + FastAPI + Pydantic. PostgreSQL + SQLAlchemy (SQLite or JSON files are acceptable for the first slice). Provider-independent LLM abstraction with adapters for Anthropic, OpenAI, Gemini. Isolated script execution. Do not add libraries without clear value. Do not assume a skill format or provider throughout the codebase; keep it extensible.
 
 ## 5. Mandatory engineering principles
 

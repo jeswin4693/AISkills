@@ -35,21 +35,17 @@ The venv lives outside OneDrive so thousands of files do not sync.
 uv venv C:\dev\venvs\aiskills --python 3.13
 uv pip install --python C:\dev\venvs\aiskills\Scripts\python.exe -r backend\requirements.txt
 
-# 2. Free local AI: install Ollama from https://ollama.com, then download a model
-ollama pull qwen2.5:7b
-
-# 3. Config: the defaults in .env.example already point at local Ollama. No key needed.
+# 2. Config: copy .env.example to .env, then set LLM_MODEL and your API key (OPENAI_API_KEY).
 #    Never commit .env.
 Copy-Item .env.example .env
 
-# 4. Smoke test: one structured-output call to the configured provider
+# 3. Smoke test: one structured-output call to the configured provider
 C:\dev\venvs\aiskills\Scripts\python.exe backend\scripts\hello_structured.py
 ```
 
 ### Cost
 
-The default setup costs nothing: local Ollama needs no account and no key, and your prompts never leave
-your machine. The only "price" is your own hardware (about 5 GB of RAM for the 7B model, CPU is fine but
-slow). Hosted providers (Ollama Cloud, Anthropic, others) are optional extras that you can enable in `.env`.
+You bring your own API key (OpenAI or Anthropic). Usage is billed by the provider to your own account.
+This repo includes no key, no bundled model and no hosted service.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

@@ -1,0 +1,47 @@
+# CLAUDE.md: SkillForge AI (AISkills)
+
+An open-source platform that understands repositories (a graph it remembers), suggests ideas grounded in them,
+and builds reusable AI skills from plain-English requirements, with a safety layer. Python backend in
+`backend/skillforge`.
+
+**Status and plan: [docs/roadmap.md](docs/roadmap.md) is the source of truth. Read it (and the docs it links)
+before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
+Safety (static validators + a fail-closed Docker sandbox). Next: script generation tested in the sandbox, then
+import / export / versioning, then UI and database, Agent Builder last.
+
+## Commands (run from `backend/`)
+
+```powershell
+python -m pytest -q                                   # all tests, offline (a few need a Linux Docker and skip without one)
+python -m skillforge graph <stats|callers|impact|duplicates|...> <repo>
+python -m skillforge suggest <repo> [--facts-only]    # AI parts need a provider key in .env
+python -m skillforge build "<what the skill should do>"
+python -m skillforge validate <skill-folder>
+python -m skillforge sandbox-status
+```
+
+Setup, the layout and what each part does are in [README.md](README.md). The development machine notes are in
+[docs/environment-notes.md](docs/environment-notes.md) and [docs/sandbox-wsl.md](docs/sandbox-wsl.md).
+
+## Rules for working here
+
+- **The graph is deterministic.** No AI in `backend/skillforge/graph`. A link is `resolved` (proven) or `guess`
+  (name only); guesses never count toward risk or test coverage; built-in method names (`get`, `push`, ...) are
+  never matched by name; an ambiguous call makes no edge.
+- **Models see only facts that code computed.** A suggestion must cite graph nodes that exist, and numbers it
+  mentions are checked against the facts. Existence is checked, correctness of the reasoning is not: say so.
+- **Completeness is a checklist in code, not the model's opinion.** A requirement slot counts as answered only
+  with a quote that code verified appears in the person's own words. Never ask a model for JSON Schema or front
+  matter: code builds schemas from field lists and writes YAML with a library. Model text is data and is never
+  evaluated as a template.
+- **A check is "passed" only if it ran.** Every report lists what did not run. Heuristics (wording, markup)
+  warn; structural problems fail.
+- **Generated code is untrusted.** Validate it statically, and run it ONLY through `skillforge.sandbox`, which
+  fails closed: no Linux container engine means it does not run, never on the host. Windows containers are
+  refused on purpose.
+- **Tests are offline.** Use `MockProvider`. No test may read the real `.env` or call a hosted model (a conftest
+  fixture enforces it). Tests that need a Linux Docker (`test_sandbox_live.py`) skip when none exists.
+- **Keys** come only from the environment or the git-ignored `.env`. Never commit, print or document one. Do not
+  hardcode model names: models get retired for new keys while still listed, so test a model with a real call.
+- **No new library without clear value.** Do not add or reintroduce Ollama.
+- **After each slice:** tests pass, README, `docs/roadmap.md` and the slice's doc are updated, then commit and push.

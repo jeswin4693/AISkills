@@ -88,10 +88,11 @@ def render_files(sdm: SkillDefinition, spec: RequirementSpec) -> dict[str, str]:
 def render_report(sdm: SkillDefinition, checks: list, notes: list[str]) -> str:
     ran = [c for c in checks if c.status != "not run"]
     failed = [c for c in ran if c.status == "failed"]
+    warned = [c for c in ran if c.status == "warning"]
     skipped = [c for c in checks if c.status == "not run"]
     return _env.get_template("report.md.j2").render(
-        sdm=sdm, ran=ran, skipped=skipped, passed=len(ran) - len(failed), failed=len(failed), notes=notes,
-        title=sdm.name.replace("-", " ").title(),
+        sdm=sdm, ran=ran, skipped=skipped, passed=len(ran) - len(failed) - len(warned), failed=len(failed),
+        warned=len(warned), notes=notes, title=sdm.name.replace("-", " ").title(),
     )
 
 

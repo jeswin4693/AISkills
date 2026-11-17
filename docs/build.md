@@ -57,6 +57,10 @@ data: it is never evaluated as a template, and the skill name is forced to a saf
 
 ## Checks that run (by code)
 
+The static validators from [validate.md](validate.md) (hidden characters, attack-like wording, JSON, scripts,
+capabilities, binaries) run on every build, next to these structural checks. Wording and markup findings are
+**warnings**: they are shown in the report and do not make the skill a draft. The structural checks:
+
 Name is a valid slug; description present and within 1024 characters; input and output schemas are valid JSON
 Schema; field names unique and snake_case; every workflow step has an instruction and a failure response;
 every acceptance criterion is covered by at least one test; tests cite only real criteria; there is a
@@ -67,7 +71,8 @@ written as a **DRAFT**, the report says so, and the command exits with code 1.
 
 ## Checks that do NOT run (and are listed as such in every report)
 
-Scripts compiling or running in a sandbox (this tool generates no scripts yet, and no sandbox exists); test
+Scripts running in a sandbox (this tool generates no scripts yet, and the report states whether a Linux
+sandbox is available on the machine that built the skill); test
 cases run against a real agent (no harness yet; the cases are data); conflict analysis of the instructions;
 a security review of the text. A report that says "every check that ran passed" also says that this is not a
 guarantee the skill works.

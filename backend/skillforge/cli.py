@@ -17,9 +17,11 @@ from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
 from .providers import ProviderError, provider_from_env
+from .sandbox import probe_docker
 from .suggest.facts import collect_facts
 from .suggest.pipeline import SuggestReport
 from .suggest.pipeline import suggest as run_suggest
+from .validate import validate_skill_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -193,14 +195,18 @@ def _render_spec(spec: RequirementSpec) -> str:
 def _render_build(r: BuildResult) -> str:
     ran = [c for c in r.checks if c.status != "not run"]
     failed = [c for c in ran if c.status == "failed"]
+    warned = [c for c in ran if c.status == "warning"]
     skipped = [c for c in r.checks if c.status == "not run"]
     head = (
         f"Skill '{r.sdm.name}' written to {r.out_dir}"
         if r.status == "ok"
         else f"DRAFT skill '{r.sdm.name}' written to {r.out_dir}: {len(failed)} check(s) failed"
     )
-    lines = [head, f"Checks: {len(ran) - len(failed)} passed, {len(failed)} failed, {len(skipped)} not run"]
+    counts = f"{len(ran) - len(failed) - len(warned)} passed, "
+    counts += f"{len(warned)} warning(s), " if warned else ""
+    lines = [head, f"Checks: {counts}{len(failed)} failed, {len(skipped)} not run"]
     lines += [f"  FAILED: {c.name}: {c.detail}" for c in failed]
+    lines += [f"  warning: {c.name}: {c.detail}" for c in warned]
     lines += [f"  not run: {c.name}" for c in skipped]
     lines += [f"note: {n}" for n in r.notes]
     lines.append("Read report.md in that folder before using the skill. It lists what was not checked.")
@@ -259,6 +265,15 @@ def _description_from_args(args: argparse.Namespace) -> str:
     return args.description
 
 
+def _sandbox_note() -> str:
+    """What the report says about the sandbox on this machine. A failed probe must never stop a build."""
+    try:
+        s = probe_docker()
+    except Exception as exc:  # noqa: BLE001
+        return f"unknown ({type(exc).__name__})"
+    return f"{'available' if s.available else 'unavailable'}. {s.reason}"
+
+
 def _run_build(args: argparse.Namespace) -> int:
     load_dotenv(REPO_ROOT / ".env")
     description = _description_from_args(args)
@@ -268,16 +283,44 @@ def _run_build(args: argparse.Namespace) -> int:
         ask=_make_ask(args.answers),
         approve=(lambda spec: True) if args.yes else _interactive_approve,
         out_root=Path(args.out) if args.out else REPO_ROOT / "generated-skills",
-        force=args.force, max_rounds=args.max_rounds,
+        force=args.force, max_rounds=args.max_rounds, sandbox_note=_sandbox_note(),
     )
     print(_render_build(result))
     return 0 if result.status == "ok" else 1
 
 
 def _run_render(args: argparse.Namespace) -> int:
-    result = rebuild(Path(args.sdm), Path(args.out) if args.out else REPO_ROOT / "generated-skills", force=args.force)
+    result = rebuild(
+        Path(args.sdm), Path(args.out) if args.out else REPO_ROOT / "generated-skills", force=args.force,
+        sandbox_note=_sandbox_note(),
+    )
     print(_render_build(result))
     return 0 if result.status == "ok" else 1
+
+
+def _run_validate(args: argparse.Namespace) -> int:
+    path = Path(args.folder)
+    if not path.is_dir():
+        raise NotADirectoryError(f"Not a directory: {path}")
+    results = validate_skill_dir(path)
+    failed = [c for c in results if c.status == "failed"]
+    if args.json:
+        print(json.dumps([c.__dict__ for c in results], indent=2))
+    else:
+        for c in results:
+            print(f"{c.status.upper():8} {c.name}" + (f"  ({c.detail})" if c.detail else ""))
+        warned = sum(c.status == "warning" for c in results)
+        print(f"\n{len(results) - len(failed) - warned} passed, {warned} warning(s), {len(failed)} failed. "
+              "Static checks only: nothing was run, and passing is not proof the skill is safe.")
+    return 1 if failed else 0
+
+
+def _run_sandbox_status(args: argparse.Namespace) -> int:
+    s = probe_docker()
+    print(("AVAILABLE: " if s.available else "UNAVAILABLE: ") + s.reason)
+    if not s.available:
+        print("Scripts will not be run anywhere until a Linux container engine is available. They are never run on this machine directly.")
+    return 0 if s.available else 1
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -346,6 +389,12 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("sdm", help="path of a skill.sdm.json")
     r.add_argument("--out", help="where skill folders go (default: generated-skills/ in this repository)")
     r.add_argument("--force", action="store_true", help="replace an existing skill folder")
+
+    v = area.add_parser("validate", help="static safety and structure checks on any skill folder (runs nothing)")
+    v.add_argument("folder", help="path of a skill folder (the one with SKILL.md)")
+    v.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
+    area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
     return parser
 
 
@@ -354,8 +403,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render"):
-        handler = {"suggest": _run_suggest, "build": _run_build, "render": _run_render}[args.area]
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status"):
+        handler = {
+            "suggest": _run_suggest, "build": _run_build, "render": _run_render,
+            "validate": _run_validate, "sandbox-status": _run_sandbox_status,
+        }[args.area]
         try:
             return handler(args)
         except NeedAnswers as exc:

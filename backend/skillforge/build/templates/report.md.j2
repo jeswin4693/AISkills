@@ -2,13 +2,16 @@
 
 {% if failed %}
 **Status: DRAFT. {{ failed }} check(s) failed.** Do not rely on this skill before you read the failures below.
+{% elif warned %}
+**Status: every check that ran passed, with {{ warned }} warning(s) a person should read.** {{ skipped | length }}
+check(s) did not run (listed below), so this is not a guarantee that the skill works.
 {% else %}
 **Status: every check that ran passed.** {{ skipped | length }} check(s) did not run (listed below), so this is
 not a guarantee that the skill works.
 {% endif %}
 
 Made by `{{ sdm.provenance.provider }}/{{ sdm.provenance.model }}` on {{ sdm.provenance.created_at }}.
-Summary: {{ passed }} passed, {{ failed }} failed, {{ skipped | length }} not run.
+Summary: {{ passed }} passed, {{ warned }} warning(s), {{ failed }} failed, {{ skipped | length }} not run.
 
 ## Checks that ran
 

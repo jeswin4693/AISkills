@@ -3,26 +3,17 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-
 import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult  # noqa: F401  (re-exported for callers)
 from .models import SkillDefinition
 from .render import schema_for
 
-PASSED, FAILED, NOT_RUN = "passed", "failed", "not run"
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 MAX_DESCRIPTION = 1024
-
-
-@dataclass
-class CheckResult:
-    name: str
-    status: str  # "passed" | "failed" | "not run"
-    detail: str = ""
 
 
 def _result(name: str, problems: list[str], ok_detail: str = "") -> CheckResult:
@@ -113,9 +104,10 @@ def check_rendered(files: dict[str, str], sdm: SkillDefinition) -> list[CheckRes
     return out
 
 
-def not_run_checks() -> list[CheckResult]:
+def not_run_checks(sandbox_note: str | None = None) -> list[CheckResult]:
+    sandbox = "This tool generates no scripts yet." + (f" Sandbox on this machine: {sandbox_note}" if sandbox_note else "")
     return [
-        CheckResult("scripts compile and run in a sandbox", NOT_RUN, "This tool generates no scripts yet, and the sandbox does not exist."),
+        CheckResult("scripts run in a sandbox", NOT_RUN, sandbox),
         CheckResult("test cases executed against a real agent", NOT_RUN, "There is no agent test harness yet. The test cases are data only."),
         CheckResult("instructions free of conflicting rules", NOT_RUN, "Only structural checks exist. No semantic analyser has been built."),
         CheckResult("security review of the generated text", NOT_RUN, "Not automated. Read the instructions yourself before using the skill."),

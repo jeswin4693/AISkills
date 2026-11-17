@@ -26,6 +26,14 @@ def _parser(lang: str) -> Parser:
     return _PARSERS[lang]
 
 
+def parses_cleanly(source: bytes, lang: str) -> bool:
+    """True when the source has no syntax errors. Nothing is executed."""
+    try:
+        return not _parser(lang).parse(source).root_node.has_error
+    except Exception:  # noqa: BLE001 - an unparseable file is simply "not clean"
+        return False
+
+
 FUNC_VALUES = {"arrow_function", "function_expression", "function", "generator_function"}
 FUNC_DECLS = {"function_declaration", "generator_function_declaration"}
 CLASS_DECLS = {"class_declaration", "abstract_class_declaration"}

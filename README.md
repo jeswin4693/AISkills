@@ -63,6 +63,18 @@ python -m skillforge build "A skill that finds duplicate functions in a TypeScri
 python -m skillforge build --from-suggestions report.json --pick 1   # start from an idea found by `suggest`
 ```
 
+## Check any skill folder
+
+Static safety and structure checks that run nothing, for skills made here or downloaded
+([docs/validate.md](docs/validate.md)). Scripts are never run unless a Linux sandbox is available, and never on
+your machine directly.
+
+```powershell
+cd backend
+python -m skillforge validate C:\path\to\skill-folder   # exit code 1 if a check failed
+python -m skillforge sandbox-status                     # is a safe place to run scripts available?
+```
+
 ## Setup
 
 The venv lives outside OneDrive so thousands of files do not sync.

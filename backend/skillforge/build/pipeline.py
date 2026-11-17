@@ -11,6 +11,7 @@ from ..providers.base import LLMProvider
 from .architect import criteria_ids, design
 from .checks import FAILED, SLUG, CheckResult, check_rendered, not_run_checks, run_checks
 from .models import Provenance, RequirementSpec, SkillDefinition, SkillDraft
+from ..validate import validate_files
 from .render import MAX_NAME, render_files, render_report, slugify, write_files
 from .requirements import Question, check_completeness, extract_spec, questions_for
 
@@ -57,14 +58,15 @@ def _assemble(draft: SkillDraft, spec: RequirementSpec, provider: LLMProvider, n
 
 def finalize(
     sdm: SkillDefinition, spec: RequirementSpec, out_root: Path, *, force: bool, notes: list[str] | None = None,
-    model_calls: int = 0,
+    model_calls: int = 0, sandbox_note: str | None = None,
 ) -> BuildResult:
     """Render, run every check, write the report, then the files. No model is involved."""
     if not SLUG.match(sdm.name) or len(sdm.name) > MAX_NAME:  # the name becomes a folder name: never trust it
         raise BuildError(f"'{sdm.name}' is not a valid skill name (lowercase letters, digits and hyphens, max {MAX_NAME}).")
     notes = list(notes or [])
     files = render_files(sdm, spec)
-    checks = run_checks(sdm) + check_rendered(files, sdm) + not_run_checks()
+    static = validate_files({path: text.encode("utf-8") for path, text in files.items()}, folder=sdm.name)
+    checks = run_checks(sdm) + check_rendered(files, sdm) + static + not_run_checks(sandbox_note)
     if sdm.provenance.name_adjusted:
         notes.append(f"The model's name was changed to '{sdm.name}' because it was not a valid skill name.")
     files["report.md"] = render_report(sdm, checks, notes)
@@ -118,6 +120,7 @@ def build_skill(
     force: bool = False,
     max_rounds: int = 3,
     now: datetime | None = None,
+    sandbox_note: str | None = None,
 ) -> BuildResult:
     now = now or datetime.now(timezone.utc)
     spec, calls, notes = gather_spec(description, provider, ask, max_rounds)
@@ -133,10 +136,10 @@ def build_skill(
         draft, used = design(provider, spec, failures)
         calls += used
         sdm = _assemble(draft, spec, provider, now)
-    return finalize(sdm, spec, out_root, force=force, notes=notes, model_calls=calls)
+    return finalize(sdm, spec, out_root, force=force, notes=notes, model_calls=calls, sandbox_note=sandbox_note)
 
 
-def rebuild(sdm_path: Path, out_root: Path, *, force: bool) -> BuildResult:
+def rebuild(sdm_path: Path, out_root: Path, *, force: bool, sandbox_note: str | None = None) -> BuildResult:
     """Re-render a saved skill.sdm.json. No model call: the same definition always gives the same files."""
     try:
         sdm = SkillDefinition.model_validate_json(sdm_path.read_text(encoding="utf-8"))
@@ -147,4 +150,7 @@ def rebuild(sdm_path: Path, out_root: Path, *, force: bool) -> BuildResult:
         spec = RequirementSpec.model_validate_json(spec_path.read_text(encoding="utf-8"))
     else:
         spec = RequirementSpec(goal=sdm.description, acceptance_criteria=list(sdm.acceptance_criteria.values()))
-    return finalize(sdm, spec, out_root, force=force, notes=["Re-rendered from a saved definition; no model was used."])
+    return finalize(
+        sdm, spec, out_root, force=force, notes=["Re-rendered from a saved definition; no model was used."],
+        sandbox_note=sandbox_note,
+    )

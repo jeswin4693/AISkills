@@ -1,0 +1,111 @@
+"""Models for the Build slice.
+
+Three layers: what the model extracts (with quotes that code verifies), the approved RequirementSpec, and the
+SkillDefinition (SDM) that every generated file is rendered from. Free-form JSON Schema is never asked of the
+model: it gives simple field lists and code builds the schema, so the schema is valid by construction.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+Kind = Literal["prompt", "skill", "tool", "agent"]
+FieldType = Literal["string", "integer", "number", "boolean", "list", "object"]
+Permission = Literal["read_files", "write_files", "run_commands", "network"]
+TestKind = Literal["positive", "negative", "edge"]
+
+SLOTS = ("goal", "inputs", "outputs", "constraints", "acceptance_criteria", "failure_behavior")
+
+
+# ---- extraction: what the model returns while reading the person's words -----------------------------
+
+
+class Slot(BaseModel):
+    values: list[str] = Field(description="What the person said for this item. Empty list if they did not say it.")
+    quote: str = Field(
+        description="Words copied exactly, word for word, from the person's text that support the values. "
+        "Empty string if the person did not say it."
+    )
+
+
+class Extraction(BaseModel):
+    kind: Kind = Field(description="The closest kind of thing the person wants.")
+    goal: Slot
+    inputs: Slot
+    outputs: Slot
+    constraints: Slot
+    acceptance_criteria: Slot
+    failure_behavior: Slot
+
+
+# ---- the approved requirement spec -------------------------------------------------------------------
+
+
+class RequirementSpec(BaseModel):
+    kind: Kind = "skill"
+    goal: str = ""
+    inputs: list[str] = Field(default_factory=list)  # "none" is a valid, explicit answer
+    outputs: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)  # "none" is a valid, explicit answer
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    failure_behavior: str = ""
+    quotes: dict[str, str] = Field(default_factory=dict)  # slot -> the person's own words that support it
+    user_words: str = ""  # everything the person typed, kept for audit
+    rounds: int = 1
+
+
+# ---- the skill definition ----------------------------------------------------------------------------
+
+
+class IOField(BaseModel):
+    name: str = Field(description="snake_case name of the input or output field.")
+    type: FieldType
+    description: str
+    required: bool
+
+
+class Step(BaseModel):
+    title: str
+    instruction: str = Field(description="What the agent does in this step, in plain imperative sentences.")
+    on_failure: str = Field(description="What the agent does if this step cannot be done.")
+
+
+class SkillTest(BaseModel):
+    name: str
+    kind: TestKind
+    input_description: str = Field(description="What the agent is given in this test.")
+    expected_result: str = Field(description="What a correct run produces or does.")
+    covers: list[str] = Field(description='Ids of the acceptance criteria this test checks, such as "AC1".')
+
+
+class SkillDraft(BaseModel):
+    """What the model designs. Code adds version, provenance and the criteria text."""
+
+    name: str = Field(description="Lowercase letters, digits and hyphens only, at most 40 characters.")
+    description: str = Field(description="One or two sentences: what the skill does and when to use it.")
+    does: list[str] = Field(description="What the skill is responsible for.")
+    does_not: list[str] = Field(description="What it explicitly does not do.")
+    inputs: list[IOField]
+    outputs: list[IOField]
+    workflow: list[Step]
+    permissions: list[Permission] = Field(description="Only what the steps really need; empty if nothing.")
+    error_handling: list[str]
+    limitations: list[str]
+    tests: list[SkillTest]
+
+
+class Provenance(BaseModel):
+    provider: str
+    model: str
+    created_at: str
+    rounds: int
+    name_adjusted: bool = False
+
+
+class SkillDefinition(SkillDraft):
+    version: str = "0.1.0"
+    kind: Literal["skill"] = "skill"
+    acceptance_criteria: dict[str, str]  # "AC1" -> text, copied from the approved spec
+    provenance: Provenance

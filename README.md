@@ -3,8 +3,8 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand (repository graph) and Suggest (AI ideas grounded in the graph) are built and tested.**
-Build comes next. See [docs/roadmap.md](docs/roadmap.md).
+Status: **Understand, Suggest and Build are built and tested offline.** The live check of Build with a real
+model is still pending. See [docs/roadmap.md](docs/roadmap.md).
 
 ```
  Repo --> UNDERSTAND --graph facts--> SUGGEST --ideas with evidence--> BUILD --> skill packages
@@ -50,6 +50,17 @@ The model only sees facts computed from the graph, and a suggestion that cites n
 cd backend
 python -m skillforge suggest C:\path\to\repo --facts-only   # no AI, no key: just the facts
 python -m skillforge suggest C:\path\to\repo                # refactor / test / risk findings + skill ideas
+```
+
+## Build a skill
+
+Describe what you want. It asks only what is missing, waits for your approval, then writes a skill folder and
+a report that says what was checked and what was not ([docs/build.md](docs/build.md)). Needs a provider key.
+
+```powershell
+cd backend
+python -m skillforge build "A skill that finds duplicate functions in a TypeScript repository and suggests safe refactors."
+python -m skillforge build --from-suggestions report.json --pick 1   # start from an idea found by `suggest`
 ```
 
 ## Setup

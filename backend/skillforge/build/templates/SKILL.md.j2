@@ -1,0 +1,64 @@
+{{ frontmatter }}
+# {{ title }}
+
+{{ sdm.description | oneline }}
+
+## Responsibilities
+
+This skill does:
+
+{% for item in sdm.does %}
+- {{ item | oneline }}
+{% endfor %}
+
+This skill does not:
+
+{% for item in sdm.does_not %}
+- {{ item | oneline }}
+{% else %}
+- (nothing stated)
+{% endfor %}
+
+## Inputs
+
+{% for f in sdm.inputs %}
+- `{{ f.name }}` ({{ f.type }}, {{ "required" if f.required else "optional" }}): {{ f.description | oneline }}
+{% else %}
+This skill takes no input.
+{% endfor %}
+
+## Workflow
+
+{% for s in sdm.workflow %}
+{{ loop.index }}. **{{ s.title | oneline }}**: {{ s.instruction | oneline }} If this cannot be done: {{ s.on_failure | oneline }}
+{% endfor %}
+
+## Outputs
+
+{% for f in sdm.outputs %}
+- `{{ f.name }}` ({{ f.type }}, {{ "always" if f.required else "when available" }}): {{ f.description | oneline }}
+{% endfor %}
+
+## Error handling
+
+{% for item in sdm.error_handling %}
+- {{ item | oneline }}
+{% else %}
+- Stop and tell the user what went wrong.
+{% endfor %}
+
+## Limitations
+
+{% for item in sdm.limitations %}
+- {{ item | oneline }}
+{% else %}
+- None stated.
+{% endfor %}
+
+## Permissions
+
+{% if sdm.permissions %}
+This skill asks the host agent for: {{ sdm.permissions | join(", ") }}.
+{% else %}
+This skill needs no special permissions.
+{% endif %}

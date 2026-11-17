@@ -1,7 +1,8 @@
 # Step 1 proposal: requirement text to skill files (thin slice)
 
-Status: **proposal; now slice C of the [roadmap](roadmap.md).** Slice A (repository graph) was built first, so
-this build step comes after the suggester. Nothing in this document is built yet.
+Status: **original proposal, now built as slice C of the [roadmap](roadmap.md).** What exists is described in
+[build.md](build.md); it differs in details (for example quotes verified by code decide completeness, and the
+schemas are built from field lists). Kept for the reasoning.
 
 ## Goal
 

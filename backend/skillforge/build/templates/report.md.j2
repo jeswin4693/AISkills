@@ -1,0 +1,33 @@
+# Build report: {{ title }}
+
+{% if failed %}
+**Status: DRAFT. {{ failed }} check(s) failed.** Do not rely on this skill before you read the failures below.
+{% else %}
+**Status: every check that ran passed.** {{ skipped | length }} check(s) did not run (listed below), so this is
+not a guarantee that the skill works.
+{% endif %}
+
+Made by `{{ sdm.provenance.provider }}/{{ sdm.provenance.model }}` on {{ sdm.provenance.created_at }}.
+Summary: {{ passed }} passed, {{ failed }} failed, {{ skipped | length }} not run.
+
+## Checks that ran
+
+| Check | Result | Detail |
+|---|---|---|
+{% for c in ran %}
+| {{ c.name | cell }} | {{ c.status }} | {{ c.detail | cell }} |
+{% endfor %}
+
+## Checks that did NOT run
+
+{% for c in skipped %}
+- **{{ c.name }}**: {{ c.detail | oneline }}
+{% endfor %}
+
+{% if notes %}
+## Notes
+
+{% for n in notes %}
+- {{ n | oneline }}
+{% endfor %}
+{% endif %}

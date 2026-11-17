@@ -11,6 +11,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .build.models import SLOTS, RequirementSpec
+from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, rebuild
+from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
 from .providers import ProviderError, provider_from_env
@@ -175,6 +178,108 @@ def _run_suggest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_spec(spec: RequirementSpec) -> str:
+    lines = ["Requirement (in your words, as I understood them):"]
+    lines.append(f"  Goal:        {spec.goal}")
+    lines.append(f"  Inputs:      {'; '.join(spec.inputs)}")
+    lines.append(f"  Outputs:     {'; '.join(spec.outputs)}")
+    lines.append(f"  Constraints: {'; '.join(spec.constraints)}")
+    for i, c in enumerate(spec.acceptance_criteria, start=1):
+        lines.append(f"  Works when ({i}): {c}")
+    lines.append(f"  On failure:  {spec.failure_behavior}")
+    return "\n".join(lines)
+
+
+def _render_build(r: BuildResult) -> str:
+    ran = [c for c in r.checks if c.status != "not run"]
+    failed = [c for c in ran if c.status == "failed"]
+    skipped = [c for c in r.checks if c.status == "not run"]
+    head = (
+        f"Skill '{r.sdm.name}' written to {r.out_dir}"
+        if r.status == "ok"
+        else f"DRAFT skill '{r.sdm.name}' written to {r.out_dir}: {len(failed)} check(s) failed"
+    )
+    lines = [head, f"Checks: {len(ran) - len(failed)} passed, {len(failed)} failed, {len(skipped)} not run"]
+    lines += [f"  FAILED: {c.name}: {c.detail}" for c in failed]
+    lines += [f"  not run: {c.name}" for c in skipped]
+    lines += [f"note: {n}" for n in r.notes]
+    lines.append("Read report.md in that folder before using the skill. It lists what was not checked.")
+    return "\n".join(lines)
+
+
+def _need_answers_message(exc: NeedAnswers) -> str:
+    lines = ["error: I need more details, and cannot ask here (no terminal). Questions:"]
+    lines += [f"  [{q.slot}] {q.text}" for q in exc.questions]
+    keys = ", ".join(f'"{q.slot}": "..."' for q in exc.questions)
+    lines.append(f"Answer them in a JSON file like {{{keys}}} and run again with --answers FILE.json")
+    return "\n".join(lines)
+
+
+def _make_ask(answers_file: str | None):
+    if answers_file:
+        data = json.loads(Path(answers_file).read_text(encoding="utf-8"))
+        known = {k: str(v) for k, v in data.items() if k in SLOTS}
+
+        def from_file(questions: list[Question]) -> dict[str, str]:
+            given = {q.slot: known.get(q.slot, "") for q in questions}
+            if not any(given.values()):
+                raise NeedAnswers(questions)
+            return given
+
+        return from_file
+
+    def interactive(questions: list[Question]) -> dict[str, str]:
+        if not sys.stdin.isatty():
+            raise NeedAnswers(questions)
+        print("\nI need a few more details:")
+        return {q.slot: input(f"\n{q.text}\n> ") for q in questions}
+
+    return interactive
+
+
+def _interactive_approve(spec: RequirementSpec) -> bool:
+    if not sys.stdin.isatty():
+        raise BuildError("Approval needs a person. Read the requirement above, then run again with --yes.")
+    print("\n" + _render_spec(spec))
+    return input("\nApprove this requirement and build the skill? [y/N] ").strip().lower() in ("y", "yes")
+
+
+def _description_from_args(args: argparse.Namespace) -> str:
+    if args.from_suggestions:
+        data = json.loads(Path(args.from_suggestions).read_text(encoding="utf-8"))
+        ideas = [s for s in data.get("suggestions", []) if str(s.get("skill_requirement", "")).strip()]
+        if not ideas:
+            raise BuildError("That report has no skill or automation idea with a requirement text.")
+        if args.pick is None or not 1 <= args.pick <= len(ideas):
+            listing = "\n".join(f"  {i}. {s['title']}" for i, s in enumerate(ideas, start=1))
+            raise BuildError(f"Choose one idea with --pick N:\n{listing}")
+        return ideas[args.pick - 1]["skill_requirement"]
+    if not args.description:
+        raise BuildError("Give a description, or --from-suggestions REPORT.json --pick N.")
+    return args.description
+
+
+def _run_build(args: argparse.Namespace) -> int:
+    load_dotenv(REPO_ROOT / ".env")
+    description = _description_from_args(args)
+    provider = provider_from_env()
+    result = build_skill(
+        description, provider,
+        ask=_make_ask(args.answers),
+        approve=(lambda spec: True) if args.yes else _interactive_approve,
+        out_root=Path(args.out) if args.out else REPO_ROOT / "generated-skills",
+        force=args.force, max_rounds=args.max_rounds,
+    )
+    print(_render_build(result))
+    return 0 if result.status == "ok" else 1
+
+
+def _run_render(args: argparse.Namespace) -> int:
+    result = rebuild(Path(args.sdm), Path(args.out) if args.out else REPO_ROOT / "generated-skills", force=args.force)
+    print(_render_build(result))
+    return 0 if result.status == "ok" else 1
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("repo", help="path of the repository to analyse")
     p.add_argument("--focus", help="only analyse this folder of the repository")
@@ -226,6 +331,21 @@ def _parser() -> argparse.ArgumentParser:
     sg.add_argument("--no-ideas", action="store_true", help="skip the second pass that proposes skills and automations")
     sg.add_argument("--facts-only", action="store_true", help="print the facts and stop: no AI, no key")
     sg.add_argument("--save", help="also write the JSON report to this file")
+
+    b = area.add_parser("build", help="turn a requirement into a skill folder (needs a provider key)")
+    b.add_argument("description", nargs="?", help="what the skill should do, in plain English")
+    b.add_argument("--from-suggestions", metavar="REPORT.json", help="start from a skill idea in a suggest report")
+    b.add_argument("--pick", type=int, help="which idea of the report to build (1, 2, ...)")
+    b.add_argument("--answers", metavar="FILE.json", help="answers to the follow-up questions, for non-interactive use")
+    b.add_argument("--yes", action="store_true", help="approve the requirement without asking")
+    b.add_argument("--out", help="where skill folders go (default: generated-skills/ in this repository)")
+    b.add_argument("--force", action="store_true", help="replace an existing skill folder")
+    b.add_argument("--max-rounds", type=int, default=3, help="most question rounds before giving up")
+
+    r = area.add_parser("render", help="re-render a skill folder from its skill.sdm.json (no AI)")
+    r.add_argument("sdm", help="path of a skill.sdm.json")
+    r.add_argument("--out", help="where skill folders go (default: generated-skills/ in this repository)")
+    r.add_argument("--force", action="store_true", help="replace an existing skill folder")
     return parser
 
 
@@ -234,10 +354,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area == "suggest":
+    if args.area in ("suggest", "build", "render"):
+        handler = {"suggest": _run_suggest, "build": _run_build, "render": _run_render}[args.area]
         try:
-            return _run_suggest(args)
-        except (ProviderError, query.QueryError, NotADirectoryError) as exc:
+            return handler(args)
+        except NeedAnswers as exc:
+            print(_need_answers_message(exc), file=sys.stderr)
+            return 2
+        except (ProviderError, BuildError, query.QueryError, NotADirectoryError, OSError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     try:

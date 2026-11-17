@@ -25,3 +25,18 @@ supply and pay for the model is not planned.
 - Add a contributing guide and a security-reporting policy.
 - Review docs for personal or employer information.
 - Confirm that publishing is allowed under your employment / IP terms.
+
+## D2 - Zero-cost by default (2026-11-17)
+
+**Decision:** the default setup must cost nothing and need no account: local Ollama with a small open
+model (`qwen2.5:7b`). Hosted providers (Ollama Cloud, Anthropic, others) are optional extras.
+
+**Consequences**
+
+- `.env.example` defaults to local Ollama. A local base URL needs no API key.
+- Automated tests use a mock provider, never a paid or hosted model.
+- No hosted demo or paid infrastructure is planned.
+- Small local models are slower and weaker, so validation and retries are part of the design, and the
+  README states the hardware needed (about 5 GB of RAM for the 7B model).
+- Docker Desktop is not assumed, because it needs a paid license at larger companies. Docker Engine or
+  Podman are the free options for the sandbox.

@@ -18,6 +18,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import anthropic
 import openai
@@ -25,7 +26,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OLLAMA_BASE_URL = "https://ollama.com/v1"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"  # free local Ollama is the default
 
 PROMPT = (
     "Greet SkillForge AI in one short sentence, then list exactly "
@@ -61,11 +62,19 @@ def require_env(name: str) -> str:
     return value
 
 
+def is_local_url(url: str) -> bool:
+    return (urlparse(url).hostname or "") in {"localhost", "127.0.0.1", "::1"}
+
+
 def call_ollama(model: str) -> Reply:
-    client = openai.OpenAI(
-        base_url=os.getenv("OLLAMA_BASE_URL", "").strip() or DEFAULT_OLLAMA_BASE_URL,
-        api_key=require_env("OLLAMA_API_KEY"),
-    )
+    base_url = os.getenv("OLLAMA_BASE_URL", "").strip() or DEFAULT_OLLAMA_BASE_URL
+    local = is_local_url(base_url)
+    api_key = os.getenv("OLLAMA_API_KEY", "").strip()
+    if not api_key:
+        if not local:
+            raise ProviderError("OLLAMA_API_KEY is empty. Set it in .env (never commit that file).")
+        api_key = "ollama"  # a local Ollama ignores the key, but the client needs a non-empty value
+    client = openai.OpenAI(base_url=base_url, api_key=api_key)
     try:
         response = client.chat.completions.parse(
             model=model,
@@ -77,7 +86,8 @@ def call_ollama(model: str) -> Reply:
     except openai.PermissionDeniedError as exc:
         raise ProviderError(f"The key lacks permission for this request: {exc.message}")
     except openai.NotFoundError:
-        raise ProviderError(f"Model '{model}' was not found. Check LLM_MODEL in .env.")
+        hint = f"Run: ollama pull {model}" if local else "Check LLM_MODEL in .env."
+        raise ProviderError(f"Model '{model}' was not found. {hint}")
     except openai.BadRequestError as exc:
         raise ProviderError(f"Bad request (400): {exc.message}")
     except openai.RateLimitError:
@@ -85,6 +95,11 @@ def call_ollama(model: str) -> Reply:
     except openai.APIStatusError as exc:
         raise ProviderError(f"API error {exc.status_code}: {exc.message}")
     except openai.APIConnectionError:
+        if local:
+            raise ProviderError(
+                f"Could not reach Ollama at {base_url}. Install it from https://ollama.com, "
+                "start it, then run: ollama pull " + model
+            )
         raise ProviderError("Could not reach the Ollama API. Check network and proxy settings.")
     except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError) as exc:
         raise ProviderError(f"The model did not finish cleanly: {exc}")

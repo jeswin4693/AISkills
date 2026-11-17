@@ -119,3 +119,37 @@ def test_tests_and_ignored_folders_are_recognised(graph):
     })
     assert set(g.files) == {"src/a.py", "tests/test_a.py"}
     assert g.files["tests/test_a.py"].is_test and not g.files["src/a.py"].is_test
+
+
+def test_closures_can_call_their_siblings_and_enclosing_functions_in_python(graph):
+    g = graph({
+        "m.py": (
+            "def outer():\n"
+            "    def helper():\n        return 1\n"
+            "    def first():\n        return helper()\n"  # sibling closure
+            "    def second():\n        def deep():\n            return helper()\n        return deep()\n"  # two levels down
+            "    return first() + second()\n"
+            "class K:\n"
+            "    def m(self):\n        return other()\n"
+            "    def other(self):\n        return 1\n"  # a class member is not visible by bare name
+            "def other():\n    return 2\n"
+        ),
+    })
+    resolved = calls(g, "resolved")
+    assert ("m.py::outer.first", "m.py::outer.helper") in resolved
+    assert ("m.py::outer.second.deep", "m.py::outer.helper") in resolved
+    assert ("m.py::outer.second", "m.py::outer.second.deep") in resolved
+    assert ("m.py::K.m", "m.py::other") in resolved and ("m.py::K.m", "m.py::K.other") not in resolved
+
+
+def test_closures_can_call_their_siblings_in_typescript(graph):
+    g = graph({
+        "a.ts": (
+            "export function extract() {\n"
+            "  const requireImport = (x: string) => x;\n"
+            "  function handleCall(n: string) { return requireImport(n); }\n"
+            "  return handleCall('a');\n"
+            "}\n"
+        ),
+    })
+    assert ("a.ts::extract.handleCall", "a.ts::extract.requireImport") in calls(g, "resolved")

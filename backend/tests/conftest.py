@@ -15,6 +15,14 @@ def isolated_data_dir(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("SKILLFORGE_DATA_DIR", str(tmp_path_factory.mktemp("sf-data")))
 
 
+@pytest.fixture(autouse=True)
+def never_reach_a_real_provider(monkeypatch):
+    """No test may read the real .env or hold a real key, so no test can call a hosted model by accident."""
+    monkeypatch.setattr("skillforge.cli.load_dotenv", lambda *a, **k: False)
+    for var in ("LLM_PROVIDER", "LLM_MODEL", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def write_files(root: Path, files: dict[str, str]) -> Path:
     for rel, text in files.items():
         p = root / rel

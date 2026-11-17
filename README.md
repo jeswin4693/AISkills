@@ -3,8 +3,8 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **the Understand slice (repository graph) is built and tested.** Suggest and Build come next.
-See [docs/roadmap.md](docs/roadmap.md).
+Status: **Understand (repository graph) and Suggest (AI ideas grounded in the graph) are built and tested.**
+Build comes next. See [docs/roadmap.md](docs/roadmap.md).
 
 ```
  Repo --> UNDERSTAND --graph facts--> SUGGEST --ideas with evidence--> BUILD --> skill packages
@@ -40,6 +40,17 @@ python -m skillforge graph hotspots   C:\path\to\repo
 
 Every answer says how sure it is (proven link, or a name-only guess), and the limits are stated in
 [docs/graph.md](docs/graph.md). Nothing is written into the repository you analyse.
+
+## Get AI suggestions for a repository
+
+The model only sees facts computed from the graph, and a suggestion that cites nothing real is dropped
+([docs/suggest.md](docs/suggest.md)). Needs a provider key in `.env`.
+
+```powershell
+cd backend
+python -m skillforge suggest C:\path\to\repo --facts-only   # no AI, no key: just the facts
+python -m skillforge suggest C:\path\to\repo                # refactor / test / risk findings + skill ideas
+```
 
 ## Setup
 

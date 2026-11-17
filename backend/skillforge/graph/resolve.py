@@ -303,6 +303,22 @@ class Resolver:
 
     # ---- calls ------------------------------------------------------------------------------------------
 
+    def _enclosing_definition(self, caller: Symbol, name: str) -> Symbol | None:
+        """A function defined inside `caller` or inside any function that encloses it (closures call siblings).
+
+        Class bodies are skipped: a method cannot call another method of its class by bare name.
+        """
+        parts = caller.qualname.split(".")
+        for i in range(len(parts), 0, -1):
+            scope = ".".join(parts[:i])
+            scope_sym = self.symbols.get(f"{caller.file}::{scope}")
+            if scope_sym is not None and scope_sym.kind == "class" and scope != caller.qualname:
+                continue
+            found = self.symbols.get(f"{caller.file}::{scope}.{name}")
+            if found is not None and found.kind in ("function", "class"):
+                return found
+        return None
+
     def _receiver_target(self, path: str, receiver: str, callee: str) -> tuple[Symbol | None, bool]:
         """(symbol, known). `known` is True when the receiver is a module or class of this repository."""
         parts = receiver.split(".")
@@ -323,7 +339,7 @@ class Resolver:
     def resolve_call(self, caller: Symbol, call: CallSite) -> tuple[str, Symbol | None]:
         path = caller.file
         if call.kind == "name":
-            nested = self.symbols.get(f"{path}::{caller.qualname}.{call.callee}")
+            nested = self._enclosing_definition(caller, call.callee)
             if nested is not None:
                 return "resolved", nested
             target = self.lookup(path, call.callee)

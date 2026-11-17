@@ -7,8 +7,18 @@ import json
 import sys
 from typing import Any
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
 from .graph import query
 from .graph.build import build_graph
+from .providers import ProviderError, provider_from_env
+from .suggest.facts import collect_facts
+from .suggest.pipeline import SuggestReport
+from .suggest.pipeline import suggest as run_suggest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _loc(item: dict[str, Any]) -> str:
@@ -111,6 +121,60 @@ def _render_dead(r: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _node(g_nodes: list[str], limit: int = 4) -> str:
+    shown = ", ".join(g_nodes[:limit])
+    return shown + (f" (+{len(g_nodes) - limit} more)" if len(g_nodes) > limit else "")
+
+
+def _render_facts(facts: list) -> str:
+    lines = []
+    for f in facts:
+        lines.append(f"{f.id:4} [{f.kind}] {f.summary}")
+        if f.nodes:
+            lines.append(f"       nodes: {_node(f.nodes)}")
+    return "\n".join(lines)
+
+
+def _render_suggestions(r: SuggestReport) -> str:
+    lines = [
+        f"Suggestions for {r.repo} ({r.provider}/{r.model}): {len(r.suggestions)} kept, {len(r.dropped)} dropped"
+        + f", {r.attempts} model call(s)"
+    ]
+    for i, g in enumerate(r.suggestions, start=1):
+        s = g.suggestion
+        lines.append(f"\n{i}. [{s.category} | {s.confidence}] {s.title}")
+        lines.append(f"   Why:      {s.rationale}")
+        lines.append(f"   Evidence: {_node(g.evidence_nodes)}")
+        lines.append(f"   Next:     {s.next_step}")
+        if s.skill_requirement.strip():
+            lines.append(f"   As a skill requirement: {s.skill_requirement}")
+        if g.ignored_evidence:
+            lines.append(f"   (ignored citations that match nothing: {', '.join(g.ignored_evidence[:3])})")
+        if g.unverified_numbers:
+            lines.append(f"   (CHECK: numbers not found in the facts: {', '.join(g.unverified_numbers[:5])})")
+    if r.dropped:
+        lines.append("\nDropped:")
+        lines += [f"  - {d.title}: {d.reason}" for d in r.dropped]
+    lines += [f"\nnote: {n}" for n in r.notes]
+    return "\n".join(lines)
+
+
+def _run_suggest(args: argparse.Namespace) -> int:
+    load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
+    g = build_graph(args.repo, focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
+    if args.facts_only:
+        facts = collect_facts(g)
+        print(json.dumps([f.__dict__ for f in facts], indent=2) if args.json else _render_facts(facts))
+        return 0
+    report = run_suggest(
+        g, provider_from_env(), max_suggestions=args.max, max_ideas=args.max_ideas, with_ideas=not args.no_ideas
+    )
+    if args.save:
+        Path(args.save).write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    print(json.dumps(report.to_dict(), indent=2) if args.json else _render_suggestions(report))
+    return 0
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("repo", help="path of the repository to analyse")
     p.add_argument("--focus", help="only analyse this folder of the repository")
@@ -154,6 +218,14 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--include-tests", action="store_true")
     p = cmds.add_parser("dead", help="functions nothing visibly uses (candidates)")
     _add_common(p)
+
+    sg = area.add_parser("suggest", help="AI ideas for a repository, grounded in its graph (needs a provider key)")
+    _add_common(sg)
+    sg.add_argument("--max", type=int, default=8, help="most review suggestions to keep")
+    sg.add_argument("--max-ideas", type=int, default=3, help="most skill / automation ideas to keep")
+    sg.add_argument("--no-ideas", action="store_true", help="skip the second pass that proposes skills and automations")
+    sg.add_argument("--facts-only", action="store_true", help="print the facts and stop: no AI, no key")
+    sg.add_argument("--save", help="also write the JSON report to this file")
     return parser
 
 
@@ -162,6 +234,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
+    if args.area == "suggest":
+        try:
+            return _run_suggest(args)
+        except (ProviderError, query.QueryError, NotADirectoryError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     try:
         g = build_graph(args.repo, focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
         cmd = args.command

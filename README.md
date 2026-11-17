@@ -1,30 +1,45 @@
 # AISkills (SkillForge AI)
 
-A platform that turns natural-language requirements into tested, versioned, reusable AI skill packages.
+An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
+reusable AI skills** from plain-English requirements.
 
-Status: **Step 0 - environment and project skeleton.** No application code yet.
+Status: **the Understand slice (repository graph) is built and tested.** Suggest and Build come next.
+See [docs/roadmap.md](docs/roadmap.md).
+
+```
+ Repo --> UNDERSTAND --graph facts--> SUGGEST --ideas with evidence--> BUILD --> skill packages
+          (no AI)                     (AI + graph)                      (AI + templates)
+```
 
 ## Layout
 
 ```
 AISkills/
-├── backend/   # FastAPI + Pydantic (Step 1+)
-├── docs/      # architecture notes, SDM draft
+├── backend/
+│   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
+│   ├── skillforge/cli.py   # `python -m skillforge ...`
+│   ├── tests/              # offline tests, no key or network needed
+│   └── scripts/            # Step 0 smoke test for the LLM provider
+├── docs/                   # roadmap, graph design, decisions, environment notes
 ├── .env.example
 └── README.md
 ```
 
-A `frontend/` (Next.js) folder will be added later, after the backend slice works.
+## Understand a repository
 
-## Core idea
+Works on Python and TypeScript / JavaScript repositories. Needs no AI and no key.
 
-The Skill Definition Model (SDM) is the single source of truth. Every generated file is derived from it.
-
+```powershell
+cd backend
+python -m skillforge graph stats      C:\path\to\repo
+python -m skillforge graph impact     C:\path\to\repo src/service.ts
+python -m skillforge graph callers    C:\path\to\repo parse --depth 2
+python -m skillforge graph duplicates C:\path\to\repo
+python -m skillforge graph hotspots   C:\path\to\repo
 ```
-Chat -> Requirement Spec -> SDM -> Generated files -> Validator -> Sandbox tests -> Quality report
-```
 
-See [docs/sdm-draft.md](docs/sdm-draft.md).
+Every answer says how sure it is (proven link, or a name-only guess), and the limits are stated in
+[docs/graph.md](docs/graph.md). Nothing is written into the repository you analyse.
 
 ## Setup
 
@@ -33,20 +48,25 @@ The venv lives outside OneDrive so thousands of files do not sync.
 ```powershell
 # 1. Python environment (Python 3.13)
 uv venv C:\dev\venvs\aiskills --python 3.13
-uv pip install --python C:\dev\venvs\aiskills\Scripts\python.exe -r backend\requirements.txt
+uv pip install --python C:\dev\venvs\aiskills\Scripts\python.exe -r backend\requirements-dev.txt
 
-# 2. Config: copy .env.example to .env, then set LLM_MODEL and your API key
+# 2. Run the tests (offline)
+cd backend
+C:\dev\venvs\aiskills\Scripts\python.exe -m pytest
+
+# 3. For the AI parts later: copy .env.example to .env, then set LLM_MODEL and your API key
 #    (GOOGLE_API_KEY for Gemini, OPENAI_API_KEY, or ANTHROPIC_API_KEY). Never commit .env.
-Copy-Item .env.example .env
+Copy-Item ..\.env.example ..\.env
 
-# 3. Smoke test: one structured-output call to the configured provider
+# 4. Smoke test: one structured-output call to the configured provider
+cd ..
 C:\dev\venvs\aiskills\Scripts\python.exe backend\scripts\hello_structured.py
 ```
 
 ### Cost
 
-You bring your own API key. Gemini offers a free key with rate limits (check Google's terms for how
-free-tier data is handled); OpenAI and Anthropic usage is billed by the provider to your own account.
-This repo includes no key, no bundled model and no hosted service.
+The graph needs no key and costs nothing. For the AI parts you bring your own API key. Gemini offers a free
+key with rate limits (check Google's terms for how free-tier data is handled); OpenAI and Anthropic usage is
+billed by the provider to your own account. This repo includes no key, no bundled model and no hosted service.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

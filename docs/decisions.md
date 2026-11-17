@@ -44,3 +44,22 @@ first, but the owner's account had no credits (HTTP 429).
 - Automated tests use a mock provider, never a hosted model.
 - Docker Desktop is not assumed, because it needs a paid license at larger companies. Docker Engine or
   Podman are the free options for the sandbox.
+
+## D3 - Scope: Understand, Suggest, Build; graph first (2026-11-17)
+
+**Decision:** the platform covers three capabilities: **Understand** (a repository graph the tool remembers),
+**Suggest** (AI ideas grounded in graph facts) and **Build** (requirements to skill packages). The graph is
+built first, as a fresh Python implementation in this repository. It follows the design of the owner's
+Repository Intelligence Assistant (RIA): evidence-only answers, confidence labels, an incremental cache. It
+adds function-level call edges from real parsers, which RIA does not have. RIA stays a separate local tool
+with no AI, and is not a runtime dependency.
+
+**Consequences**
+
+- The graph is built without AI, so it is deterministic, free, and fully testable offline.
+- Every answer carries its confidence. Name-only guesses are labelled and never count toward risk scores or
+  test coverage; calls that cannot be pinned down are counted, not invented.
+- Suggestions must cite real graph nodes as evidence. A suggestion without evidence is dropped.
+- The cache lives in a per-user data folder, never inside the analysed repository or this synced folder.
+- Only Python and TypeScript / JavaScript are parsed at first. Agent Builder, hosting and more languages are
+  deferred.

@@ -35,8 +35,8 @@ The venv lives outside OneDrive so thousands of files do not sync.
 uv venv C:\dev\venvs\aiskills --python 3.13
 uv pip install --python C:\dev\venvs\aiskills\Scripts\python.exe -r backend\requirements.txt
 
-# 2. Config: copy .env.example to .env, then set LLM_MODEL and your API key (OPENAI_API_KEY).
-#    Never commit .env.
+# 2. Config: copy .env.example to .env, then set LLM_MODEL and your API key
+#    (GOOGLE_API_KEY for Gemini, OPENAI_API_KEY, or ANTHROPIC_API_KEY). Never commit .env.
 Copy-Item .env.example .env
 
 # 3. Smoke test: one structured-output call to the configured provider
@@ -45,7 +45,8 @@ C:\dev\venvs\aiskills\Scripts\python.exe backend\scripts\hello_structured.py
 
 ### Cost
 
-You bring your own API key (OpenAI or Anthropic). Usage is billed by the provider to your own account.
+You bring your own API key. Gemini offers a free key with rate limits (check Google's terms for how
+free-tier data is handled); OpenAI and Anthropic usage is billed by the provider to your own account.
 This repo includes no key, no bundled model and no hosted service.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

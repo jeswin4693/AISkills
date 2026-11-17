@@ -26,18 +26,21 @@ supply and pay for the model is not planned.
 - Review docs for personal or employer information.
 - Confirm that publishing is allowed under your employment / IP terms.
 
-## D2 - Provider: bring your own API key, OpenAI first (2026-11-17)
+## D2 - Provider: bring your own API key, Gemini first (2026-11-17)
 
-**Decision:** the first provider is OpenAI, using the project owner's own API key. Anthropic stays
-supported as a second adapter. This replaces an earlier idea of a free local-model default.
+**Decision:** the first provider is Google Gemini, using the project owner's own key, through Gemini's
+OpenAI-compatible endpoint. OpenAI and Anthropic are supported as additional adapters. OpenAI was tried
+first, but the owner's account had no credits (HTTP 429).
 
 **Consequences**
 
-- Usage is billed by the provider to whoever owns the key. This repo ships no key, no bundled model and
-  no hosted service, so the project itself has no running cost.
-- `.env.example` defaults to `LLM_PROVIDER=openai`. `LLM_MODEL` has no default, because the model a
-  key can use depends on the account.
-- Automated tests use a mock provider, never a paid or hosted model.
-- People without a paid API key have no free path in the default setup.
+- This repo ships no key, no bundled model and no hosted service, so the project itself has no running cost.
+- Gemini has a free key with rate limits, so there is a no-payment path for users. Free-tier terms and
+  limits are Google's and can change.
+- OpenAI and Anthropic usage is billed by the provider to whoever owns the key.
+- `.env.example` defaults to `LLM_PROVIDER=gemini`. `LLM_MODEL` has no default, because models are retired
+  for new users while still appearing in the provider's model list (`gemini-2.5-flash` was already
+  unavailable to a new key), and the usable model depends on the account.
+- Automated tests use a mock provider, never a hosted model.
 - Docker Desktop is not assumed, because it needs a paid license at larger companies. Docker Engine or
   Podman are the free options for the sandbox.

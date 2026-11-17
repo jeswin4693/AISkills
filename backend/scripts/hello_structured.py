@@ -3,6 +3,7 @@
 Reads LLM_PROVIDER, LLM_MODEL and the provider's key from the repo-root .env.
 Supported providers:
   openai     OpenAI Chat Completions API (OPENAI_API_KEY)
+  gemini     Google Gemini through its OpenAI-compatible endpoint (GOOGLE_API_KEY)
   anthropic  Anthropic Messages API (ANTHROPIC_API_KEY)
 
 This is a throwaway smoke test. Step 1 replaces it with the provider interface
@@ -25,6 +26,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 PROMPT = (
     "Greet SkillForge AI in one short sentence, then list exactly "
@@ -60,9 +62,11 @@ def require_env(name: str) -> str:
     return value
 
 
-def call_openai(model: str) -> Reply:
-    require_env("OPENAI_API_KEY")
-    client = openai.OpenAI()  # key comes from the environment loaded above
+def call_openai_compatible(
+    model: str, *, label: str, key_env: str, base_url: str | None = None
+) -> Reply:
+    """Structured-output call through the OpenAI client (OpenAI itself or a compatible endpoint)."""
+    client = openai.OpenAI(api_key=require_env(key_env), base_url=base_url)
     try:
         response = client.chat.completions.parse(
             model=model,
@@ -70,12 +74,13 @@ def call_openai(model: str) -> Reply:
             response_format=HelloResult,
         )
     except openai.AuthenticationError:
-        raise ProviderError("The API key was rejected (401). Check OPENAI_API_KEY in .env.")
+        raise ProviderError(f"The API key was rejected (401). Check {key_env} in .env.")
     except openai.PermissionDeniedError as exc:
         raise ProviderError(f"The key lacks permission for this request: {exc.message}")
-    except openai.NotFoundError:
+    except openai.NotFoundError as exc:
         raise ProviderError(
-            f"Model '{model}' was not found or your key cannot use it. Check LLM_MODEL in .env."
+            f"Model '{model}' is not available to this key: {exc.message}\n"
+            "Check LLM_MODEL in .env. A model can appear in the provider's list and still be retired."
         )
     except openai.BadRequestError as exc:
         raise ProviderError(f"Bad request (400): {exc.message}")
@@ -84,7 +89,7 @@ def call_openai(model: str) -> Reply:
     except openai.APIStatusError as exc:
         raise ProviderError(f"API error {exc.status_code}: {exc.message}")
     except openai.APIConnectionError:
-        raise ProviderError("Could not reach the OpenAI API. Check network and proxy settings.")
+        raise ProviderError(f"Could not reach the {label} API. Check network and proxy settings.")
     except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError) as exc:
         raise ProviderError(f"The model did not finish cleanly: {exc}")
     except ValidationError as exc:
@@ -149,7 +154,17 @@ def call_anthropic(model: str) -> Reply:
     )
 
 
-PROVIDERS = {"openai": call_openai, "anthropic": call_anthropic}
+def call_openai(model: str) -> Reply:
+    return call_openai_compatible(model, label="OpenAI", key_env="OPENAI_API_KEY")
+
+
+def call_gemini(model: str) -> Reply:
+    return call_openai_compatible(
+        model, label="Gemini", key_env="GOOGLE_API_KEY", base_url=GEMINI_BASE_URL
+    )
+
+
+PROVIDERS = {"openai": call_openai, "gemini": call_gemini, "anthropic": call_anthropic}
 
 
 def main() -> int:

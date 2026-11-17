@@ -15,18 +15,33 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
 
 ## LLM provider
 
-- First provider: **OpenAI**, using the project owner's own API key. Anthropic is the second adapter.
+- First provider: **Google Gemini**, using the project owner's own API key, through Gemini's
+  OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`) with the
+  `openai` client. OpenAI and Anthropic are additional adapters.
 - Keys come only from `.env` (git-ignored). `LLM_MODEL` has no default; set a model your key can use.
-- `backend/scripts/hello_structured.py` is the smoke test. `LLM_PROVIDER` selects `openai` or `anthropic`.
-  Both branches request schema-constrained output from a Pydantic model.
+- `backend/scripts/hello_structured.py` is the smoke test. `LLM_PROVIDER` selects `gemini`, `openai` or
+  `anthropic`. Every branch requests schema-constrained output from a Pydantic model.
 
-### Verification status
+### Verified live
 
-- OpenAI branch: request construction and response parsing checked only with a mocked HTTP transport.
-  Not yet run live, because no key is in `.env` yet.
-- Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback): also checked only with a mocked
-  HTTP transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured
-  output must not be built on forced tool calls.
+- Gemini, `gemini-3.5-flash-lite`: structured output validated against the Pydantic model, about 5.6 s
+  (21 tokens in, 54 out).
+
+### Gotchas found
+
+- `gemini-2.5-flash` and `gemini-2.5-flash-lite` still appear in the key's model list but return 404
+  ("no longer available to new users"). Listing a model does not mean the key can use it.
+- `gemini-3.8-flash` returned 503 (overloaded) once, after the SDK's two automatic retries.
+- The Gemini key's native `generateContent` endpoint wants the key in the `x-goog-api-key` header; a
+  `Bearer` header is rejected (401). The OpenAI-compatible endpoint takes it as a normal API key.
+
+### Not verified live
+
+- OpenAI branch: the key authenticates and lists models, but chat calls return **429 "no credits
+  remaining"**. Checked only with a mocked HTTP transport.
+- Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback): checked only with a mocked HTTP
+  transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured output
+  must not be built on forced tool calls.
 
 ## Docker: Linux containers are NOT available yet
 

@@ -53,11 +53,11 @@ python -m skillforge sandbox-status
 
 ### Status on the development machine
 
-**Unavailable.** The Docker here is a native Windows engine that runs Windows containers only
-(`UNAVAILABLE: Docker is in Windows-container mode; the sandbox needs Linux containers.`). So the sandbox code
-is tested (command construction, the probe, the fail-closed behaviour, timeouts) but has **never run a real
-container**. Until a Linux engine is available, no script is run anywhere, and every build report says so.
-Options for getting one are in [environment-notes.md](environment-notes.md).
+**Available, through Docker inside WSL** (the native Docker here only runs Windows containers). Real-container
+tests prove the locks (7 of 7 pass), including a control showing that the network lock is what blocks the
+connection. How it was set up, the steps for another machine, and what the sandbox does not prove are in
+[sandbox-wsl.md](sandbox-wsl.md). Where no Linux engine exists, the sandbox raises `SandboxUnavailable` and no
+script is run anywhere, and the build report says so.
 
-Nothing needs the sandbox yet: `build` generates instructions only, with no scripts. Generating scripts is
-the next step that depends on it.
+Nothing calls the sandbox yet: `build` generates instructions only, with no scripts. Generating scripts and
+testing them in the sandbox is the next step.

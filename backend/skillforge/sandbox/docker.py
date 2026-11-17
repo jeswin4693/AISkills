@@ -6,15 +6,17 @@ fallback that runs the script on the host, and no flag that turns the check off.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$")
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+DOCKER = ("docker",)
 
 
 class SandboxUnavailable(Exception):
@@ -26,6 +28,8 @@ class SandboxStatus:
     available: bool
     reason: str
     engine_os: str | None = None
+    prefix: tuple[str, ...] = DOCKER  # how to reach docker: ("docker",) or ("wsl.exe", "--exec", "docker")
+    wsl: bool = False  # True when docker runs inside WSL, so host paths must be mapped to /mnt/<drive>/...
 
 
 @dataclass(frozen=True)
@@ -47,25 +51,81 @@ class RunResult:
     truncated: bool
 
 
+def _decode(data: bytes | str | None) -> str:
+    """wsl.exe writes UTF-16 text; other tools write UTF-8. Return plain text either way."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    return data.decode("utf-16-le", "replace") if b"\x00" in data else data.decode("utf-8", "replace")
+
+
+def _engine_status(out, prefix: tuple[str, ...], wsl: bool, where: str) -> SandboxStatus:
+    if out.returncode != 0:
+        detail = " ".join((_decode(getattr(out, "stdout", None)) + _decode(getattr(out, "stderr", None))).split()).lower()
+        if wsl and "no installed distributions" in detail:
+            return SandboxStatus(False, "WSL is installed but has no Linux distribution yet (see docs/sandbox-wsl.md).", None, prefix, wsl)
+        if wsl and "not installed" in detail:
+            return SandboxStatus(False, "The Windows Subsystem for Linux is not installed.", None, prefix, wsl)
+        if wsl:
+            return SandboxStatus(False, "WSL is installed but Docker is not running inside it (or no Linux distribution exists).", None, prefix, wsl)
+        return SandboxStatus(False, "Docker is installed but its engine is not running or not reachable.", None, prefix, wsl)
+    engine = _decode(out.stdout).strip().lower()
+    if engine == "linux":
+        return SandboxStatus(True, f"{where} is running Linux containers.", "linux", prefix, wsl)
+    if engine == "windows":
+        return SandboxStatus(False, f"{where} is in Windows-container mode; the sandbox needs Linux containers.", "windows", prefix, wsl)
+    return SandboxStatus(False, f"{where} reports an unexpected engine OS: {engine or 'unknown'}.", engine or None, prefix, wsl)
+
+
 def probe_docker(timeout: float = 8.0, run: Callable = subprocess.run) -> SandboxStatus:
-    """Is there a Docker engine that runs Linux containers? Anything else means no sandbox."""
+    """Is there a native Docker engine that runs Linux containers? Anything else means no sandbox from it."""
     try:
-        out = run(["docker", "version", "--format", "{{.Server.Os}}"], capture_output=True, text=True, timeout=timeout)
+        out = run([*DOCKER, "version", "--format", "{{.Server.Os}}"], capture_output=True, timeout=timeout)
     except FileNotFoundError:
         return SandboxStatus(False, "Docker is not installed or not on PATH.")
     except (subprocess.TimeoutExpired, OSError):
         return SandboxStatus(False, "Docker did not answer in time.")
-    if out.returncode != 0:
-        return SandboxStatus(False, "Docker is installed but its engine is not running or not reachable.")
-    engine = (out.stdout or "").strip().lower()
-    if engine == "linux":
-        return SandboxStatus(True, "Docker is running Linux containers.", "linux")
-    if engine == "windows":
-        return SandboxStatus(False, "Docker is in Windows-container mode; the sandbox needs Linux containers.", "windows")
-    return SandboxStatus(False, f"Docker reports an unexpected engine OS: {engine or 'unknown'}.", engine or None)
+    return _engine_status(out, DOCKER, False, "Docker")
 
 
-def docker_run_args(image: str, host_dir: Path, argv: list[str], limits: Limits, name: str) -> list[str]:
+def probe_wsl_docker(timeout: float = 20.0, run: Callable = subprocess.run, distro: str | None = None) -> SandboxStatus:
+    """Is there Docker inside WSL? `--exec` runs it directly, with no shell between us and docker."""
+    prefix = ("wsl.exe", *(("-d", distro) if distro else ()), "--exec", "docker")
+    try:
+        out = run([*prefix, "version", "--format", "{{.Server.Os}}"], capture_output=True, timeout=timeout)
+    except FileNotFoundError:
+        return SandboxStatus(False, "WSL is not available on this machine (wsl.exe not found).", None, prefix, True)
+    except (subprocess.TimeoutExpired, OSError):
+        return SandboxStatus(False, "WSL did not answer in time.", None, prefix, True)
+    return _engine_status(out, prefix, True, "Docker inside WSL")
+
+
+def probe_sandbox(
+    timeout: float = 8.0, run: Callable = subprocess.run, distro: str | None = None
+) -> SandboxStatus:
+    """The first safe place found: native Docker with Linux containers, else Docker inside WSL."""
+    native = probe_docker(timeout, run)
+    if native.available:
+        return native
+    wsl = probe_wsl_docker(timeout + 12, run, distro or os.environ.get("SKILLFORGE_WSL_DISTRO") or None)
+    if wsl.available:
+        return wsl
+    return SandboxStatus(False, f"{native.reason} WSL: {wsl.reason}", native.engine_os)
+
+
+def to_wsl_path(path: str) -> str:
+    """C:\\Users\\me\\x -> /mnt/c/Users/me/x. Only plain drive paths can be mapped."""
+    p = PureWindowsPath(path)
+    if not p.drive or len(p.drive) != 2 or p.drive[1] != ":":
+        raise ValueError(f"Cannot map this path into WSL: {path}")
+    return "/mnt/" + p.drive[0].lower() + "/" + "/".join(p.parts[1:])
+
+
+def docker_run_args(
+    image: str, host_dir: Path, argv: list[str], limits: Limits, name: str,
+    *, prefix: tuple[str, ...] = DOCKER, wsl_paths: bool = False,
+) -> list[str]:
     """The exact `docker run` command. A list, never a shell string, so nothing is ever interpreted by a shell."""
     if not IMAGE.match(image):
         raise ValueError(f"Not a valid image reference: {image!r}")
@@ -76,8 +136,9 @@ def docker_run_args(image: str, host_dir: Path, argv: list[str], limits: Limits,
     host_dir = Path(host_dir).resolve()
     if not host_dir.is_dir():
         raise ValueError(f"Not a directory: {host_dir}")
+    mount = to_wsl_path(str(host_dir)) if wsl_paths else str(host_dir)
     return [
-        "docker", "run", "--rm", "--name", name,
+        *prefix, "run", "--rm", "--name", name,
         "--pull", "never",  # never reach the network to fetch an image at run time
         "--network", "none",  # the script cannot talk to anything
         "--read-only",  # the root file system cannot be written
@@ -90,7 +151,7 @@ def docker_run_args(image: str, host_dir: Path, argv: list[str], limits: Limits,
         "--user", "65534:65534",  # nobody
         "--tmpfs", f"/tmp:rw,noexec,nosuid,size={limits.tmpfs_size}",  # the only writable place, and not executable
         "--env", "HOME=/tmp",
-        "-v", f"{host_dir}:/skill:ro",  # the skill is mounted read-only
+        "-v", f"{mount}:/skill:ro",  # the skill is mounted read-only
         "-w", "/skill",
         image, *argv,
     ]
@@ -107,7 +168,7 @@ class DockerRunner:
         image: str,
         limits: Limits | None = None,
         *,
-        probe: Callable[[], SandboxStatus] = probe_docker,
+        probe: Callable[[], SandboxStatus] = probe_sandbox,
         runner: Callable = subprocess.run,
     ) -> None:
         self.image = image
@@ -120,11 +181,11 @@ class DockerRunner:
         if not status.available:
             raise SandboxUnavailable(f"Not run. {status.reason}")
         name = f"skillforge-{uuid.uuid4().hex[:12]}"
-        cmd = docker_run_args(self.image, skill_dir, argv, self.limits, name)
+        cmd = docker_run_args(self.image, skill_dir, argv, self.limits, name, prefix=status.prefix, wsl_paths=status.wsl)
         try:
             proc = self._runner(cmd, capture_output=True, timeout=self.limits.timeout_s)
         except subprocess.TimeoutExpired as exc:
-            self._runner(["docker", "kill", name], capture_output=True, timeout=10)
+            self._runner([*status.prefix, "kill", name], capture_output=True, timeout=10)
             out, t1 = _clip(exc.stdout, self.limits.max_output_bytes)
             err, t2 = _clip(exc.stderr, self.limits.max_output_bytes)
             return RunResult(None, out, err, True, t1 or t2)

@@ -21,6 +21,13 @@ def fake_docker(stdout: str = "", returncode: int = 0, raises: Exception | None 
     return run
 
 
+def fake_docker_bytes(stdout: bytes, returncode: int):
+    def run(cmd, **kw):
+        return SimpleNamespace(stdout=stdout, stderr=b"", returncode=returncode)
+
+    return run
+
+
 # ---- the hardened command ----------------------------------------------------------------------------------
 
 
@@ -130,16 +137,117 @@ def test_output_is_capped(tmp_path):
 
 
 def test_sandbox_status_command_and_a_probe_that_breaks_never_stops_a_build(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "probe_docker", lambda: UNAVAILABLE)
+    monkeypatch.setattr(cli, "probe_sandbox", lambda: UNAVAILABLE)
     assert cli.main(["sandbox-status"]) == 1
     out = capsys.readouterr().out
     assert "UNAVAILABLE" in out and "never run on this machine directly" in out
 
-    monkeypatch.setattr(cli, "probe_docker", lambda: AVAILABLE)
+    monkeypatch.setattr(cli, "probe_sandbox", lambda: AVAILABLE)
     assert cli.main(["sandbox-status"]) == 0 and "AVAILABLE" in capsys.readouterr().out
 
     def boom():
         raise RuntimeError("docker exploded")
 
-    monkeypatch.setattr(cli, "probe_docker", boom)
+    monkeypatch.setattr(cli, "probe_sandbox", boom)
     assert cli._sandbox_note().startswith("unknown")
+
+
+# ---- Docker inside WSL -------------------------------------------------------------------------------------
+
+import sys  # noqa: E402
+
+from skillforge.sandbox import probe_sandbox, probe_wsl_docker, to_wsl_path  # noqa: E402
+
+WSL_PREFIX = ("wsl.exe", "--exec", "docker")
+WSL_AVAILABLE = SandboxStatus(True, "Docker inside WSL is running Linux containers.", "linux", WSL_PREFIX, True)
+
+
+def test_windows_paths_map_to_their_wsl_mount_points():
+    assert to_wsl_path(r"C:\Users\jj1\OneDrive - Aptean-online\skills\x") == "/mnt/c/Users/jj1/OneDrive - Aptean-online/skills/x"
+    assert to_wsl_path(r"d:\data") == "/mnt/d/data"
+    for bad in (r"\\server\share\x", r"relative\path", "/already/linux"):
+        with pytest.raises(ValueError, match="Cannot map"):
+            to_wsl_path(bad)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs a Windows drive path")
+def test_a_wsl_run_uses_exec_and_a_mapped_read_only_mount(tmp_path):
+    cmd = docker_run_args("python:3.13-slim", tmp_path, ["python", "x.py"], Limits(), "n1", prefix=WSL_PREFIX, wsl_paths=True)
+    assert cmd[:4] == ["wsl.exe", "--exec", "docker", "run"]  # --exec: no shell between us and docker
+    mount = cmd[cmd.index("-v") + 1]
+    assert mount.startswith("/mnt/") and mount.endswith(":/skill:ro") and "\\" not in mount
+    assert "--network" in cmd and "none" in cmd and "--read-only" in cmd  # same hardening as native
+
+
+def test_wsl_probe_reads_utf16_error_text_from_wsl_exe():
+    not_installed = "The Windows Subsystem for Linux is not installed. You can install by running 'wsl.exe --install'.".encode("utf-16-le")
+    s = probe_wsl_docker(run=fake_docker_bytes(not_installed, 1))
+    assert not s.available and s.reason == "The Windows Subsystem for Linux is not installed." and s.wsl
+
+
+def test_wsl_without_any_distribution_is_explained_exactly():
+    # The text wsl.exe really prints on this machine when WSL is installed but no distribution exists.
+    real = ("Windows Subsystem for Linux has no installed distributions.\r\nYou can resolve this by installing a "
+            "distribution with the instructions below:\r\n\r\nUse 'wsl.exe --list --online' to list available "
+            "distributions\r\nand 'wsl.exe --install <Distro>' to install.\r\n").encode("utf-16-le")
+    s = probe_wsl_docker(run=fake_docker_bytes(real, 4294967295))
+    assert not s.available and "installed but has no Linux distribution yet" in s.reason
+
+
+@pytest.mark.parametrize(
+    "run, available, text",
+    [
+        (fake_docker_bytes(b"linux\n", 0), True, "Docker inside WSL is running Linux containers"),
+        (fake_docker_bytes(b"", 1), False, "Docker is not running inside it"),
+        (fake_docker(raises=FileNotFoundError()), False, "wsl.exe not found"),
+        (fake_docker(raises=subprocess.TimeoutExpired("wsl", 1)), False, "did not answer"),
+    ],
+)
+def test_wsl_probe_outcomes(run, available, text):
+    s = probe_wsl_docker(run=run)
+    assert s.available is available and text in s.reason
+    assert s.prefix == ("wsl.exe", "--exec", "docker") and s.wsl
+
+
+def test_the_wsl_distribution_can_be_chosen():
+    seen = []
+
+    def run(cmd, **kw):
+        seen.append(cmd)
+        return SimpleNamespace(stdout=b"linux", stderr=b"", returncode=0)
+
+    s = probe_wsl_docker(run=run, distro="Ubuntu-24.04")
+    assert seen[0][:5] == ["wsl.exe", "-d", "Ubuntu-24.04", "--exec", "docker"] and s.prefix[:3] == ("wsl.exe", "-d", "Ubuntu-24.04")
+
+
+def test_native_linux_docker_wins_and_wsl_is_the_fallback():
+    def runs(native_os: str, wsl_os: str | None):
+        def run(cmd, **kw):
+            if cmd[0] == "docker":
+                return SimpleNamespace(stdout=native_os, stderr="", returncode=0)
+            if wsl_os is None:
+                raise FileNotFoundError()
+            return SimpleNamespace(stdout=wsl_os.encode(), stderr=b"", returncode=0)
+
+        return run
+
+    assert probe_sandbox(run=runs("linux", None)).wsl is False  # native Linux Docker is used when it exists
+    fallback = probe_sandbox(run=runs("windows", "linux"))
+    assert fallback.available and fallback.wsl  # Windows-container Docker, but WSL has a Linux engine
+    both = probe_sandbox(run=runs("windows", None))
+    assert not both.available and "Windows-container mode" in both.reason and "WSL:" in both.reason
+
+
+def test_a_wsl_timeout_kill_goes_through_wsl_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("skillforge.sandbox.docker.to_wsl_path", lambda p: "/mnt/c/x")  # any host, any path
+    seen = []
+
+    def runner(cmd, **kw):
+        seen.append(cmd)
+        if cmd[3] == "run":
+            raise subprocess.TimeoutExpired(cmd, 1, output=b"", stderr=b"")
+        return SimpleNamespace(stdout=b"", stderr=b"", returncode=0)
+
+    result = DockerRunner("python:3.13-slim", probe=lambda: WSL_AVAILABLE, runner=runner).run(tmp_path, ["python", "loop.py"])
+    assert result.timed_out
+    assert seen[0][:3] == ["wsl.exe", "--exec", "docker"] and seen[1][:4] == ["wsl.exe", "--exec", "docker", "kill"]

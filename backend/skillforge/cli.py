@@ -17,7 +17,7 @@ from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
 from .providers import ProviderError, provider_from_env
-from .sandbox import probe_docker
+from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
 from .suggest.pipeline import SuggestReport
 from .suggest.pipeline import suggest as run_suggest
@@ -268,7 +268,7 @@ def _description_from_args(args: argparse.Namespace) -> str:
 def _sandbox_note() -> str:
     """What the report says about the sandbox on this machine. A failed probe must never stop a build."""
     try:
-        s = probe_docker()
+        s = probe_sandbox()
     except Exception as exc:  # noqa: BLE001
         return f"unknown ({type(exc).__name__})"
     return f"{'available' if s.available else 'unavailable'}. {s.reason}"
@@ -316,7 +316,7 @@ def _run_validate(args: argparse.Namespace) -> int:
 
 
 def _run_sandbox_status(args: argparse.Namespace) -> int:
-    s = probe_docker()
+    s = probe_sandbox()
     print(("AVAILABLE: " if s.available else "UNAVAILABLE: ") + s.reason)
     if not s.available:
         print("Scripts will not be run anywhere until a Linux container engine is available. They are never run on this machine directly.")

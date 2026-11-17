@@ -8,8 +8,12 @@ from .docker import (
     SandboxUnavailable,
     docker_run_args,
     probe_docker,
+    probe_sandbox,
+    probe_wsl_docker,
+    to_wsl_path,
 )
 
 __all__ = [
-    "DockerRunner", "Limits", "RunResult", "SandboxStatus", "SandboxUnavailable", "docker_run_args", "probe_docker",
+    "DockerRunner", "Limits", "RunResult", "SandboxStatus", "SandboxUnavailable", "docker_run_args",
+    "probe_docker", "probe_sandbox", "probe_wsl_docker", "to_wsl_path",
 ]

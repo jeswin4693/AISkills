@@ -43,21 +43,12 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
   transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured output
   must not be built on forced tool calls.
 
-## Docker: Linux containers are NOT available yet
+## Docker and the sandbox
 
-- `docker` here is a native **Docker Engine service** (installed via Chocolatey), not Docker Desktop.
-  There is no "Switch to Linux containers" toggle.
-- The engine runs Windows containers only (`OSType=windows`, default isolation `hyperv`).
-- Verified: `docker run --rm alpine echo ok` fails with `no matching manifest for windows/amd64`.
-- WSL is not installed, and enabling Windows features needs admin rights, so nothing was changed.
-
-Options for the sandbox (needed in Step 2, not Step 1):
-
-| Option | Notes |
-|---|---|
-| A. WSL2 + Docker Engine inside WSL | Free. Needs admin to run `wsl --install`; company policy may block it. Recommended first thing to ask IT. |
-| B. Docker Desktop (WSL2 backend) | Easiest, but Desktop needs a paid license at larger companies and also needs WSL2/admin. |
-| C. Windows containers as the sandbox | Works today (`--network none`, `--memory`, `--cpus`, Hyper-V isolation), but images are large and the filesystem and mount controls are weaker. |
-| D. Remote Linux runner (VM, Codespaces, cloud container) | No local changes needed. Adds cost and network setup. |
-
-Decision pending: pick A/B/C/D before Step 2.
+- Native `docker` here is a Docker Engine service installed via Chocolatey. It runs **Windows containers only**
+  (`docker run alpine` fails with `no matching manifest for windows/amd64`), so the sandbox refuses it.
+- **The sandbox works through Docker inside WSL**: WSL 3.0.5 with an imported Ubuntu 24.04.5 distribution
+  (`skillforge-ubuntu`, kept in `C:\dev\wsl`, outside OneDrive) running Docker Engine 29.1.3. See
+  [sandbox-wsl.md](sandbox-wsl.md) for how it was set up, why `wsl --install -d` could not be used here (this
+  network resets connections to `raw.githubusercontent.com`), and the real-container tests that prove the locks.
+- Check it any time with `python -m skillforge sandbox-status`.

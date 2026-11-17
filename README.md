@@ -3,8 +3,8 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest and Build are built and tested offline.** The live check of Build with a real
-model is still pending. See [docs/roadmap.md](docs/roadmap.md).
+Status: **Understand, Suggest and Build are built, tested offline, and verified live with Gemini.**
+See [docs/roadmap.md](docs/roadmap.md).
 
 ```
  Repo --> UNDERSTAND --graph facts--> SUGGEST --ideas with evidence--> BUILD --> skill packages
@@ -88,7 +88,10 @@ C:\dev\venvs\aiskills\Scripts\python.exe backend\scripts\hello_structured.py
 ### Cost
 
 The graph needs no key and costs nothing. For the AI parts you bring your own API key. Gemini offers a free
-key with rate limits (check Google's terms for how free-tier data is handled); OpenAI and Anthropic usage is
-billed by the provider to your own account. This repo includes no key, no bundled model and no hosted service.
+key with rate limits (check Google's terms for how free-tier data is handled); OpenAI usage is billed by the
+provider to your own account. If you cannot get a Gemini key (Google sometimes refuses to create one for an
+account), `LLM_PROVIDER` can also be `groq`, `openrouter`, `mistral`, or `custom` for any OpenAI-compatible API;
+those four share the same adapter but have not been verified live yet. This repo includes no key, no bundled
+model and no hosted service.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

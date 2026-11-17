@@ -72,6 +72,17 @@ cases run against a real agent (no harness yet; the cases are data); conflict an
 a security review of the text. A report that says "every check that ran passed" also says that this is not a
 guarantee the skill works.
 
+## Real result (2026-11-17, `gemini-3.5-flash-lite`, free key)
+
+From the one sentence "A skill that finds duplicate functions in a TypeScript repository and suggests safe
+refactors" the model filled in only the goal and, as instructed, left everything else empty. The checklist
+therefore asked five questions across two rounds. After the five answers it designed the skill
+`ts-duplicate-detector` in about 24 seconds: 9 checks passed, 0 failed, 4 listed as not run. Reading the result:
+the instructions matched the requirement, the "never edit any file" rule appears under "does not", every
+workflow step has a failure response, the only permission asked for is `read_files`, and there are positive,
+negative and edge tests tied to the acceptance criterion. Cosmetic flaw: the title is the slug in title case
+("Ts Duplicate Detector").
+
 ## Limits
 
 - Skills only, and instructions only: no scripts. Generated code would be untrusted and the sandbox does not exist.

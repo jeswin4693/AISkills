@@ -25,11 +25,31 @@ def test_factory_builds_gemini_and_openai():
     assert (o.name, o.model) == ("openai", "m2")
 
 
+def test_factory_presets_use_their_own_address_and_key_variable():
+    for name, key_env, host in (
+        ("groq", "GROQ_API_KEY", "api.groq.com"),
+        ("openrouter", "OPENROUTER_API_KEY", "openrouter.ai"),
+        ("mistral", "MISTRAL_API_KEY", "api.mistral.ai"),
+    ):
+        p = provider_from_env({"LLM_PROVIDER": name, "LLM_MODEL": "m", key_env: "k"})
+        assert p.name == name and host in str(p._client.base_url)
+
+
+def test_factory_custom_provider_needs_an_address_and_a_key():
+    base = {"LLM_PROVIDER": "custom", "LLM_MODEL": "m"}
+    with pytest.raises(ProviderError, match="LLM_BASE_URL is empty"):
+        provider_from_env({**base, "LLM_API_KEY": "k"})
+    with pytest.raises(ProviderError, match="LLM_API_KEY is empty"):
+        provider_from_env({**base, "LLM_BASE_URL": "https://example.test/v1"})
+    p = provider_from_env({**base, "LLM_BASE_URL": "https://example.test/v1", "LLM_API_KEY": "k"})
+    assert "example.test" in str(p._client.base_url)
+
+
 @pytest.mark.parametrize(
     "env, message",
     [
         ({}, "LLM_PROVIDER is ''"),
-        ({"LLM_PROVIDER": "ollama"}, "Supported: gemini, openai"),
+        ({"LLM_PROVIDER": "nonsense"}, "Supported: custom, gemini, groq, mistral, openai, openrouter"),
         ({"LLM_PROVIDER": "gemini"}, "LLM_MODEL is empty"),
         ({"LLM_PROVIDER": "gemini", "LLM_MODEL": "m"}, "GOOGLE_API_KEY is empty"),
         ({"LLM_PROVIDER": "openai", "LLM_MODEL": "m"}, "OPENAI_API_KEY is empty"),

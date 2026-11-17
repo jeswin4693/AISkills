@@ -19,7 +19,8 @@ python -m skillforge suggest C:\path\to\repo --json --save report.json
 ```
 
 Options: `--max` (review suggestions to keep), `--max-ideas`, `--no-ideas`, `--focus <dir>`, `--no-cache`,
-`--no-history`. Providers: `gemini` (free key, OpenAI-compatible endpoint) and `openai`.
+`--no-history`. Providers: `gemini` and `openai` (verified live), plus `groq`, `openrouter`, `mistral` and
+`custom` (any OpenAI-compatible API), which share the same adapter but are only checked with a mock.
 
 ## The fact sheet
 

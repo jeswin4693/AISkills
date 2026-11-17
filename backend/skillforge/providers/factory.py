@@ -8,10 +8,15 @@ from collections.abc import Mapping
 from .base import LLMProvider, ProviderError
 from .openai_compat import GEMINI_BASE_URL, OpenAICompatibleProvider
 
-# provider name -> (key variable, base URL or None for the vendor default)
+# provider name -> (key variable, base URL or None for the vendor default). Gemini and OpenAI are verified live;
+# the rest are OpenAI-compatible endpoints that share the same adapter and have only been checked with a mock.
 SUPPORTED = {
     "gemini": ("GOOGLE_API_KEY", GEMINI_BASE_URL),
     "openai": ("OPENAI_API_KEY", None),
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1"),
+    "openrouter": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    "mistral": ("MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
+    "custom": ("LLM_API_KEY", None),  # any OpenAI-compatible endpoint; its address comes from LLM_BASE_URL
 }
 
 
@@ -24,6 +29,10 @@ def provider_from_env(env: Mapping[str, str] | None = None) -> LLMProvider:
     if not model:
         raise ProviderError("LLM_MODEL is empty. Set a model your key can use in .env.")
     key_env, base_url = SUPPORTED[name]
+    if name == "custom":
+        base_url = env.get("LLM_BASE_URL", "").strip()
+        if not base_url:
+            raise ProviderError("LLM_BASE_URL is empty. For provider 'custom', set the address of an OpenAI-compatible API.")
     api_key = env.get(key_env, "").strip()
     if not api_key:
         raise ProviderError(f"{key_env} is empty. Add it to .env (never commit that file).")

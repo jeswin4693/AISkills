@@ -10,7 +10,11 @@ import posixpath
 import sys
 from dataclasses import dataclass
 
+from . import languages
 from .model import CallSite, FileRecord, Symbol
+
+IMPLICIT_THIS = frozenset({"java", "kotlin", "csharp", "cpp", "ruby"})  # a bare call inside a method may call a sibling
+IMPORT_EXTS = {"ruby": (".rb",), "php": (".php",), "c": ("",), "cpp": ("",), "java": (".java",), "kotlin": (".kt", ".kts"), "csharp": (".cs",)}
 
 TS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
 JS_TO_TS = (".ts", ".tsx", ".mts", ".cts")
@@ -27,13 +31,18 @@ toUpperCase charAt sort reverse flat flatMap fill copyWithin at call apply bind 
 close open pipe resolve reject all race append extend insert remove update copy items count index pop popitem
 setdefault strip lstrip rstrip lower upper format encode decode readline readlines writelines flush seek tell
 sub subn findall finditer group groups
+size length isEmpty contains containsKey put putAll iterator next hasNext hashCode equals compareTo getClass wait
+notify stream collect orElse isPresent Println Printf Sprintf Errorf Error String Len Lock Unlock Done Wait
+ToString Equals GetHashCode Add Remove Contains Count First Last Where Select ToList Any Append Dispose
+unwrap expect iter into clone len is_empty push_str as_str to_string map_err ok_or unwrap_or
+each select reject to_s to_i to_a inspect puts print first last empty nil each_with_index
 """.split())
 
 
 @dataclass(frozen=True)
 class _Entry:
     local: str  # the name bound in the importing file
-    kind: str  # "module" | "name" | "star" | "external"
+    kind: str  # "module" | "name" | "star" | "external" | "package" (a directory, for Go)
     file: str | None = None
     name: str | None = None  # imported name, for kind "name"
 
@@ -66,6 +75,29 @@ class Resolver:
                     parts = parts[:-1]
                 for i in range(len(parts)):
                     self.py_index.setdefault(".".join(parts[i:]), []).append(path)
+
+        # indexes for languages where a name can be defined in another file of the same package or project
+        self.dir_top: dict[str, dict[str, Symbol]] = {}
+        self.global_top: dict[str, list[Symbol]] = {}
+        self.dir_methods: dict[tuple[str, str], Symbol] = {}
+        self.go_dirs: dict[str, list[str]] = {}
+        self._scopes: dict[str, str] = {}
+        for path, rec in files.items():
+            d = posixpath.dirname(path)
+            if rec.lang == "go":
+                self.go_dirs.setdefault(d, []).append(path)
+            for sym in rec.symbols:
+                if sym.kind in ("function", "class") and "." not in sym.qualname:
+                    self.dir_top.setdefault(d, {}).setdefault(sym.name, sym)
+                    self.global_top.setdefault(sym.name, []).append(sym)
+                elif sym.kind == "method":
+                    self.dir_methods[(d, sym.qualname)] = sym
+
+    def scope_of(self, path: str) -> str:
+        lang = self.files[path].lang
+        if lang not in self._scopes:
+            self._scopes[lang] = languages.info(lang).scope
+        return self._scopes[lang]
 
     # ---- modules -> files -------------------------------------------------------------------------------
 
@@ -156,8 +188,10 @@ class Resolver:
         for imp in rec.imports:
             if rec.lang == "python":
                 self._table_python(path, imp, entries, gaps, dep)
-            else:
+            elif rec.lang in ("typescript", "tsx", "javascript"):
                 self._table_ts(path, imp, entries, gaps, dep)
+            else:
+                self._table_generic(path, rec.lang, imp, entries, gaps, dep)
         self._tables[path] = entries
         if gaps:
             self.gaps[path] = gaps
@@ -222,6 +256,111 @@ class Resolver:
             else:
                 entries.append(_Entry(local, "name", target, name))
 
+    # ---- other languages: how an import maps to files ---------------------------------------------------
+
+    def _unique(self, matches: list[str]) -> str | None:
+        return matches[0] if len(matches) == 1 else None
+
+    def _relative_file(self, importer: str, module: str, exts: tuple[str, ...]) -> str | None:
+        """Ruby require_relative, PHP include, C/C++ #include: relative to the importing file, else a unique path suffix."""
+        here = posixpath.dirname(importer)
+        if module.startswith("."):
+            base = posixpath.normpath(posixpath.join(here, module))
+            bases = [] if base.startswith("..") else [base]
+        else:
+            bases = [posixpath.normpath(posixpath.join(here, module)), module]
+        for base in bases:
+            for ext in ("",) + exts:
+                if base + ext in self.paths:
+                    return base + ext
+        if module.startswith("."):
+            return None
+        wanted = [module + ext for ext in ("",) + exts]
+        return self._unique([p for p in self.paths if any(p == w or p.endswith("/" + w) for w in wanted)])
+
+    def _dotted_file(self, module: str, name: str, ext: tuple[str, ...]) -> str | None:
+        """Java / Kotlin / PHP: package.Class -> .../package/Class.ext, tolerating source roots and namespace roots."""
+        parts = module.split(".") + ([name] if name else [])
+        for i in range(len(parts)):
+            suffix = "/".join(parts[i:])
+            found = [p for p in self.paths if any(p == suffix + e or p.endswith("/" + suffix + e) for e in ext)]
+            if len(found) == 1:
+                return found[0]
+        return None
+
+    def _go_dir(self, module: str) -> str | None:
+        parts = [p for p in module.split("/") if p]
+        for k in range(min(len(parts), 4), 0, -1):
+            suffix = "/".join(parts[-k:])
+            found = [d for d in self.go_dirs if d == suffix or d.endswith("/" + suffix)]
+            if len(found) == 1:
+                return found[0]
+        return None
+
+    def _rust_file(self, importer: str, module: str, exact: bool = False) -> str | None:
+        """The file of a Rust module path. `exact` means the whole path must name a module (not just a prefix)."""
+        parts = module.split("::")
+        base = posixpath.dirname(importer)
+        if parts[0] == "crate":
+            parts = parts[1:]
+        elif parts[0] == "self":
+            parts = parts[1:]
+        elif parts[0] == "super":
+            base, parts = posixpath.dirname(base), parts[1:]
+        for k in range(len(parts), 0 if not exact else len(parts) - 1, -1):
+            rel = "/".join(parts[:k])
+            for cand in (f"{rel}.rs", f"{rel}/mod.rs"):
+                if posixpath.join(base, cand) in self.paths:
+                    return posixpath.join(base, cand)
+                found = self._unique([p for p in self.paths if p.endswith("/" + cand)])
+                if found:
+                    return found
+        return None
+
+    def _table_generic(self, path, lang, imp, entries, gaps, dep) -> None:
+        style = languages.info(lang).import_style
+        names = imp.names
+        if style == "go":
+            directory = self._go_dir(imp.module)
+            for _, local in names:
+                entries.append(_Entry(local, "package", directory) if directory else _Entry(local, "external"))
+            for f in self.go_dirs.get(directory or "", [])[:25]:
+                dep(f)
+            return
+        if style == "relative":
+            target = self._relative_file(path, imp.module, IMPORT_EXTS.get(lang, ("",)))
+        elif style == "dotted":
+            name = names[0][0] if names and names[0][0] not in ("", "*") else ""
+            target = None if names and names[0][0] == "*" else self._dotted_file(imp.module.replace("\\", "."), name, IMPORT_EXTS.get(lang, ("",)))
+        elif style == "rust":
+            target = self._rust_file(path, imp.module)
+        else:
+            target = None
+        if target is None:
+            if imp.module.startswith("."):
+                gaps.append(imp.module)
+            for _, local in names:
+                if local not in ("*", ""):
+                    entries.append(_Entry(local, "external"))
+            return
+        dep(target)
+        for name, local in names:
+            if name == "":
+                entries.append(_Entry(local, "module", target))
+            elif name == "*":
+                entries.append(_Entry("*", "star", target))
+            elif style == "rust" and (sub := self._rust_file(path, f"{imp.module}::{name}", exact=True)):
+                entries.append(_Entry(local, "module", sub))
+                dep(sub)
+            else:
+                entries.append(_Entry(local, "name", target, name))
+
+    def package_alias(self, path: str, local: str) -> str | None:
+        for entry in self.table(path):
+            if entry.kind == "package" and entry.local == local:
+                return entry.file
+        return None
+
     # ---- names -> symbols -------------------------------------------------------------------------------
 
     def lookup(self, path: str, name: str, depth: int = MAX_DEPTH, _seen: frozenset | None = None) -> Symbol | None:
@@ -229,6 +368,10 @@ class Resolver:
         top = self.top.get(path, {}).get(name)
         if top is not None:
             return top
+        if self.scope_of(path) == "directory":  # Go and Java: the same package is the same directory
+            same_package = self.dir_top.get(posixpath.dirname(path), {}).get(name)
+            if same_package is not None:
+                return same_package
         if depth <= 0:
             return None
         key = (path, name)
@@ -270,7 +413,10 @@ class Resolver:
 
     def class_of(self, sym: Symbol) -> Symbol | None:
         if sym.parent:
-            return self.symbols.get(f"{sym.file}::{sym.parent}")
+            found = self.symbols.get(f"{sym.file}::{sym.parent}")
+            if found is None:  # Go, Rust and C++ declare methods away from the type
+                found = self.dir_top.get(posixpath.dirname(sym.file), {}).get(sym.parent)
+            return found if found is not None and found.kind == "class" else None
         parts = sym.qualname.split(".")
         for i in range(len(parts) - 1, 0, -1):
             cand = self.symbols.get(f"{sym.file}::{'.'.join(parts[:i])}")
@@ -289,6 +435,8 @@ class Resolver:
     def find_method(self, cls: Symbol, name: str, skip_self: bool = False, depth: int = MAX_DEPTH) -> Symbol | None:
         if not skip_self:
             m = self.symbols.get(f"{cls.file}::{cls.qualname}.{name}")
+            if m is None:
+                m = self.dir_methods.get((posixpath.dirname(cls.file), f"{cls.qualname}.{name}"))
             if m is not None and m.kind == "method":
                 return m
         if depth <= 0:
@@ -322,6 +470,9 @@ class Resolver:
     def _receiver_target(self, path: str, receiver: str, callee: str) -> tuple[Symbol | None, bool]:
         """(symbol, known). `known` is True when the receiver is a module or class of this repository."""
         parts = receiver.split(".")
+        pkg = self.package_alias(path, receiver)
+        if pkg is not None:  # Go: `util.Do()` where util is an imported package (a directory)
+            return self.dir_top.get(pkg, {}).get(callee), True
         for i in range(len(parts), 0, -1):
             mod = self.module_alias(path, ".".join(parts[:i]))
             if mod is None:
@@ -342,8 +493,24 @@ class Resolver:
             nested = self._enclosing_definition(caller, call.callee)
             if nested is not None:
                 return "resolved", nested
+            if self.files[path].lang in IMPLICIT_THIS and caller.parent:  # Java: `helper()` may be this.helper()
+                cls = self.class_of(caller)
+                sibling = self.find_method(cls, call.callee) if cls else None
+                if sibling is not None:
+                    return "resolved", sibling
             target = self.lookup(path, call.callee)
-            return ("resolved", target) if target is not None else ("external", None)
+            if target is not None:
+                return "resolved", target
+            if self.scope_of(path) == "global":  # C, Ruby, PHP, C#: no import ties a name to a file, so name only
+                cands = [
+                    s for s in self.global_top.get(call.callee, [])
+                    if s is not caller and (self.files[path].is_test or not self.files[s.file].is_test)
+                ]
+                if len(cands) == 1:
+                    return "guess", cands[0]
+                if cands:
+                    return "ambiguous", None
+            return "external", None
         if call.kind in ("self", "super"):
             cls = self.class_of(caller)
             method = self.find_method(cls, call.callee, skip_self=call.kind == "super") if cls else None

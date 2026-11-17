@@ -251,3 +251,21 @@ def test_a_wsl_timeout_kill_goes_through_wsl_too(tmp_path, monkeypatch):
     result = DockerRunner("python:3.13-slim", probe=lambda: WSL_AVAILABLE, runner=runner).run(tmp_path, ["python", "loop.py"])
     assert result.timed_out
     assert seen[0][:3] == ["wsl.exe", "--exec", "docker"] and seen[1][:4] == ["wsl.exe", "--exec", "docker", "kill"]
+
+
+# ---- which languages can run in the strict sandbox ---------------------------------------------------------
+
+from skillforge.sandbox.images import command_for, runnable_languages  # noqa: E402
+
+
+def test_every_runner_is_a_valid_image_and_points_into_the_read_only_skill_folder(tmp_path):
+    for lang in runnable_languages():
+        image, argv = command_for(lang, "scripts/run.x")
+        docker_run_args(image, tmp_path, argv, Limits(), "n1")  # raises if the image or the command is not acceptable
+        assert argv[-1] == "/skill/scripts/run.x" and argv[0] != "sh"  # a direct interpreter call, never a shell string
+
+
+def test_compiled_languages_are_not_runnable_because_the_strict_sandbox_cannot_build(tmp_path):
+    assert runnable_languages() == ["bash", "java", "javascript", "php", "python", "ruby", "typescript"]
+    for compiled in ("go", "rust", "c", "cpp", "csharp", "kotlin"):
+        assert command_for(compiled, "x") is None

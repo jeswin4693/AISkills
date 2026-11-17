@@ -82,3 +82,31 @@ def test_a_fork_bomb_hits_the_process_limit(status, tmp_path):
         "except OSError:\n    print('LIMITED', len(procs))\n"
     ), pids=32)
     assert "LIMITED" in r.stdout and "UNLIMITED" not in r.stdout
+
+
+# ---- every runnable language runs in the same locked box ---------------------------------------------------
+
+from skillforge.sandbox.images import command_for  # noqa: E402
+
+PROGRAMS = {
+    "python": ("s.py", "print('hello from python')"),
+    "javascript": ("s.js", "console.log('hello from javascript')"),
+    "typescript": ("s.ts", "const n: number = 1;\nconsole.log('hello from typescript', n);"),
+    "bash": ("s.sh", "echo hello from bash"),
+    "ruby": ("s.rb", "puts 'hello from ruby'"),
+    "php": ("s.php", "<?php echo 'hello from php';"),
+    "java": ("Hi.java", 'public class Hi { public static void main(String[] a) { System.out.println("hello from java"); } }'),
+}
+
+
+@pytest.mark.parametrize("lang", sorted(PROGRAMS))
+def test_each_interpreter_language_runs_with_no_network(status, tmp_path, lang):
+    filename, source = PROGRAMS[lang]
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / filename).write_text(source, encoding="utf-8")
+    image, argv = command_for(lang, f"scripts/{filename}")
+    result = DockerRunner(image, Limits(timeout_s=90)).run(tmp_path, argv)
+    if result.exit_code == 125 and "Unable to find image" in result.stderr:
+        pytest.skip(f"pre-pull the image first: docker pull {image}")
+    assert result.exit_code == 0, result.stderr[-300:]
+    assert f"hello from {lang}" in result.stdout

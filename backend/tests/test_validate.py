@@ -146,7 +146,32 @@ def test_script_syntax_is_checked_without_running_anything():
     assert status(run(good(scripts__bad_dot_py="def broken(:\n")), N_PARSE) == FAILED
     assert status(run(good(scripts__ok_dot_ts="export const x = (a: number) => a + 1;\n")), N_PARSE) == PASSED
     assert status(run(good(scripts__bad_dot_ts="function broken( {\n")), N_PARSE) == FAILED
-    assert status(run(good(scripts__tool_dot_rb="puts 1\n")), N_PARSE) == WARNING  # unsupported type
+    assert status(run(good(scripts__tool_dot_xyz="puts 1\n")), N_PARSE) == WARNING  # a type nobody has a grammar for
+
+
+@pytest.mark.parametrize(
+    "ext, good_src, bad_src",
+    [
+        ("rb", "def f\n  1\nend\n", "def f(\n"),
+        ("go", "package main\nfunc main() {}\n", "package main\nfunc main( {\n"),
+        ("java", "class A { void f() {} }\n", "class A { void f( {}\n"),
+        ("php", "<?php function f() { return 1; }\n", "<?php function f( {\n"),
+        ("sh", "echo hi\n", "if then fi (\n"),
+    ],
+)
+def test_scripts_in_other_languages_are_syntax_checked_by_their_grammar(ext, good_src, bad_src):
+    from skillforge.graph import languages
+
+    parser, why = languages.get_parser(languages.language_of_path(f"x.{ext}") or "")
+    if parser is None:
+        pytest.skip(f"no grammar here: {why}")
+    assert status(run(good(**{f"scripts__s_dot_{ext}": good_src})), N_PARSE) == PASSED
+    assert status(run(good(**{f"scripts__s_dot_{ext}": bad_src})), N_PARSE) == FAILED
+
+
+def test_capabilities_of_scripts_in_other_languages_are_not_claimed_to_be_checked():
+    r = run(good(scripts__a_dot_rb="puts 1\n"))[N_CAPS]
+    assert r.status == WARNING and "only analysed for Python and JavaScript/TypeScript" in r.detail
 
 
 def test_scripts_that_skill_md_mentions_must_exist():

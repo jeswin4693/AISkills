@@ -34,6 +34,10 @@ Setup, the layout and what each part does are in [README.md](README.md). The dev
   with a quote that code verified appears in the person's own words. Never ask a model for JSON Schema or front
   matter: code builds schemas from field lists and writes YAML with a library. Model text is data and is never
   evaluated as a template.
+- **Be honest about language depth.** Every language has a level (full / standard / basic, in
+  `graph/languages.py` and [docs/languages.md](docs/languages.md)); never claim more than the level gives. A new
+  language needs a grammar name that exists in `tree-sitter-language-pack`, a level, and, above `basic`, a spec in
+  `graph/extract_generic.py` with tests. A missing grammar must degrade that one language, never the run.
 - **A check is "passed" only if it ran.** Every report lists what did not run. Heuristics (wording, markup)
   warn; structural problems fail.
 - **Generated code is untrusted.** Validate it statically, and run it ONLY through `skillforge.sandbox`, which

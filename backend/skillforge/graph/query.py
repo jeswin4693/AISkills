@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from . import languages
 from .model import RepoGraph, Symbol
 
 MIN_CLONE_SIZE = 30  # syntax nodes; smaller bodies (getters, one-liners) are not worth reporting
@@ -347,6 +348,7 @@ def stats(g: RepoGraph) -> dict[str, Any]:
         "test_files": sum(1 for r in g.files.values() if r.is_test),
         "lines": sum(r.lines for r in g.files.values()),
         "languages": langs,
+        "language_levels": {lang: languages.level_of(lang) for lang in sorted(langs)},
         "symbols": kinds,
         "edges": edge_counts,
         "call_sites": g.call_stats,

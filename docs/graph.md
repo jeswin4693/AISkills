@@ -10,7 +10,7 @@ does not have: function-level call edges from real parsers.
 
 | Thing | Source |
 |---|---|
-| Files, functions, methods, classes | Python: the standard `ast` module. TypeScript / JavaScript / TSX: tree-sitter. |
+| Files, functions, methods, classes | Python: the standard `ast` module. Everything else: tree-sitter, in 45 languages at three honest levels (full, standard, basic). See [languages.md](languages.md). |
 | Imports, resolved to repository files | per-language rules (Python relative and absolute, TS relative, `index`, `.js` to `.ts`, `@/`, re-exports, `export *`) |
 | Calls, resolved to the function they reach | scope, imports, `self` / `this`, `super`, inheritance, namespaces |
 | Git history | churn per file, files that change together (co-change) |
@@ -57,6 +57,7 @@ A function can be named `name`, `Class.method` or `file::name`. An ambiguous nam
 - Duplicate detection finds structural clones (same structure, different names or values). Near-duplicates
   with a few changed lines are not found yet.
 - "Dead code" results are candidates: public APIs, framework entry points and dynamic use are invisible.
-- Only Python and TypeScript / JavaScript are parsed. Other languages are skipped, not guessed.
+- How deeply a language is understood depends on its level (full, standard, basic; see
+  [languages.md](languages.md)). File types that are not programming languages are skipped, not guessed.
 - tsconfig path aliases other than `@/` and `~/`, and monorepo workspace packages, are not resolved.
 - Co-change needs git, and ignores commits that touch more than 40 files.

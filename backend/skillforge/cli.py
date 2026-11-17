@@ -31,7 +31,8 @@ def _loc(item: dict[str, Any]) -> str:
 
 
 def _render_stats(r: dict[str, Any]) -> str:
-    langs = ", ".join(f"{k} {v}" for k, v in sorted(r["languages"].items())) or "none"
+    levels = r.get("language_levels", {})
+    langs = ", ".join(f"{k} {v} ({levels.get(k, '?')})" for k, v in sorted(r["languages"].items())) or "none"
     symbols = ", ".join(f"{k} {v}" for k, v in sorted(r["symbols"].items())) or "none"
     edges = ", ".join(f"{k} {v}" for k, v in sorted(r["edges"].items())) or "none"
     calls = r["call_sites"]
@@ -315,6 +316,28 @@ def _run_validate(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _run_languages(args: argparse.Namespace) -> int:
+    from .graph import languages
+
+    names = sorted(set(languages.EXTENSIONS.values()), key=lambda n: (["full", "standard", "basic"].index(languages.level_of(n)), n))
+    if args.download or args.download_all:
+        wanted = [n for n in names if args.download_all or languages.level_of(n) == "standard"]
+        for n in wanted:
+            parser, why = languages.get_parser(n)
+            print(f"{'ok  ' if parser else 'FAIL'} {n}" + ("" if parser else f": {why}"))
+        print()
+    print(f"{'LEVEL':9} {'LANGUAGE':12} {'GRAMMAR':28} EXTENSIONS")
+    for n in names:
+        info = languages.info(n)
+        print(f"{info.level:9} {n:12} {languages.grammar_status(n):28} {' '.join(info.extensions)}")
+    print(
+        "\nfull: imports and calls resolved by scope. standard: functions, classes, imports and calls, links labelled\n"
+        "resolved or guess. basic: definitions and duplicate detection only. Other file types are not parsed.\n"
+        "Grammars other than Python/TypeScript/JavaScript download on first use (SKILLFORGE_OFFLINE=1 forbids it)."
+    )
+    return 0
+
+
 def _run_sandbox_status(args: argparse.Namespace) -> int:
     s = probe_sandbox()
     print(("AVAILABLE: " if s.available else "UNAVAILABLE: ") + s.reason)
@@ -395,6 +418,10 @@ def _parser() -> argparse.ArgumentParser:
     v.add_argument("--json", action="store_true", help="print machine-readable JSON")
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
+
+    lg = area.add_parser("languages", help="which programming languages are supported, and how deeply")
+    lg.add_argument("--download", action="store_true", help="fetch the grammars of the standard languages now")
+    lg.add_argument("--download-all", action="store_true", help="fetch every grammar in the table now")
     return parser
 
 
@@ -403,10 +430,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
-            "validate": _run_validate, "sandbox-status": _run_sandbox_status,
+            "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
         }[args.area]
         try:
             return handler(args)

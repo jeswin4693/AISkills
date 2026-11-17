@@ -6,31 +6,19 @@ import os
 import subprocess
 from pathlib import Path, PurePosixPath
 
-LANGUAGES = {
-    ".py": "python",
-    ".ts": "typescript",
-    ".mts": "typescript",
-    ".cts": "typescript",
-    ".tsx": "tsx",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-}
+from .languages import language_of_path
 
 SKIP_DIRS = {
     ".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "out", ".next",
     ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", "target", "coverage", ".ria", "workspace-data",
-    "site-packages",
+    "site-packages", "vendor", "obj", ".gradle", ".idea", "Pods", ".dart_tool", ".build",
 }
 MAX_BYTES = 1_000_000
 
 
 def language_of(path: str) -> str | None:
-    name = PurePosixPath(path).name.lower()
-    if name.endswith((".d.ts", ".min.js", ".min.mjs")):
-        return None
-    return LANGUAGES.get(PurePosixPath(path).suffix.lower())
+    """Grammar name of a source file (python, java, go, ...), or None when it is not a programming language we know."""
+    return language_of_path(path)
 
 
 def is_test_path(path: str) -> bool:
@@ -41,7 +29,10 @@ def is_test_path(path: str) -> bool:
     return (
         name == "conftest.py"
         or name.startswith("test_")
-        or name.endswith(("_test.py", "_test.go"))
+        or name.endswith((
+            "_test.py", "_test.go", "_test.rs", "_spec.rb", "test.java", "tests.java", "test.kt", "tests.kt",
+            "tests.cs", "test.cs", "test.php", "_test.c", "_test.cpp", "_test.cc",
+        ))
         or ".test." in name
         or ".spec." in name
     )

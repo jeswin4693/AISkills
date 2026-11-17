@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from . import extract_python, extract_ts, history, store
+from . import extract_generic, extract_python, extract_ts, history, languages, store
 from .files import discover, is_test_path, language_of
 from .model import Edge, FileRecord, RepoGraph
 from .resolve import Resolver
@@ -23,9 +23,15 @@ def _parse(root: Path, rel: str, size: int, mtime_ns: int) -> FileRecord:
     if lang == "python":
         text = data.decode("utf-8-sig", errors="replace")
         rec.symbols, rec.imports, rec.refs, rec.error = extract_python.extract(rel, text)
-    else:
+    elif lang in ("typescript", "tsx", "javascript"):
         rec.symbols, rec.imports, rec.refs, rec.error = extract_ts.extract(rel, data, lang)
+    else:
+        rec.symbols, rec.imports, rec.refs, rec.error = extract_generic.extract(rel, data, lang)
     return rec
+
+
+def _grammar_missing(rec: FileRecord) -> bool:
+    return (rec.error or "").startswith("grammar unavailable")
 
 
 def build_graph(
@@ -53,8 +59,8 @@ def build_graph(
         else:
             records[rel] = _parse(root, rel, st.st_size, st.st_mtime_ns)
             parsed += 1
-    if use_cache and not focus:
-        store.save_records(cache_file, records)
+    if use_cache and not focus:  # a file we could not parse for lack of a grammar must be retried next time
+        store.save_records(cache_file, {p: r for p, r in records.items() if not _grammar_missing(r)})
 
     graph = RepoGraph(root=str(root), files=records)
     resolver = Resolver(records)
@@ -87,8 +93,15 @@ def build_graph(
     if with_history:
         graph.commits, graph.churn, graph.co_change = history.collect(root, set(records))
 
-    broken = sorted(p for p, r in records.items() if r.error)
+    unparsed: dict[str, int] = {}
+    for rec in records.values():
+        if _grammar_missing(rec):
+            unparsed[rec.lang] = unparsed.get(rec.lang, 0) + 1
+    broken = sorted(p for p, r in records.items() if r.error and not _grammar_missing(r))
     graph.notes.append(f"{parsed} files parsed, {reused} reused from the cache.")
+    for lang, count in sorted(unparsed.items()):
+        _, why = languages.get_parser(lang)
+        graph.notes.append(f"{count} {lang} file(s) were counted but not parsed: {why}.")
     if broken:
         graph.notes.append(f"{len(broken)} file(s) had parse problems (partial or no symbols): {', '.join(broken[:5])}")
     return graph

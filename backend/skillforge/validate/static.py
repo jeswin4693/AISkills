@@ -16,7 +16,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from ..graph.extract_ts import parses_cleanly
+from ..graph import languages
 from ..results import FAILED, PASSED, WARNING, CheckResult
 
 MAX_FILE = 1_000_000
@@ -228,15 +228,17 @@ def _check_scripts_parse(files: Mapping[str, bytes]) -> CheckResult:
                 ast.parse(_text(data), filename=rel)
             except (SyntaxError, ValueError, RecursionError) as exc:
                 failed.append(f"{rel}: {type(exc).__name__}")
-        elif suffix in JS_LANGS:
-            if not parses_cleanly(data, JS_LANGS[suffix]):
+        else:  # any language with a grammar: Java, Go, Rust, C, C++, C#, Ruby, PHP, Kotlin, Bash, ...
+            lang = languages.language_of_path(rel)
+            clean = languages.parses_cleanly(data, lang) if lang else None
+            if clean is False:
                 failed.append(f"{rel}: syntax errors")
-        else:
-            unchecked.append(rel)
+            elif clean is None:
+                unchecked.append(rel)
     if failed:
         return CheckResult(name, FAILED, "; ".join(failed))
     if unchecked:
-        return CheckResult(name, WARNING, "cannot be checked (unsupported type): " + ", ".join(unchecked))
+        return CheckResult(name, WARNING, "cannot be checked (no grammar for this type, or it could not be loaded): " + ", ".join(unchecked))
     return CheckResult(name, PASSED, f"{len(scripts)} script(s) parsed; nothing was run")
 
 
@@ -331,11 +333,20 @@ def _check_capabilities(files: Mapping[str, bytes]) -> CheckResult:
             declared = None
     all_observed = set().union(*observed.values()) if observed else set()
     notes = [f"{rel} uses {', '.join(sorted(d))}" for rel, d in dynamic.items()]
+    unanalysed = [
+        rel for rel in scripts
+        if PurePosixPath(rel).suffix.lower() not in PY_SUFFIXES and PurePosixPath(rel).suffix.lower() not in JS_LANGS
+    ]
     if declared is not None and all_observed - declared:
         extra = sorted(all_observed - declared)
         return CheckResult(name, FAILED, f"scripts use {', '.join(extra)} but the skill declares only: {', '.join(sorted(declared)) or 'nothing'}")
     if declared is None and all_observed:
         return CheckResult(name, WARNING, "scripts use " + ", ".join(sorted(all_observed)) + "; there is no skill.sdm.json to compare with")
+    if unanalysed:
+        return CheckResult(
+            name, WARNING,
+            "capabilities are only analysed for Python and JavaScript/TypeScript, so these are not checked: " + ", ".join(unanalysed[:5]),
+        )
     if notes:
         return CheckResult(name, WARNING, "; ".join(notes) + " (dynamic code cannot be analysed)")
     return CheckResult(name, PASSED, "by syntax analysis only: it cannot see calls made through other modules or at run time")

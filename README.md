@@ -27,7 +27,10 @@ AISkills/
 
 ## Understand a repository
 
-Works on Python and TypeScript / JavaScript repositories. Needs no AI and no key.
+Works on repositories in many languages: full support for Python and TypeScript / JavaScript, standard support
+for Java, Go, Rust, C, C++, C#, Ruby, PHP and Kotlin, and basic support (definitions and duplicate detection)
+for 30+ more. See [docs/languages.md](docs/languages.md) or run `python -m skillforge languages`. Needs no AI
+and no key.
 
 ```powershell
 cd backend

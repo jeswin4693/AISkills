@@ -10,11 +10,22 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
 
 ## LLM provider
 
-- First provider: Anthropic. Default model: `claude-sonnet-5-5`, set through `LLM_MODEL` in `.env`.
-- Key comes only from `.env` (`ANTHROPIC_API_KEY`). `.env` is git-ignored.
-- `backend/scripts/hello_structured.py` is the smoke test. It uses structured output (Pydantic schema,
-  `output_config.format`) and the server-side refusal fallback. Sonnet 5.5 rejects forced `tool_choice`,
-  so structured output must not be built on forced tool calls.
+- No Anthropic API key is available (Claude Code access only), so the active provider is **Ollama Cloud**,
+  reached through its OpenAI-compatible endpoint (`https://ollama.com/v1`) with the `openai` client.
+  Default model: `deepseek-v4.1-flash` (confirmed visible to the key; 24 models listed).
+- Keys come only from `.env` (`OLLAMA_API_KEY`, `ANTHROPIC_API_KEY`). `.env` is git-ignored.
+- `backend/scripts/hello_structured.py` is the smoke test. `LLM_PROVIDER` selects `ollama` or `anthropic`.
+  Both branches request schema-constrained output from a Pydantic model.
+- The Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback) is kept for later. Sonnet 5.5
+  rejects forced `tool_choice`, so structured output must not be built on forced tool calls.
+
+### Status of the live call
+
+- Auth works: the key lists models.
+- Inference currently returns **402 Payment Required** ("Add usage credits or subscribe") for both
+  `deepseek-v4.1-flash` and `gpt-oss:20b`. The account needs credits or a plan before any chat call works.
+- Request construction and response parsing for both branches were checked offline with a mocked HTTP
+  transport. That does not prove a live call works.
 
 ## Docker: Linux containers are NOT available yet
 

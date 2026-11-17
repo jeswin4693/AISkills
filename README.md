@@ -35,8 +35,8 @@ The venv lives outside OneDrive so thousands of files do not sync.
 uv venv C:\dev\venvs\aiskills --python 3.13
 uv pip install --python C:\dev\venvs\aiskills\Scripts\python.exe -r backend\requirements.txt
 
-# 2. Config: copy .env.example to .env, set LLM_PROVIDER, LLM_MODEL and your API key.
-#    Never commit .env.
+# 2. Config: copy .env.example to .env, set LLM_PROVIDER (ollama or anthropic), LLM_MODEL
+#    and the matching key (OLLAMA_API_KEY or ANTHROPIC_API_KEY). Never commit .env.
 Copy-Item .env.example .env
 
 # 3. Smoke test: one structured-output call to the configured provider

@@ -10,6 +10,7 @@ from jsonschema.exceptions import SchemaError
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult  # noqa: F401  (re-exported for callers)
 from .models import SkillDefinition
 from .render import schema_for
+from .scriptfiles import script_path
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -79,7 +80,34 @@ def run_checks(sdm: SkillDefinition) -> list[CheckResult]:
     kinds = {t.kind for t in sdm.tests}
     missing = [k for k in ("positive", "negative") if k not in kinds]
     out.append(_result("tests include a positive case and a negative case", [f"missing a {k} test" for k in missing]))
+    if sdm.scripts:
+        out += _workflow_scripts(sdm)
     return out
+
+
+SCRIPT_MENTION = re.compile(r"\bscripts/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+")
+
+
+def _model_text(sdm: SkillDefinition) -> str:
+    """Everything the model wrote that ends up in SKILL.md."""
+    parts = [sdm.description, *sdm.does, *sdm.does_not, *sdm.error_handling, *sdm.limitations]
+    for step in sdm.workflow:
+        parts += [step.title, step.instruction, step.on_failure]
+    return "\n".join(parts)
+
+
+def _workflow_scripts(sdm: SkillDefinition) -> list[CheckResult]:
+    """The text may name only scripts that exist, and every script should be named by a step."""
+    paths = {script_path(s): s for s in sdm.scripts}
+    text = _model_text(sdm)
+    invented = sorted({m for m in SCRIPT_MENTION.findall(text) if m not in paths})
+    steps = "\n".join(f"{s.title}\n{s.instruction}\n{s.on_failure}" for s in sdm.workflow)
+    unused = [p for p in paths if p not in steps]
+    return [
+        _result("the instructions name only scripts that exist", [f"names scripts that are not shipped: {', '.join(invented)}"] if invented else []),
+        CheckResult("every script is used by a workflow step", WARNING, "no step mentions: " + ", ".join(unused))
+        if unused else CheckResult("every script is used by a workflow step", PASSED, f"{len(paths)} script(s) named in the workflow"),
+    ]
 
 
 def check_rendered(files: dict[str, str], sdm: SkillDefinition) -> list[CheckResult]:
@@ -104,10 +132,24 @@ def check_rendered(files: dict[str, str], sdm: SkillDefinition) -> list[CheckRes
     return out
 
 
-def not_run_checks(sandbox_note: str | None = None) -> list[CheckResult]:
-    sandbox = "This tool generates no scripts yet." + (f" Sandbox on this machine: {sandbox_note}" if sandbox_note else "")
+def not_run_checks(sandbox_note: str | None = None, has_scripts: bool = False) -> list[CheckResult]:
+    """What no code has checked. With scripts, the sandbox row is replaced by the real per-case results."""
+    if has_scripts:
+        first = CheckResult(
+            "scripts tested on real project data", NOT_RUN,
+            "The script cases use small samples written by the model. They show the scripts run in a locked sandbox "
+            "and print the expected text on those samples. They do not show the scripts are right on your real files. "
+            "The expected text is also chosen by the model, so a passing case can still be a weak test: read "
+            "tests/script_cases.json. When an agent uses this skill, the scripts run on your machine (a different "
+            "operating system can behave differently), not in the sandbox.",
+        )
+    else:
+        note = f" Sandbox on this machine: {sandbox_note}" if sandbox_note else ""
+        first = CheckResult(
+            "scripts run in a sandbox", NOT_RUN, "This skill has no scripts, so there was nothing to run. Build with --scripts to add some." + note
+        )
     return [
-        CheckResult("scripts run in a sandbox", NOT_RUN, sandbox),
+        first,
         CheckResult("test cases executed against a real agent", NOT_RUN, "There is no agent test harness yet. The test cases are data only."),
         CheckResult("instructions free of conflicting rules", NOT_RUN, "Only structural checks exist. No semantic analyser has been built."),
         CheckResult("security review of the generated text", NOT_RUN, "Not automated. Read the instructions yourself before using the skill."),

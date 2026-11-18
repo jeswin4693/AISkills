@@ -2,6 +2,7 @@
 
 from .docker import (
     DockerRunner,
+    ImageNotPulled,
     Limits,
     RunResult,
     SandboxStatus,
@@ -14,6 +15,6 @@ from .docker import (
 )
 
 __all__ = [
-    "DockerRunner", "Limits", "RunResult", "SandboxStatus", "SandboxUnavailable", "docker_run_args",
+    "DockerRunner", "ImageNotPulled", "Limits", "RunResult", "SandboxStatus", "SandboxUnavailable", "docker_run_args",
     "probe_docker", "probe_sandbox", "probe_wsl_docker", "to_wsl_path",
 ]

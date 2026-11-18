@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest and Build are built, tested offline, and verified live with Gemini.**
+Status: **Understand, Suggest, Build, Safety and Scripts are built and tested; Suggest, Build and Scripts are verified live with Gemini.**
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -64,7 +64,11 @@ a report that says what was checked and what was not ([docs/build.md](docs/build
 cd backend
 python -m skillforge build "A skill that finds duplicate functions in a TypeScript repository and suggests safe refactors."
 python -m skillforge build --from-suggestions report.json --pick 1   # start from an idea found by `suggest`
+python -m skillforge build "A skill that counts TODO and FIXME comments in a folder." --scripts
 ```
+
+With `--scripts` the skill can ship helper scripts. Every script case runs in the Linux sandbox, and a skill whose
+scripts never ran is marked DRAFT ([docs/scripts.md](docs/scripts.md)).
 
 ## Check any skill folder
 

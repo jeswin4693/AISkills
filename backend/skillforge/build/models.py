@@ -104,8 +104,48 @@ class Provenance(BaseModel):
     name_adjusted: bool = False
 
 
+# ---- scripts: written by the model, run only in the sandbox ------------------------------------------
+# No defaults and no free-form dicts below: these are sent to the model as a strict schema.
+# Keep ScriptLanguage equal to the keys of sandbox.images.RUNNERS (a test enforces it).
+
+ScriptLanguage = Literal["python", "javascript", "typescript", "bash", "ruby", "php", "java"]
+
+
+class Script(BaseModel):
+    name: str = Field(description="Lowercase letters, digits and underscores, like find_duplicates. No extension: code makes the file name.")
+    language: ScriptLanguage
+    purpose: str = Field(description="One sentence: the mechanical job this script does for the skill.")
+    usage: str = Field(description="What arguments it takes and what it prints, in a few plain sentences.")
+    code: str = Field(description="The complete source code. Standard library only. No placeholders or TODOs.")
+
+
+class Fixture(BaseModel):
+    path: str = Field(description="File name inside this case's fixture folder, such as input.txt or src/a.ts. Relative, no '..'.")
+    text: str = Field(description="The file's content. Keep it small.")
+
+
+class ScriptCase(BaseModel):
+    name: str = Field(description="Short name of the case, lowercase words with hyphens, unique across all cases.")
+    script: str = Field(description="The name of the script this case runs, exactly as written in its 'name'.")
+    args: list[str] = Field(description='Command-line arguments. Write {fixtures} for this case\'s fixture folder, such as "{fixtures}/input.txt".')
+    stdin: str = Field(description="Text sent to the script's standard input. Empty string for none.")
+    fixtures: list[Fixture] = Field(description="Small input files created for this case. Empty list for none.")
+    expect_exit_code: int = Field(description="The exit code a correct run ends with: 0 for success, non-zero for a failure case.")
+    stdout_contains: list[str] = Field(description="Short exact fragments the script's standard output must contain.")
+    stderr_contains: list[str] = Field(description="Short exact fragments the script's standard error must contain. For failure cases give one short word of your own error message.")
+
+
+class ScriptBundle(BaseModel):
+    """What the script step returns: the scripts and the cases that prove them."""
+
+    scripts: list[Script] = Field(description="At most 4 scripts. An empty list when the job needs no code.")
+    cases: list[ScriptCase] = Field(description="Test cases. Every script needs a success case and a failure case.")
+
+
 class SkillDefinition(SkillDraft):
     version: str = "0.1.0"
     kind: Literal["skill"] = "skill"
     acceptance_criteria: dict[str, str]  # "AC1" -> text, copied from the approved spec
     provenance: Provenance
+    scripts: list[Script] = Field(default_factory=list)  # empty for an instructions-only skill
+    script_cases: list[ScriptCase] = Field(default_factory=list)

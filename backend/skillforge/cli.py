@@ -198,17 +198,26 @@ def _render_build(r: BuildResult) -> str:
     failed = [c for c in ran if c.status == "failed"]
     warned = [c for c in ran if c.status == "warning"]
     skipped = [c for c in r.checks if c.status == "not run"]
-    head = (
-        f"Skill '{r.sdm.name}' written to {r.out_dir}"
-        if r.status == "ok"
-        else f"DRAFT skill '{r.sdm.name}' written to {r.out_dir}: {len(failed)} check(s) failed"
-    )
+    if r.status == "ok":
+        head = f"Skill '{r.sdm.name}' written to {r.out_dir}"
+    elif failed:
+        head = f"DRAFT skill '{r.sdm.name}' written to {r.out_dir}: {len(failed)} check(s) failed"
+    else:
+        head = f"DRAFT skill '{r.sdm.name}' written to {r.out_dir}: its scripts were not all run in the sandbox"
     counts = f"{len(ran) - len(failed) - len(warned)} passed, "
     counts += f"{len(warned)} warning(s), " if warned else ""
     lines = [head, f"Checks: {counts}{len(failed)} failed, {len(skipped)} not run"]
     lines += [f"  FAILED: {c.name}: {c.detail}" for c in failed]
     lines += [f"  warning: {c.name}: {c.detail}" for c in warned]
-    lines += [f"  not run: {c.name}" for c in skipped]
+    lines += [f"  not run: {c.name}" + (f" ({c.detail})" if c.name.startswith("script test") else "") for c in skipped]
+    if r.sdm.scripts:
+        ran_cases = [c for c in ran if c.name.startswith("script test: ")]
+        lines.append(
+            f"Scripts: {len(r.sdm.scripts)} written, {sum(c.status == 'passed' for c in ran_cases)} of "
+            f"{len(r.sdm.script_cases)} case(s) passed in the sandbox"
+        )
+    if r.draft_reason:
+        lines.append(f"  {r.draft_reason}")
     lines += [f"note: {n}" for n in r.notes]
     lines.append("Read report.md in that folder before using the skill. It lists what was not checked.")
     return "\n".join(lines)
@@ -284,7 +293,7 @@ def _run_build(args: argparse.Namespace) -> int:
         ask=_make_ask(args.answers),
         approve=(lambda spec: True) if args.yes else _interactive_approve,
         out_root=Path(args.out) if args.out else REPO_ROOT / "generated-skills",
-        force=args.force, max_rounds=args.max_rounds, sandbox_note=_sandbox_note(),
+        force=args.force, max_rounds=args.max_rounds, sandbox_note=_sandbox_note(), with_scripts=args.scripts,
     )
     print(_render_build(result))
     return 0 if result.status == "ok" else 1
@@ -407,6 +416,7 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--out", help="where skill folders go (default: generated-skills/ in this repository)")
     b.add_argument("--force", action="store_true", help="replace an existing skill folder")
     b.add_argument("--max-rounds", type=int, default=3, help="most question rounds before giving up")
+    b.add_argument("--scripts", action="store_true", help="also write helper scripts and test them in the sandbox (needs a Linux sandbox)")
 
     r = area.add_parser("render", help="re-render a skill folder from its skill.sdm.json (no AI)")
     r.add_argument("sdm", help="path of a skill.sdm.json")

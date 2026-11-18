@@ -23,6 +23,15 @@ class SandboxUnavailable(Exception):
     """There is no safe place to run this. The script was NOT run anywhere."""
 
 
+class ImageNotPulled(SandboxUnavailable):
+    """The engine works but this language's image is not on the machine. Images are never fetched at run time."""
+
+    def __init__(self, image: str, pull_command: str) -> None:
+        self.image = image
+        self.pull_command = pull_command
+        super().__init__(f"Not run. The image {image} is not on this machine yet. Fetch it once with: {pull_command}")
+
+
 @dataclass(frozen=True)
 class SandboxStatus:
     available: bool
@@ -124,7 +133,7 @@ def to_wsl_path(path: str) -> str:
 
 def docker_run_args(
     image: str, host_dir: Path, argv: list[str], limits: Limits, name: str,
-    *, prefix: tuple[str, ...] = DOCKER, wsl_paths: bool = False,
+    *, prefix: tuple[str, ...] = DOCKER, wsl_paths: bool = False, stdin: bool = False,
 ) -> list[str]:
     """The exact `docker run` command. A list, never a shell string, so nothing is ever interpreted by a shell."""
     if not IMAGE.match(image):
@@ -138,7 +147,7 @@ def docker_run_args(
         raise ValueError(f"Not a directory: {host_dir}")
     mount = to_wsl_path(str(host_dir)) if wsl_paths else str(host_dir)
     return [
-        *prefix, "run", "--rm", "--name", name,
+        *prefix, "run", "--rm", *(["-i"] if stdin else []), "--name", name,  # -i only when text is piped in
         "--pull", "never",  # never reach the network to fetch an image at run time
         "--network", "none",  # the script cannot talk to anything
         "--read-only",  # the root file system cannot be written
@@ -176,14 +185,20 @@ class DockerRunner:
         self._probe = probe
         self._runner = runner
 
-    def run(self, skill_dir: Path, argv: list[str]) -> RunResult:
+    def run(self, skill_dir: Path, argv: list[str], stdin: str | None = None) -> RunResult:
+        """Run `argv` in the box. `stdin` is text piped to the program; None (or empty) means no input at all."""
         status = self._probe()
         if not status.available:
             raise SandboxUnavailable(f"Not run. {status.reason}")
         name = f"skillforge-{uuid.uuid4().hex[:12]}"
-        cmd = docker_run_args(self.image, skill_dir, argv, self.limits, name, prefix=status.prefix, wsl_paths=status.wsl)
+        piped = stdin.encode("utf-8") if stdin else None
+        cmd = docker_run_args(
+            self.image, skill_dir, argv, self.limits, name,
+            prefix=status.prefix, wsl_paths=status.wsl, stdin=piped is not None,
+        )
+        extra = {"input": piped} if piped is not None else {}
         try:
-            proc = self._runner(cmd, capture_output=True, timeout=self.limits.timeout_s)
+            proc = self._runner(cmd, capture_output=True, timeout=self.limits.timeout_s, **extra)
         except subprocess.TimeoutExpired as exc:
             self._runner([*status.prefix, "kill", name], capture_output=True, timeout=10)
             out, t1 = _clip(exc.stdout, self.limits.max_output_bytes)

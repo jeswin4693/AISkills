@@ -14,6 +14,8 @@ writes a report that says what was checked and what was not.
 ```powershell
 cd backend
 python -m skillforge build "A skill that finds duplicate functions in a TypeScript repository and suggests safe refactors."
+# let the skill ship helper scripts and test them in the sandbox (see scripts.md):
+python -m skillforge build "..." --scripts
 # or start from an idea found by `suggest`:
 python -m skillforge suggest C:\path\to\repo --save report.json
 python -m skillforge build --from-suggestions report.json --pick 1
@@ -71,8 +73,9 @@ written as a **DRAFT**, the report says so, and the command exits with code 1.
 
 ## Checks that do NOT run (and are listed as such in every report)
 
-Scripts running in a sandbox (this tool generates no scripts yet, and the report states whether a Linux
-sandbox is available on the machine that built the skill); test
+Scripts running in a sandbox (without `--scripts` a skill has no scripts, and the report states whether a Linux
+sandbox is available on the machine that built it; with `--scripts` the per-case results appear instead, see
+[scripts.md](scripts.md), and "scripts tested on real project data" is listed as not run); test
 cases run against a real agent (no harness yet; the cases are data); conflict analysis of the instructions;
 a security review of the text. A report that says "every check that ran passed" also says that this is not a
 guarantee the skill works.
@@ -90,6 +93,7 @@ negative and edge tests tied to the acceptance criterion. Cosmetic flaw: the tit
 
 ## Limits
 
-- Skills only, and instructions only: no scripts. Generated code would be untrusted and the sandbox does not exist.
+- Skills only. Instructions only unless you pass `--scripts`; scripts are untrusted code, run only in the
+  sandbox, and tested only on small samples ([scripts.md](scripts.md)).
 - The quality of the questions and the design depends on the model; a small free model gives plain results.
 - The checks are structural. They cannot tell you that the instructions are good, only that they are consistent.

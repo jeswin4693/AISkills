@@ -2,6 +2,8 @@
 
 {% if failed %}
 **Status: DRAFT. {{ failed }} check(s) failed.** Do not rely on this skill before you read the failures below.
+{% elif draft_reason %}
+**Status: DRAFT. {{ draft_reason }}** Do not rely on this skill before you read the checks below.
 {% elif warned %}
 **Status: every check that ran passed, with {{ warned }} warning(s) a person should read.** {{ skipped | length }}
 check(s) did not run (listed below), so this is not a guarantee that the skill works.

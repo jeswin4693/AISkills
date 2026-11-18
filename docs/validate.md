@@ -59,5 +59,6 @@ connection. How it was set up, the steps for another machine, and what the sandb
 [sandbox-wsl.md](sandbox-wsl.md). Where no Linux engine exists, the sandbox raises `SandboxUnavailable` and no
 script is run anywhere, and the build report says so.
 
-Nothing calls the sandbox yet: `build` generates instructions only, with no scripts. Generating scripts and
-testing them in the sandbox is the next step.
+`build --scripts` calls the sandbox: every generated script case runs in it, one container per case, and a case
+counts as passed only if it really ran. Input text can be piped to a script (`-i` is added to the container
+only when a case gives some). See [scripts.md](scripts.md).

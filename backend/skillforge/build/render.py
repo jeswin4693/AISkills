@@ -11,6 +11,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from .models import IOField, RequirementSpec, SkillDefinition
+from .scriptfiles import script_files, script_views
 
 TEMPLATES = Path(__file__).parent / "templates"
 MAX_NAME = 40
@@ -73,8 +74,11 @@ def _json(obj: Any) -> str:
 
 def render_files(sdm: SkillDefinition, spec: RequirementSpec) -> dict[str, str]:
     """Relative path -> file text. `report.md` is added later, once every check has run."""
-    ctx = {"sdm": sdm, "spec": spec, "frontmatter": frontmatter(sdm), "title": sdm.name.replace("-", " ").title()}
-    return {
+    ctx = {
+        "sdm": sdm, "spec": spec, "frontmatter": frontmatter(sdm), "title": sdm.name.replace("-", " ").title(),
+        "scripts": script_views(sdm.scripts),
+    }
+    files = {
         "SKILL.md": _env.get_template("SKILL.md.j2").render(**ctx),
         "README.md": _env.get_template("README.md.j2").render(**ctx),
         "schemas/input.schema.json": _json(schema_for(f"{sdm.name} input", sdm.inputs)),
@@ -83,16 +87,18 @@ def render_files(sdm: SkillDefinition, spec: RequirementSpec) -> dict[str, str]:
         "skill.sdm.json": _json(sdm.model_dump()),
         "spec.json": _json(spec.model_dump()),
     }
+    files.update(script_files(sdm.scripts, sdm.script_cases))  # scripts, fixtures and tests/script_cases.json
+    return files
 
 
-def render_report(sdm: SkillDefinition, checks: list, notes: list[str]) -> str:
+def render_report(sdm: SkillDefinition, checks: list, notes: list[str], draft_reason: str = "") -> str:
     ran = [c for c in checks if c.status != "not run"]
     failed = [c for c in ran if c.status == "failed"]
     warned = [c for c in ran if c.status == "warning"]
     skipped = [c for c in checks if c.status == "not run"]
     return _env.get_template("report.md.j2").render(
         sdm=sdm, ran=ran, skipped=skipped, passed=len(ran) - len(failed) - len(warned), failed=len(failed),
-        warned=len(warned), notes=notes, title=sdm.name.replace("-", " ").title(),
+        warned=len(warned), notes=notes, title=sdm.name.replace("-", " ").title(), draft_reason=draft_reason,
     )
 
 

@@ -25,6 +25,10 @@ for every project). The agent reads `SKILL.md`. The other files are for people a
 | `SKILL.md` | the instructions the agent follows |
 | `schemas/input.schema.json`, `schemas/output.schema.json` | the inputs and outputs as JSON Schema |
 | `tests/cases.json` | test cases as data, written from your acceptance criteria |
+{% if scripts %}
+| `scripts/` | helper scripts the agent runs (see Scripts below) |
+| `tests/script_cases.json`, `tests/fixtures/` | the script test cases and their sample input files |
+{% endif %}
 | `skill.sdm.json` | the skill definition every file here was generated from |
 | `spec.json` | the requirement you approved, with your own words as evidence |
 | `report.md` | what was checked, and what was not |
@@ -41,6 +45,19 @@ None.
 
 `tests/cases.json` has {{ sdm.tests | length }} test case(s): positive, negative and edge. They are
 descriptions to run by hand or with an agent harness. **They have not been run.**
+
+{% if scripts %}
+## Scripts
+
+{% for s in scripts %}
+- `{{ s.path }}` ({{ s.language }}): {{ s.purpose | oneline }}
+{% endfor %}
+
+`tests/script_cases.json` has {{ sdm.script_cases | length }} script test case(s) with sample input in
+`tests/fixtures/`. `report.md` says whether they ran in the sandbox and what happened. **When an agent uses this
+skill, these scripts run on your own machine, not in the sandbox.** They were tested only on the small samples in
+`tests/fixtures/`, so read them before you trust them.
+{% endif %}
 
 ## Limitations
 

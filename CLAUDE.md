@@ -6,8 +6,8 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 
 **Status and plan: [docs/roadmap.md](docs/roadmap.md) is the source of truth. Read it (and the docs it links)
 before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
-Safety (static validators + a fail-closed Docker sandbox). Next: script generation tested in the sandbox, then
-import / export / versioning, then UI and database, Agent Builder last.
+Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
+sandbox). Next: import / export / versioning, then UI and database, Agent Builder last.
 
 ## Commands (run from `backend/`)
 

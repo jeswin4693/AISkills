@@ -279,6 +279,25 @@ def build_from_spec(
             notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once. Failed checks and warnings went from {first[0]} and {first[1]} to {_score(sdm)[0]} and {_score(sdm)[1]}.")
         else:  # a repair must never make the skill worse
             notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once, but its second design was worse, so the first was kept.")
+    # A stronger model is asked once, and only when it is configured (LLM_ESCALATION_*) and the structural checks still fail after
+    # the one repair. Code decides this from the checks, never the model's own confidence, and a worse design is never kept.
+    stronger = provider.escalated() if hasattr(provider, "escalated") else None
+    if stronger is not None and _score(sdm)[0] > 0:
+        say("The design still fails its checks; asking the stronger model once")
+        still = [f"{c.name}: {c.detail}" for c in run_checks(sdm) if c.status == FAILED] + quality_warnings(sdm)
+        try:
+            draft, used = design(stronger, spec, still, scripts=scripts)
+        except ProviderError as exc:
+            notes.append(f"The design still fails its checks. The stronger model could not be reached ({exc}), so the design was kept.")
+        else:
+            calls += used
+            third = _assemble(draft, spec, stronger, now, scripts, cases)
+            before = _score(sdm)
+            if _score(third) < before:
+                sdm = third
+                notes.append(f"The design still failed its checks after the repair, so the stronger model ({stronger.model}) was asked once. Failed checks and warnings went from {before[0]} and {before[1]} to {_score(sdm)[0]} and {_score(sdm)[1]}.")
+            else:
+                notes.append(f"The design still failed its checks after the repair. The stronger model ({stronger.model}) was asked once, but its design was not better, so the first was kept.")
     evaluation: EvalReport | None = None
     if evaluate:  # the skill's own test cases, run against the model with the skill and without it
         say("Running the skill's own test cases against the model, with and without the skill")

@@ -18,7 +18,7 @@ in the environment or `.env`.
 | # | Step | Needs a model? |
 |---|---|---|
 | H1 | **API foundation**: app, local-only protections, and endpoints for the library (list, versions, diff, import, rollback, export, install), validate, sandbox status, languages. See [api.md](api.md). | no · **Built** |
-| H2 | **Database + build sessions**: tables for build sessions and jobs; the chat builder as an API (a round of questions, your answers, approval, then a background job with progress). | yes (mock in tests) |
+| H2 | **Database + build sessions**: tables for build sessions and jobs; the chat builder as an API (a round of questions, your answers, approval, then a background job with progress). See [database.md](database.md) and the builder part of [api.md](api.md). | yes (mock in tests; checked live with Gemini) · **Built** |
 | H3 | **UI shell + Library page**: the first screen on top of H1, so something real can be clicked early. | no |
 | H4 | **Builder chat page**: questions, approval, live progress, the report. | yes |
 | H5 | Suggest and graph pages, Settings (shows only *whether* a key is set, never its value), Testing Lab and Quality Report views. | partly |
@@ -33,7 +33,8 @@ Agent Builder stays last and is not blocked by any of this.
   CORS allows only those origins. A request with no `Origin` is a command-line client, which is fine.
 - Uploads are read with a hard size cap, into memory, never unpacked to disk; the library's own checks still decide.
 - No endpoint ever returns an API key. Nothing runs a script except through the sandbox.
-- Long work (a build, a script re-test) becomes a job you poll, from H2 on. Until then `test_scripts` on import blocks.
+- Long work (reading your words, writing a skill) is a job you poll (built in H2). `test_scripts` on a library import
+  still blocks until its cases finish.
 
 ## Open questions (will be asked when reached, not before)
 

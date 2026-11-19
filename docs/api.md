@@ -28,6 +28,45 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 Status codes: 400 a problem the person can fix (message in `detail`), 404 not in the library, 409 something is
 already there, 413 upload over 6 MB, 422 a skill that failed its checks (import) or a malformed request body.
 
+## The skill builder (step H2)
+
+The builder is a **session** you talk to across requests. The two slow steps (reading your words, writing the skill)
+run as background jobs: the request that starts one returns at once with `status: "working"`, and the browser polls
+`GET /api/builds/{id}`. Sessions and jobs are kept in the database ([database.md](database.md)).
+
+```
+ POST /builds ──► working ──► awaiting_answers ──POST answers──► working ──► ... ──► awaiting_approval
+                     │                                                                    │ POST approve
+                     └─► failed ◄── (retry, when it can help) ◄──────── working ◄─────────┘
+                                                                          └──► done ──POST save──► the library
+```
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/provider` | `{"configured", "provider", "model", "detail"}`: is a model set up. Never a key, and no call to the model. |
+| `POST /api/builds` | `{"description", "with_scripts"}` starts a session (201). A sentence under 10 characters is a 400. |
+| `GET /api/builds` | Sessions, newest first, each with its status and what became of it. |
+| `GET /api/builds/{id}` | The whole session: `status`, `questions` (when it is waiting for answers), `spec` (the requirement waiting for approval), `result` (when done), `error`, `retryable`, and `job` with its progress `events`. |
+| `POST /api/builds/{id}/answers` | `{"answers": {"<slot>": "text"}}`. Only slots that were asked; at least one non-empty answer. |
+| `POST /api/builds/{id}/approve` | The person approves the requirement shown in `spec`. **Only then is anything built.** |
+| `POST /api/builds/{id}/retry` | Runs the step that failed again, when a second try can help (a missing key, an unreachable model). |
+| `GET /api/builds/{id}/files/{path}` | A generated file's text, looked up by name among the files that were written. |
+| `POST /api/builds/{id}/save` | `{"accept_draft", "note"}` keeps the skill in the library through the same checked import as any other skill (422 if it is refused). A **DRAFT** (a check failed, or its scripts were not all tested) is a 409 until `accept_draft` is true. |
+| `DELETE /api/builds/{id}` | Removes the session, its jobs and its generated files. 409 while it is running. |
+
+`409` on a builder action means the session is not at that step, or another click just moved it: each move is a
+conditional update in the database, so two approvals can never both build.
+
+**Same rules as the command line**, because the same code runs: completeness is decided by the fixed checklist, an
+answer counts only through a quote that code verified is in the person's own words (extraction runs again on all of
+their words each round), nothing is built before approval, and scripts run only in the sandbox. A model that says it
+has answers the person never gave is not believed (a test covers it).
+
+**Verified live (2026-11-19):** a real server with a real SQLite file and Gemini (`gemini-3.5-flash-lite`): start,
+one question round, approve, build, save took about 15 seconds and produced `count-todos` with 21 checks passed and
+0 failed, saved as v1. The same flow is covered offline with a mock model, including on real background threads.
+Building *with scripts* over HTTP has only been run with a fake sandbox runner, not live.
+
 ## Why a local server is still locked down
 
 A web page on another site can ask your browser to talk to `localhost`. Two defences, both in
@@ -50,5 +89,8 @@ except through the sandbox.
   shared server. A hosted version needs real accounts first (see D1 in [decisions.md](decisions.md)).
 - `install` writes to `~/.claude/skills` or to a folder the request names, so it can write wherever your user can.
   That is why the Origin check exists; keep the server on `127.0.0.1`.
-- Importing with `test_scripts=true` blocks until the cases finish. Jobs with progress come with step H2.
-- Not yet covered: building skills, suggestions and graph queries over HTTP (steps H2 and H5).
+- Importing with `test_scripts=true` blocks until the cases finish (builds do not: they are jobs).
+- **A running job cannot be cancelled.** Work is on threads; the way out is to wait for it. If the server stops, the
+  work that was running is marked failed on the next start and can be retried.
+- Jobs run in this one server process, two at a time. This is a personal tool, not a job queue for many people.
+- Not yet covered over HTTP: suggestions and graph queries (step H5).

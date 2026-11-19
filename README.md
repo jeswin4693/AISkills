@@ -19,6 +19,8 @@ AISkills/
 │   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
 │   ├── skillforge/library/ # skill versions: import (checked), diff, rollback, export, install (no AI)
 │   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
+│   ├── skillforge/builder/ # the skill builder as a database-backed conversation with background jobs
+│   ├── skillforge/db/      # SQLAlchemy models + Alembic migrations (SQLite first)
 │   ├── skillforge/cli.py   # `python -m skillforge ...`
 │   ├── tests/              # offline tests, no key or network needed
 │   └── scripts/            # Step 0 smoke test for the LLM provider
@@ -107,8 +109,10 @@ cd backend
 python -m skillforge serve        # http://127.0.0.1:8000/api/docs, this machine only
 ```
 
-The same library, validate, sandbox and language features over HTTP, locked to localhost
-([docs/api.md](docs/api.md), plan in [docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
+The same library, validate, sandbox and language features over HTTP, locked to localhost, plus the skill builder as a
+conversation you can poll: questions, answers, approval, then a background build ([docs/api.md](docs/api.md)).
+Sessions are kept in a SQLite file ([docs/database.md](docs/database.md)); the plan for the web UI on top is in
+[docs/ui-and-database-plan.md](docs/ui-and-database-plan.md).
 
 ## Setup
 

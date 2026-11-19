@@ -8,8 +8,8 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
 sandbox), Library (`library import|list|versions|diff|rollback|export|install`, see [docs/library.md](docs/library.md)),
-local API (`serve`, see [docs/api.md](docs/api.md)). Next: database + build sessions, then the web UI
-([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
+local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)).
+Next: the web UI, steps H3 to H5 ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
 
 ## Commands (run from `backend/`)
 

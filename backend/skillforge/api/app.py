@@ -6,6 +6,8 @@ and never unpacked to disk, no endpoint returns an API key, and nothing runs a s
 
 from __future__ import annotations
 
+import threading
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
@@ -17,15 +19,18 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .. import __version__
+from ..builder import Builder, BuilderError, SessionNotFound, WrongState
 from ..graph import languages
 from ..library import (
     Conflict, Library, LibraryError, NotFound, check_source, compare, import_source, install_skill, package_skill,
     read_zip_bytes, rollback,
 )
-from ..library.service import ImportReport
-from ..library.store import Version
 from ..sandbox import probe_sandbox
+from .builds import builds_router
 from .security import LocalOnlyMiddleware, allowed_origins
+from .views import checks_view as _checks
+from .views import import_view as _import_report
+from .views import version_view as _version
 
 MAX_UPLOAD = 6_000_000  # bytes of zip; the library's own limits on what it holds when unpacked still apply
 
@@ -39,23 +44,6 @@ class InstallBody(BaseModel):
     target: Literal["personal", "folder"]
     folder: str | None = None  # an absolute path, required when target is "folder"
     force: bool = False
-
-
-def _version(v: Version) -> dict:
-    return {**asdict(v), "tag": v.tag}
-
-
-def _checks(checks) -> list[dict]:
-    return [asdict(c) for c in checks]
-
-
-def _import_report(r: ImportReport) -> dict:
-    return {
-        "refused": r.refused, "created": r.created, "name": r.name,
-        "version": _version(r.version) if r.version else None,
-        "previous": r.previous.tag if r.previous else None,
-        "checks": _checks(r.checks), "changes": [asdict(c) for c in r.changes],
-    }
 
 
 async def read_upload(request: Request) -> bytes:
@@ -83,15 +71,39 @@ def _label(request: Request) -> str:
     return "".join(c for c in name if c.isprintable())[:100] or "upload.zip"
 
 
-def create_app(library: Library | None = None, origins: list[str] | None = None) -> FastAPI:
-    app = FastAPI(title="SkillForge AI", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
-    app.state.library = library or Library()
+def create_app(library: Library | None = None, origins: list[str] | None = None, builder: Builder | None = None) -> FastAPI:
+    """`builder` is made on first use when not given, so the library endpoints never need the database."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        if app.state.builder is not None:  # stop taking work; a job that is mid-run is marked failed on the next start
+            app.state.builder.close()
+
+    app = FastAPI(
+        title="SkillForge AI", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan,
+    )
+    app.state.library = library or (builder.library if builder else Library())
+    app.state.builder = builder
+    app.state.builder_lock = threading.Lock()
     trusted = allowed_origins(origins)
     app.add_middleware(
-        CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST"], allow_headers=["Content-Type"],
+        CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
         expose_headers=["Content-Disposition"],
     )
     app.add_middleware(LocalOnlyMiddleware, origins=trusted)  # added last, so it runs first
+
+    @app.exception_handler(SessionNotFound)
+    async def session_not_found(_: Request, exc: SessionNotFound) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(WrongState)
+    async def wrong_state(_: Request, exc: WrongState) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(BuilderError)  # BadRequest and anything else the person can fix
+    async def builder_error(_: Request, exc: BuilderError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
 
     @app.exception_handler(NotFound)
     async def not_found(_: Request, exc: NotFound) -> JSONResponse:
@@ -201,5 +213,6 @@ def create_app(library: Library | None = None, origins: list[str] | None = None)
             "has_scripts": r.has_scripts,
         }
 
+    api.include_router(builds_router())
     app.include_router(api)
     return app

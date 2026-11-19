@@ -19,6 +19,7 @@ def isolated_data_dir(tmp_path_factory, monkeypatch):
 def never_reach_a_real_provider(monkeypatch):
     """No test may read the real .env or hold a real key, so no test can call a hosted model by accident."""
     monkeypatch.setattr("skillforge.cli.load_dotenv", lambda *a, **k: False)
+    monkeypatch.setattr("skillforge.builder.provider.load_dotenv", lambda *a, **k: False)
     for var in ("LLM_PROVIDER", "LLM_MODEL", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .build.models import SLOTS, RequirementSpec
-from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, rebuild
+from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, rebuild, sandbox_note
 from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
@@ -278,11 +278,7 @@ def _description_from_args(args: argparse.Namespace) -> str:
 
 def _sandbox_note() -> str:
     """What the report says about the sandbox on this machine. A failed probe must never stop a build."""
-    try:
-        s = probe_sandbox()
-    except Exception as exc:  # noqa: BLE001
-        return f"unknown ({type(exc).__name__})"
-    return f"{'available' if s.available else 'unavailable'}. {s.reason}"
+    return sandbox_note(probe_sandbox)  # looked up here, so a test can replace cli.probe_sandbox
 
 
 def _run_build(args: argparse.Namespace) -> int:
@@ -352,9 +348,12 @@ def _run_serve(args: argparse.Namespace) -> int:
     import uvicorn  # only needed here, so the other commands never import the web server
 
     from .api import create_app
+    from .builder import Builder
 
+    library = Library()
+    builder = Builder.default(library)  # opens and migrates the database now, and marks work a crash left half-done
     print(f"SkillForge API on http://127.0.0.1:{args.port}/api/docs  (this machine only; Ctrl+C stops it)")
-    uvicorn.run(create_app(), host="127.0.0.1", port=args.port, log_level="info")
+    uvicorn.run(create_app(library, builder=builder), host="127.0.0.1", port=args.port, log_level="info")
     return 0
 
 

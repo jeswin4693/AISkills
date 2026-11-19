@@ -174,7 +174,7 @@ cd backend
 C:\dev\venvs\aiskills\Scripts\python.exe -m pytest
 
 # 3. For the AI parts later: copy .env.example to .env, then set LLM_MODEL and your API key
-#    (GOOGLE_API_KEY for Gemini, OPENAI_API_KEY, or ANTHROPIC_API_KEY). Never commit .env.
+#    (GOOGLE_API_KEY for Gemini, OPENAI_API_KEY, or ANTHROPIC_API_KEY for provider anthropic). Never commit .env.
 Copy-Item ..\.env.example ..\.env
 
 # 4. Smoke test: one structured-output call to the configured provider
@@ -188,7 +188,14 @@ The graph needs no key and costs nothing. For the AI parts you bring your own AP
 key with rate limits (check Google's terms for how free-tier data is handled); OpenAI usage is billed by the
 provider to your own account. If you cannot get a Gemini key (Google sometimes refuses to create one for an
 account), `LLM_PROVIDER` can also be `groq`, `openrouter`, `mistral`, or `custom` for any OpenAI-compatible API;
-those four share the same adapter but have not been verified live yet. This repo includes no key, no bundled
-model and no hosted service.
+those four share the same adapter but have not been verified live yet. `anthropic` has its own adapter, checked against
+a mock only. This repo includes no key, no bundled model and no hosted service.
+
+### One model service for every feature
+
+Every model call goes through one service ([docs/ai-engine.md](docs/ai-engine.md)): it picks the model by the kind of work
+(you can give writing code its own model, or the tests a Claude model, with a few optional lines in `.env`), makes one
+retry policy for failures, counts every attempt and the tokens the provider reports, and keeps keys out of error text.
+With none of the optional settings, one model does everything, as before.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

@@ -1,4 +1,4 @@
-import type { BuildResultInfo, BuildSession, BuildStatus, JobInfo, Question, RequirementSpec, TestCase } from "./types";
+import type { BuildResultInfo, BuildSession, BuildStatus, JobInfo, Question, RequirementSpec, SessionUsage, TestCase } from "./types";
 
 export const SLOT_ORDER = ["goal", "inputs", "outputs", "constraints", "acceptance_criteria", "failure_behavior"] as const;
 
@@ -135,4 +135,21 @@ export function tokenLine(tokens: BuildResultInfo["tokens"]): string | null {
   if (!tokens) return null;
   const n = (v: number) => v.toLocaleString("en-US");
   return `Costs about ${n(tokens.always)} tokens on every task (its name and description) and ${n(tokens.when_used)} more when the agent uses it. Estimates.`;
+}
+
+/**
+ * What the model was asked while building, in words: every attempt (a failed one counts), the tokens the provider reported
+ * (never an estimate), and the models used. Empty when there is nothing to say.
+ */
+export function usageText(usage: SessionUsage | undefined): string {
+  if (!usage || usage.calls === 0) return "";
+  const n = (v: number) => v.toLocaleString("en-US");
+  const parts = [`${n(usage.calls)} attempt${usage.calls === 1 ? "" : "s"} at the model${usage.errors > 0 ? ` (${n(usage.errors)} failed)` : ""}`];
+  parts.push(
+    usage.input_tokens === null && usage.output_tokens === null
+      ? "no token counts reported"
+      : `${n(usage.input_tokens ?? 0)} tokens in and ${n(usage.output_tokens ?? 0)} out`,
+  );
+  if (usage.models.length > 0) parts.push(usage.models.join(", "));
+  return parts.join(" · ") + ".";
 }

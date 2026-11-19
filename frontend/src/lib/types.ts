@@ -182,6 +182,15 @@ export interface BuildResultInfo {
   tokens?: { always: number; when_used: number; on_demand: number } | null;
 }
 
+/** What the model was asked for a session (docs/ai-engine.md). Counts and timings only; tokens are null when the provider gave none. */
+export interface SessionUsage {
+  calls: number; // attempts at the model, failed ones included
+  errors: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  models: string[];
+}
+
 export interface BuildSession {
   id: string;
   status: BuildStatus;
@@ -195,6 +204,8 @@ export interface BuildSession {
   error: string;
   retryable: boolean;
   model_calls: number;
+  /** Absent from servers that do not record it. */
+  usage?: SessionUsage;
   notes: string[];
   saved: { name: string; version: string } | null;
   created_at: string;

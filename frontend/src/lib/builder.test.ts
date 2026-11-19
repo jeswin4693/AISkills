@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
   activityText, answersToSend, canSendAnswers, elapsedSeconds, parseTests, progressSteps, specRows, statusInfo, tokenLine, traceability,
+  usageText,
 } from "./builder";
 import type { RequirementSpec, TestCase } from "./types";
 
@@ -152,5 +153,24 @@ describe("what using the skill costs", () => {
   it("shows nothing for a session saved before the cost was worked out", () => {
     expect(tokenLine(undefined)).toBeNull();
     expect(tokenLine(null)).toBeNull();
+  });
+});
+
+describe("what the model was asked, in words", () => {
+  it("counts attempts, says how many failed, gives the tokens the provider reported and the model", () => {
+    expect(usageText({ calls: 5, errors: 1, input_tokens: 6100, output_tokens: 2000, models: ["gemini-3.5-flash-lite"] })).toBe(
+      "5 attempts at the model (1 failed) · 6,100 tokens in and 2,000 out · gemini-3.5-flash-lite.",
+    );
+  });
+
+  it("says plainly when a provider reported no token counts, and lists every model used", () => {
+    expect(usageText({ calls: 1, errors: 0, input_tokens: null, output_tokens: null, models: ["a", "b"] })).toBe(
+      "1 attempt at the model · no token counts reported · a, b.",
+    );
+  });
+
+  it("shows nothing when there was no attempt, or the server did not send usage", () => {
+    expect(usageText({ calls: 0, errors: 0, input_tokens: null, output_tokens: null, models: [] })).toBe("");
+    expect(usageText(undefined)).toBe("");
   });
 });

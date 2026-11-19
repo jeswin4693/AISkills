@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { parseTests, tokenLine, traceability } from "@/lib/builder";
+import { parseTests, tokenLine, traceability, usageText } from "@/lib/builder";
 import type { BuildSession, ImportResult } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 import { CheckBadges, CheckList } from "../CheckList";
@@ -146,6 +146,7 @@ export function ResultCard({ session, onSession }: { session: BuildSession; onSe
           <CheckBadges checks={r.checks} />
         </div>
         {tokenLine(r.tokens) && <p className="mt-2 text-sm">{tokenLine(r.tokens)}</p>}
+        {usageText(session.usage) && <p className="mt-2 text-xs text-muted">Model use while building: {usageText(session.usage)}</p>}
         <p className="mt-2 text-xs text-muted">
           Made with {session.model_calls} model call{session.model_calls === 1 ? "" : "s"}. The checks are structural: they show the skill is consistent, not that
           its instructions are good. Read it before you rely on it.

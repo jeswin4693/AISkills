@@ -22,7 +22,7 @@ from ..build.scripts import SANDBOX_ROW, ScriptRunner, check_scripts, run_script
 from ..results import FAILED, NOT_RUN, WARNING, CheckResult
 from ..validate import validate_files
 from ..validate.static import SLUG
-from .package import Conflict, LibraryError, NotFound, SkillSource, read_source, write_tree, zip_bytes
+from .package import Conflict, LibraryError, NotFound, SkillSource, read_source, replace_dir, write_tree, zip_bytes
 from .store import MAX_NAME, FileChange, Library, Version, diff_files
 
 
@@ -265,7 +265,7 @@ def install_skill(
         write_tree(staging, files)
         if target.exists():
             shutil.rmtree(target)
-        staging.rename(target)
+        replace_dir(staging, target)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

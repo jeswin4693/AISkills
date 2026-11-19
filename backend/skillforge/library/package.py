@@ -8,7 +8,9 @@ as it is so that the static validator fails it. Nothing is extracted to disk by 
 from __future__ import annotations
 
 import io
+import os
 import stat
+import time
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -131,6 +133,23 @@ def zip_bytes(name: str, files: Mapping[str, bytes]) -> bytes:
             info.create_system = 3
             archive.writestr(info, files[rel])
     return buffer.getvalue()
+
+
+def replace_dir(src: Path, dst: Path, attempts: int = 6) -> None:
+    """Move a folder into place. On Windows a virus scanner or the search indexer can hold a file that was just written
+    for a moment, and the rename then fails with "Access is denied". Waiting a little and trying again is the usual fix:
+    0.05 s, then twice as long each time, about 1.5 s in all. A refusal that lasts is raised as a plain error."""
+    for n in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            if n == attempts - 1:
+                raise LibraryError(
+                    "Windows refused to move the new files into place (an antivirus scan or another program may be holding "
+                    f"them). Nothing was kept. Try again in a moment. ({exc.strerror or 'access denied'})"
+                ) from exc
+            time.sleep(0.05 * 2**n)
 
 
 def write_tree(out_dir: Path, files: Mapping[str, bytes]) -> None:

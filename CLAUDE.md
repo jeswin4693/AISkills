@@ -25,6 +25,7 @@ python -m skillforge validate <skill-folder>
 python -m skillforge sandbox-status
 python -m skillforge library <import|list|versions|diff|rollback|export|install> ...
 python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only
+python -m skillforge plan "<task>" --repo <path> [--no-ai]   # read-only task plan (docs/task-conductor.md)
 ```
 
 The web UI is in `frontend/` (run from there; `node_modules` and `.next` are junctions to `C:\dev\frontend`, see

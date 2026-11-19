@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from .build.models import SLOTS, RequirementSpec
 from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, rebuild, sandbox_note
 from .build.requirements import Question
+from .conductor import PlanError
 from .graph import query
 from .graph.build import build_graph
 from .library import Library, LibraryError, compare, export_skill, import_skill, install_skill, rollback
@@ -344,6 +345,35 @@ def _run_languages(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_plan(args: argparse.Namespace) -> int:
+    from .conductor import PlanError, make_plan, render_markdown  # noqa: F401  (PlanError is caught in main)
+
+    if args.prompt and args.file:
+        raise ValueError("Give the task as text or with --file, not both.")
+    text = Path(args.file).read_text(encoding="utf-8") if args.file else args.prompt
+    if not text:
+        raise ValueError("Give the task in words, or with --file FILE.")
+    provider = None
+    if not args.no_ai:
+        load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
+        provider = provider_from_env()
+        print(
+            "Sent to the model: your task text" + (", the names and places (not the contents) of the files and functions it mentions, "
+            "file and language counts, and the lines of the repository's CLAUDE.md / AGENTS.md." if args.repo else ".")
+            + " Use --no-ai to send nothing.", file=sys.stderr,
+        )
+    plan = make_plan(
+        text, provider=provider, repo=args.repo, task_type=args.type, tier=args.tier, allow_lower=args.allow_lower,
+        budget=args.budget, sensitive=tuple(args.sensitive or ()),
+    )
+    out = json.dumps(plan.model_dump(), indent=2) if args.json else render_markdown(plan)
+    if args.save:
+        Path(args.save).write_text(out, encoding="utf-8", newline="\n")
+        print(f"Saved to {args.save}", file=sys.stderr)
+    print(out)
+    return 0
+
+
 def _run_serve(args: argparse.Namespace) -> int:
     import uvicorn  # only needed here, so the other commands never import the web server
 
@@ -549,6 +579,19 @@ def _parser() -> argparse.ArgumentParser:
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
 
+    pl = area.add_parser("plan", help="plan a task before doing it: scope, size, process, rules, token use (reads and changes nothing)")
+    pl.add_argument("prompt", nargs="?", help="the task, in your own words")
+    pl.add_argument("--file", help="read the task from a text file")
+    pl.add_argument("--repo", help="the repository the task is about: measures the size of the change and finds its rules")
+    pl.add_argument("--no-ai", action="store_true", help="send nothing to a model: plan only what code can measure")
+    pl.add_argument("--type", choices=["feature", "bugfix", "refactor", "migration", "docs", "investigation", "other"], help="the kind of task (needed with --no-ai; otherwise the model reads it)")
+    pl.add_argument("--tier", type=int, choices=[0, 1, 2, 3], help="ask for at least this much process (it can only raise the tier)")
+    pl.add_argument("--allow-lower", action="store_true", help="let --tier LOWER the tier the evidence gives (an explicit confirmation, recorded in the plan)")
+    pl.add_argument("--budget", type=int, help="tokens of context to read (default depends on the tier)")
+    pl.add_argument("--sensitive", action="append", metavar="GLOB", help="a path pattern that counts as sensitive, such as 'src/billing/*' (repeatable)")
+    pl.add_argument("--json", action="store_true", help="print the plan as JSON")
+    pl.add_argument("--save", metavar="FILE", help="also write the plan to this file")
+
     sv = area.add_parser("serve", help="start the local HTTP API for the web UI (127.0.0.1 only)")
     sv.add_argument("--port", type=int, default=8000)
 
@@ -594,18 +637,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
-            "library": _run_library, "serve": _run_serve,
+            "library": _run_library, "serve": _run_serve, "plan": _run_plan,
         }[args.area]
         try:
             return handler(args)
         except NeedAnswers as exc:
             print(_need_answers_message(exc), file=sys.stderr)
             return 2
-        except (ProviderError, BuildError, LibraryError, query.QueryError, NotADirectoryError, OSError, ValueError) as exc:
+        except (ProviderError, BuildError, LibraryError, query.QueryError, NotADirectoryError, OSError, ValueError, PlanError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     try:

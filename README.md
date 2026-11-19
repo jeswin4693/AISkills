@@ -21,6 +21,7 @@ AISkills/
 │   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
 │   ├── skillforge/builder/ # the skill builder as a database-backed conversation with background jobs
 │   ├── skillforge/db/      # SQLAlchemy models + Alembic migrations (SQLite first)
+│   ├── skillforge/conductor/ # the read-only Task Plan: scope, size, process, rules, token plan
 ├── frontend/               # web UI: Next.js + React + TypeScript + Tailwind (talks to the local API)
 │   ├── skillforge/cli.py   # `python -m skillforge ...`
 │   ├── tests/              # offline tests, no key or network needed
@@ -85,6 +86,19 @@ your machine directly.
 cd backend
 python -m skillforge validate C:\path\to\skill-folder   # exit code 1 if a check failed
 python -m skillforge sandbox-status                     # is a safe place to run scripts available?
+```
+
+## Plan a task before doing it
+
+A read-only plan for any software task: what your request contains (each item with your own quote, verified) and what it
+does **not** say (questions, assumptions), how big it is (measured from the code graph), which process phases it needs and
+when to stop and ask, which rules in `CLAUDE.md` apply, and a token plan (which exact functions to read instead of whole
+files). It changes nothing and runs nothing ([docs/task-conductor.md](docs/task-conductor.md)).
+
+```powershell
+cd backend
+python -m skillforge plan "Add a --json option to the library list command. Do not change other commands." --repo C:\path\to\repo
+python -m skillforge plan "..." --repo C:\path\to\repo --no-ai --type bugfix    # sends nothing to any model
 ```
 
 ## Keep skills as versions

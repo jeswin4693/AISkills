@@ -7,6 +7,7 @@ unless the person asks for a re-test. Hostile zips are built by hand to prove th
 from __future__ import annotations
 
 import json
+import os
 import stat
 import zipfile
 from pathlib import Path
@@ -317,6 +318,43 @@ def test_a_stored_file_changed_behind_the_librarys_back_is_refused_by_every_comm
     with pytest.raises(LibraryError, match="changed after import"):
         rollback(lib, NAME, 1)
     assert not (tmp_path / "x.zip").exists() and not (tmp_path / "skills").exists()
+
+
+def windows_refuses(monkeypatch, times: int) -> dict:
+    """Make the folder rename fail with 'Access is denied' the first `times` calls, as a virus scanner can on Windows."""
+    real, calls = os.replace, {"n": 0}
+
+    def replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] <= times:
+            raise PermissionError(13, "Access is denied")
+        return real(src, dst)
+
+    monkeypatch.setattr("skillforge.library.package.os.replace", replace)
+    monkeypatch.setattr("skillforge.library.package.time.sleep", lambda s: None)  # no real waiting in a test
+    return calls
+
+
+def test_a_rename_that_windows_refuses_for_a_moment_is_tried_again(lib, skill, monkeypatch):
+    calls = windows_refuses(monkeypatch, times=2)
+    report = import_skill(skill, lib)
+    assert not report.refused and report.created and calls["n"] == 3
+    assert lib.read(NAME)[0].tag == "v1" and not [p for p in (lib.root / NAME).iterdir() if p.name.startswith(".tmp-")]
+
+
+def test_a_rename_that_keeps_being_refused_is_a_plain_error_and_leaves_nothing_behind(lib, skill, monkeypatch):
+    calls = windows_refuses(monkeypatch, times=99)
+    with pytest.raises(LibraryError, match="Windows refused to move the new files into place"):
+        import_skill(skill, lib)
+    assert calls["n"] == 6 and lib.versions(NAME) == []
+    assert not [p for p in (lib.root / NAME).iterdir() if p.name.startswith(".tmp-")]
+
+
+def test_installing_survives_a_rename_that_is_refused_once(lib, skill, tmp_path, monkeypatch):
+    import_skill(skill, lib)
+    windows_refuses(monkeypatch, times=1)
+    r = install_skill(lib, NAME, None, tmp_path / "skills")
+    assert (r.path / "SKILL.md").exists() and [p.name for p in (tmp_path / "skills").iterdir()] == [NAME]
 
 
 def test_a_damaged_manifest_is_reported_not_ignored(lib, skill):

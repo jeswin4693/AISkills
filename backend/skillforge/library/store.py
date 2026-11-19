@@ -12,7 +12,6 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-import os
 import re
 import shutil
 import tempfile
@@ -24,7 +23,7 @@ from pathlib import Path
 from ..graph.store import data_dir
 from ..results import CheckResult
 from ..validate.static import SLUG, read_dir
-from .package import Conflict, LibraryError, NotFound, write_tree
+from .package import Conflict, LibraryError, NotFound, replace_dir, write_tree
 
 MAX_NAME = 64
 SCHEMA = 1
@@ -191,7 +190,7 @@ class Library:
             final = skill / version.tag
             if final.exists():
                 raise Conflict(f"{final.name} of '{name}' already exists. Another run may be using the library.")
-            os.replace(staging, final)
+            replace_dir(staging, final)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise

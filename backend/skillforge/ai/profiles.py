@@ -31,12 +31,13 @@ class ProfileSet:
     default: Profile
     tiers: dict[Tier, Profile] = field(default_factory=dict)
     escalation: Profile | None = None
+    fallbacks: tuple[Profile, ...] = ()  # other models, tried in order when the first one cannot answer (LLM_FALLBACKS)
 
     def profile_for(self, tier: Tier) -> Profile:
         return self.tiers.get(tier, self.default)
 
     def all(self) -> list[Profile]:
-        return [self.default, *self.tiers.values(), *([self.escalation] if self.escalation else [])]
+        return [self.default, *self.tiers.values(), *([self.escalation] if self.escalation else []), *self.fallbacks]
 
     def secrets(self) -> tuple[str, ...]:
         """Every key the profiles hold, so any error text can be cleaned before it is stored or shown."""
@@ -93,4 +94,30 @@ def load_profiles(env: Mapping[str, str] | None = None) -> ProfileSet:
         )
     escalation_provider = override("ESCALATION", "escalation", default_timeout)
     escalation = Profile("escalation", escalation_provider, CallOptions(timeout_s=default_timeout), default.max_input_tokens) if escalation_provider else None
-    return ProfileSet(default, tiers, escalation)
+    return ProfileSet(default, tiers, escalation, _fallbacks(env, default_provider, default_timeout, default.max_input_tokens))
+
+
+def _fallbacks(
+    env: Mapping[str, str], primary: GeneratingProvider, timeout: float, max_input: int | None
+) -> tuple[Profile, ...]:
+    """LLM_FALLBACKS="groq:some-model,openai:another": other providers, in order, for when the first cannot answer.
+
+    Only the first colon separates the provider from the model (a model name may hold slashes). A copy of the default, or a
+    repeat, is dropped. A broken entry stops start-up and names the entry, as every other setting does."""
+    found: list[Profile] = []
+    seen = {(primary.name, primary.model)}
+    for item in (part.strip() for part in env.get("LLM_FALLBACKS", "").split(",")):
+        if not item:
+            continue
+        name, colon, model = item.partition(":")
+        if not colon or not name.strip() or not model.strip():
+            raise ProviderError(f"LLM_FALLBACKS has '{item}', which is not provider:model (for example groq:a-model-your-key-can-use).")
+        try:
+            provider = build_provider(name, model, env, timeout_s=timeout)
+        except ProviderError as exc:
+            raise ProviderError(f"For LLM_FALLBACKS ('{item}'): {exc}") from exc
+        if (provider.name, provider.model) in seen:
+            continue
+        seen.add((provider.name, provider.model))
+        found.append(Profile("fallback", provider, CallOptions(timeout_s=timeout), max_input))
+    return tuple(found)

@@ -22,6 +22,11 @@ SUPPORTED = {
 ANTHROPIC = "anthropic"  # its own adapter (native structured output); key variable ANTHROPIC_API_KEY
 
 
+def key_variables() -> dict[str, str]:
+    """Provider name -> the environment variable that holds its key (the names only, never a value)."""
+    return {**{name: variable for name, (variable, _url) in SUPPORTED.items()}, ANTHROPIC: "ANTHROPIC_API_KEY"}
+
+
 def supported_names() -> list[str]:
     return sorted([*SUPPORTED, ANTHROPIC])
 

@@ -20,6 +20,10 @@ from ..providers._errors import MAX_DETAIL, short
 
 _ATTEMPTS = {"overloaded": 3, "timeout": 3, "connection": 3, "rate_limit": 3, "invalid_output": 2}
 
+# Failures that are not the request's fault: another model may well answer. A bad key, a bad request, a missing model or a
+# refusal would fail the same way elsewhere (or hide a mistake in the settings), so they never hand over.
+FALLBACK_KINDS = frozenset({"rate_limit", "quota", "overloaded", "timeout", "connection", "invalid_output"})
+
 
 @dataclass(frozen=True)
 class Policy:

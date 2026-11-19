@@ -27,6 +27,7 @@ from ..library import (
 )
 from ..sandbox import probe_sandbox
 from .builds import builds_router
+from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
 from .views import import_view as _import_report
@@ -73,8 +74,14 @@ def _label(request: Request) -> str:
     return "".join(c for c in name if c.isprintable())[:100] or "upload.zip"
 
 
-def create_app(library: Library | None = None, origins: list[str] | None = None, builder: Builder | None = None) -> FastAPI:
-    """`builder` is made on first use when not given, so the library endpoints never need the database."""
+def create_app(
+    library: Library | None = None, origins: list[str] | None = None, builder: Builder | None = None,
+    hosted: Hosted | None = None,
+) -> FastAPI:
+    """`builder` is made on first use when not given, so the library endpoints never need the database.
+
+    `hosted` turns on the hosted version (docs/hosting.md): a sign-in in front of the API, no install into server folders, no
+    interactive docs. Without it everything is as it always was: local only, no sign-in."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -83,8 +90,10 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
             app.state.builder.close()
 
     app = FastAPI(
-        title="SkillForge AI", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan,
+        title="SkillForge AI", version=__version__, lifespan=lifespan,
+        docs_url=None if hosted else "/api/docs", openapi_url=None if hosted else "/api/openapi.json",
     )
+    app.state.hosted = hosted
     app.state.library = library or (builder.library if builder else Library())
     app.state.builder = builder
     app.state.builder_lock = threading.Lock()
@@ -93,7 +102,9 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
         CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
         expose_headers=["Content-Disposition"],
     )
-    app.add_middleware(LocalOnlyMiddleware, origins=trusted)  # added last, so it runs first
+    if hosted is not None:
+        app.add_middleware(AuthMiddleware, hosted=hosted)
+    app.add_middleware(LocalOnlyMiddleware, origins=trusted, hosts=hosted.allowed_hosts if hosted else ())  # added last, so it runs first
 
     @app.exception_handler(SessionNotFound)
     async def session_not_found(_: Request, exc: SessionNotFound) -> JSONResponse:
@@ -123,7 +134,7 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
 
     @api.get("/health")
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        return {"status": "ok", "version": __version__, "mode": "hosted" if hosted else "local"}
 
     @api.get("/sandbox")
     def sandbox() -> dict:
@@ -209,6 +220,8 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
 
     @api.post("/library/{name}/install")
     def install(name: str, body: InstallBody, request: Request) -> dict:
+        if hosted is not None:  # this would write into a folder on the server, which is not where anyone's agent reads skills
+            raise HTTPException(403, "Installing into a folder on the server is turned off in the hosted version. Use Export to download the zip, and install it on your own computer.")
         if body.target == "personal":
             folder = Path.home() / ".claude" / "skills"
         elif body.folder and Path(body.folder).is_absolute():
@@ -221,6 +234,7 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
             "has_scripts": r.has_scripts,
         }
 
+    api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
     app.include_router(api)
     return app

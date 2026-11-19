@@ -24,7 +24,7 @@ from pydantic import BaseModel, ValidationError
 from ..graph.store import data_dir
 from ..providers.base import CallOptions, Generation, LLMProvider, ProviderError, T, Usage
 from .cache import FileCache, ResponseCache, cache_key
-from .policy import NO_WAIT, Policy, decide
+from .policy import FALLBACK_KINDS, NO_WAIT, Decision, Policy, decide
 from .profiles import Profile, ProfileSet, load_profiles, positive_number
 from .redact import redact
 from .tasks import TIER_OF, Task
@@ -155,34 +155,72 @@ class AIService:
         self, task: Task, schema: type[T], prompt: str, system: str | None = None, *, attempts: int | None = None,
         escalate: bool = False,
     ) -> tuple[T, int]:
-        """(the validated answer, HTTP attempts made). Raises ProviderError with any key removed from its text."""
+        """(the validated answer, HTTP attempts made, across every model asked). Raises ProviderError with keys removed.
+
+        The first model is asked first. When it cannot answer for a reason that is not the request's fault (a rate limit, no
+        quota, overloaded, a timeout, no connection, answers that keep failing the format) the next fallback model
+        (LLM_FALLBACKS) is asked, and so on. A bad key or a bad request is raised at once: another model would not help."""
         tier = TIER_OF[task]
-        profile = self.profiles.escalation if escalate and self.profiles.escalation else self.profiles.profile_for(tier)
-        tier_name = "escalation" if profile.tier == "escalation" else tier.value
+        use_escalation = escalate and self.profiles.escalation is not None
+        profile = self.profiles.escalation if use_escalation else self.profiles.profile_for(tier)
+        chain = [profile] if use_escalation else [profile, *self.profiles.fallbacks]
         secrets = self.profiles.secrets()
         key = None
         if self.cache is not None and task is not Task.ACT:  # eval replies must be asked for again, so they are never cached
             key = cache_key(profile.provider.name, profile.provider.model, schema, system, prompt)
             hit = self._cached(key, schema)
             if hit is not None:
-                self._record(task, tier_name, profile, 0, "cache", "", Usage(), 0.0)  # not a call: it never reached the model
+                self._record(task, self._tier_name(profile, tier), profile, 0, "cache", "", Usage(), 0.0)  # it never reached a model
                 return hit, 0
+        made = [0]
+        failures: list[str] = []
+        for position, candidate in enumerate(chain):
+            more = position < len(chain) - 1
+            who = f"{candidate.provider.name}/{candidate.provider.model}"
+            try:
+                generation = self._run(candidate, task, self._tier_name(candidate, tier), schema, prompt, system, attempts, secrets, more, made)
+            except ProviderError as exc:
+                if more and exc.kind in FALLBACK_KINDS:
+                    failures.append(f"{who}: {exc}")
+                    continue
+                if failures:
+                    raise _clone(exc, "No model could answer. " + " | ".join([*failures, f"{who}: {exc}"]), secrets) from exc
+                raise
+            if key is not None:
+                self._store(key, generation.value)
+            return generation.value, made[0]
+        raise AssertionError("unreachable: the last model either answers or raises")  # pragma: no cover
+
+    @staticmethod
+    def _tier_name(profile: Profile, tier) -> str:
+        return profile.tier if profile.tier in ("escalation", "fallback") else tier.value
+
+    def _run(
+        self, profile: Profile, task: Task, tier_name: str, schema: type[T], prompt: str, system: str | None,
+        attempts: int | None, secrets: tuple[str, ...], more: bool, made: list[int],
+    ) -> Generation[T]:
+        """Ask ONE model until it answers or the policy says stop. `more` is True when another model could answer instead:
+        then a rate limit hands over at once (waiting would only delay the answer) and other failures get one retry, not two."""
         current = prompt
-        made = 0
+        tries = 0
         while True:
             self._guard(profile, system, current)
-            made += 1
+            tries += 1
+            made[0] += 1
             self._count_call()
             started = time.monotonic()
             try:
                 generation = self._attempt(profile, schema, current, system)
             except ProviderError as exc:
                 error = _clone(exc, str(exc), secrets)
-                self._record(task, tier_name, profile, made, "error", error.kind, Usage(), time.monotonic() - started)
-                decision = decide(error, made, self.policy, cap=attempts, rng=self._rng)
+                self._record(task, tier_name, profile, tries, "error", error.kind, Usage(), time.monotonic() - started)
+                cap = attempts if not more else 2 if attempts is None else min(attempts, 2)
+                decision = decide(error, tries, self.policy, cap=cap, rng=self._rng)
+                if more and decision.retry and error.kind == "rate_limit":
+                    decision = Decision(False, reason="handing over to the next model")
                 if not decision.retry:
-                    if made > 1:
-                        raise _clone(error, f"No usable answer after {made} attempt(s): {error}", secrets) from exc
+                    if tries > 1:
+                        raise _clone(error, f"No usable answer after {tries} attempt(s): {error}", secrets) from exc
                     if decision.reason:
                         raise _clone(error, f"{error} ({decision.reason})", secrets) from exc
                     raise error from exc
@@ -191,10 +229,8 @@ class AIService:
                 current = f"{prompt}\n\n{decision.feedback}" if decision.feedback else prompt
                 continue
             self._add_tokens(generation.usage)
-            self._record(task, tier_name, profile, made, "ok", "", generation.usage, generation.latency_s)
-            if key is not None:
-                self._store(key, generation.value)
-            return generation.value, made
+            self._record(task, tier_name, profile, tries, "ok", "", generation.usage, generation.latency_s)
+            return generation
 
     # ---- internals --------------------------------------------------------------------------------
 

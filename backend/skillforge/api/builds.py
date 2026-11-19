@@ -6,7 +6,9 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from ..ai.doctor import check_models
 from ..builder import Builder, env_provider, provider_status
+from ..providers import ProviderError
 from .views import import_view
 
 MAX_DESCRIPTION = 10_000
@@ -53,6 +55,18 @@ def builds_router() -> APIRouter:
         """Is a model set up, and which. Never a key, and no call to the model."""
         existing = request.app.state.builder
         return provider_status(existing.provider_factory if existing else env_provider)
+
+    @r.post("/provider/check")
+    def provider_check(request: Request) -> dict:
+        """One tiny call to each distinct model that is set up, so a person can see that each key and model really works.
+        It uses a little quota, so it runs only when asked. Never returns a key."""
+        existing = request.app.state.builder
+        factory = existing.provider_factory if existing else env_provider
+        try:
+            provider = factory()
+        except ProviderError as exc:
+            return {"configured": False, "detail": str(exc), "checks": []}
+        return {"configured": True, "detail": "", "checks": check_models(provider)}
 
     @r.get("/builds")
     def list_builds(request: Request) -> list[dict]:

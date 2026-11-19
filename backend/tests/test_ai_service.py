@@ -48,9 +48,9 @@ def gen(value=OK, tokens=(11, 7)):
     return Generation(value, Usage(*tokens), 0.01, "served")
 
 
-def service(provider, *, tiers=None, escalation=None, **kw):
+def service(provider, *, tiers=None, escalation=None, fallbacks=(), **kw):
     default = Profile("default", provider, CallOptions(timeout_s=90.0))
-    profiles = ProfileSet(default, tiers or {}, escalation)
+    profiles = ProfileSet(default, tiers or {}, escalation, tuple(Profile("fallback", f, CallOptions()) for f in fallbacks))
     kw.setdefault("sleep", lambda s: None)
     kw.setdefault("rng", lambda: 0.0)
     return AIService(profiles, **kw)
@@ -241,3 +241,81 @@ def test_the_old_function_uses_a_service_as_it_is():
     code = Fake([gen()], "c")
     svc = service(Fake([]), tiers={Tier.CODE: Profile("code", code, CallOptions())})
     assert generate_with_retry(svc, Answer, "q", None, task=Task.CODE)[0] == OK and len(code.calls) == 1
+
+
+# ---- fallbacks: another model answers when the first cannot -------------------------------------------------
+
+
+def test_a_rate_limited_first_model_hands_over_at_once_without_waiting():
+    waits, rec = [], Recorder()
+    first, second = Fake([boom("rate_limit", False, retry_after_s=5.0)], "gemini", "m1"), Fake([gen()], "groq", "g1")
+    svc = service(first, fallbacks=[second], sleep=waits.append, recorder=rec)
+    assert svc.generate(Task.EXTRACT, Answer, "q") == (OK, 2)
+    assert waits == [] and len(first.calls) == 1 and len(second.calls) == 1
+    assert [(r.provider, r.model, r.tier, r.status, r.error_kind) for r in rec.rows] == [
+        ("gemini", "m1", "fast", "error", "rate_limit"), ("groq", "g1", "fallback", "ok", ""),
+    ]
+
+
+def test_an_overloaded_first_model_gets_one_more_try_then_the_fallback():
+    waits = []
+    first, second = Fake([boom(), boom(), gen()], "gemini", "m1"), Fake([gen()], "groq", "g1")
+    svc = service(first, fallbacks=[second], sleep=waits.append)
+    assert svc.generate(Task.DESIGN, Answer, "q") == (OK, 3)
+    assert len(first.calls) == 2 and len(second.calls) == 1 and waits == [1.5]  # without a fallback it would have tried three times
+
+
+def test_a_bad_key_or_a_bad_request_never_goes_to_a_fallback():
+    for kind in ("auth", "bad_request", "model_missing", "refused"):
+        second = Fake([gen()], "groq", "g1")
+        with pytest.raises(ProviderError) as info:
+            service(Fake([boom(kind, False)]), fallbacks=[second]).generate(Task.DESIGN, Answer, "q")
+        assert info.value.kind == kind and second.calls == []
+
+
+def test_answers_that_keep_failing_the_format_go_to_the_next_model():
+    first = Fake([boom("invalid_output", detail="count is missing"), boom("invalid_output")], "gemini", "m1")
+    second = Fake([gen()], "groq", "g1")
+    assert service(first, fallbacks=[second]).generate(Task.DESIGN, Answer, "q") == (OK, 3)
+    assert "count is missing" in first.calls[1]["prompt"] and second.calls[0]["prompt"] == "q"  # a new model starts from the plain prompt
+
+
+def test_every_fallback_is_tried_in_order_and_the_last_error_names_each_model():
+    a = Fake([boom(), boom()], "gemini", "m1")
+    b = Fake([boom("rate_limit", False)], "groq", "g1")
+    c = Fake([boom("quota", False)], "openai", "o1")
+    with pytest.raises(ProviderError) as info:
+        service(a, fallbacks=[b, c]).generate(Task.DESIGN, Answer, "q")
+    text = str(info.value)
+    assert info.value.kind == "quota" and "No model could answer" in text
+    assert text.index("gemini/m1") < text.index("groq/g1") < text.index("openai/o1")
+
+
+def test_a_third_model_can_answer_after_two_fail():
+    a, b, c = Fake([boom("quota", False)], "gemini", "m1"), Fake([boom("quota", False)], "groq", "g1"), Fake([gen()], "openai", "o1")
+    assert service(a, fallbacks=[b, c]).generate(Task.DESIGN, Answer, "q") == (OK, 3)
+
+
+def test_the_call_budget_covers_the_fallbacks_too():
+    first, second = Fake([boom("quota", False)], "gemini", "m1"), Fake([gen()], "groq", "g1")
+    with pytest.raises(ProviderError) as info:
+        service(first, fallbacks=[second], max_calls=1).generate(Task.DESIGN, Answer, "q")
+    assert info.value.kind == "budget" and second.calls == []
+
+
+def test_a_fallbacks_key_is_redacted_from_its_errors_too():
+    secret = "gsk_" + "Z" * 40
+    first = Fake([boom("quota", False)], "gemini", "m1")
+    second = Fake([ProviderError(f"401 for {secret}", kind="auth")], "groq", "g1", secrets=[secret])
+    with pytest.raises(ProviderError) as info:
+        service(first, fallbacks=[second]).generate(Task.DESIGN, Answer, "q")
+    assert secret not in str(info.value)
+
+
+def test_an_escalated_call_does_not_use_the_fallbacks():
+    big = Fake([boom("quota", False)], "gemini", "big")
+    other = Fake([gen()], "groq", "g1")
+    svc = service(Fake([]), escalation=Profile("escalation", big, CallOptions()), fallbacks=[other])
+    with pytest.raises(ProviderError):
+        svc.escalated().generate(Task.DESIGN, Answer, "q")
+    assert other.calls == []

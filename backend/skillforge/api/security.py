@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterable
+from urllib.parse import urlparse
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 DEFAULT_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
@@ -37,9 +38,14 @@ def allowed_origins(extra: Iterable[str] | None = None) -> list[str]:
 class LocalOnlyMiddleware:
     """A plain ASGI middleware: it answers 403 before the request reaches any route."""
 
-    def __init__(self, app, origins: Iterable[str]) -> None:
+    def __init__(self, app, origins: Iterable[str], hosts: Iterable[str] = ()) -> None:
         self.app = app
         self.origins = {o.rstrip("/").lower() for o in origins}
+        self.hosts = {h.lower() for h in hosts}  # the hosted version's own names, besides loopback ("*" allows any)
+
+    def _trusts(self, origin: str) -> bool:
+        origin = origin.rstrip("/").lower()
+        return origin in self.origins or host_name(urlparse(origin).netloc) in self.hosts
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -47,9 +53,9 @@ class LocalOnlyMiddleware:
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         refusal = None
-        if host_name(headers.get("host", "")) not in LOOPBACK_HOSTS:
-            refusal = "This API answers only on localhost."
-        elif scope["method"] not in SAFE_METHODS and "origin" in headers and headers["origin"].rstrip("/").lower() not in self.origins:
+        if "*" not in self.hosts and host_name(headers.get("host", "")) not in LOOPBACK_HOSTS | self.hosts:
+            refusal = "This API answers only on localhost." if not self.hosts else "This API does not answer on that host name."
+        elif scope["method"] not in SAFE_METHODS and "origin" in headers and not self._trusts(headers["origin"]):
             refusal = "This request comes from a page this API does not trust."
         if refusal:
             body = json.dumps({"detail": refusal}).encode()

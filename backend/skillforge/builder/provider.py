@@ -22,15 +22,17 @@ def provider_status(factory=env_provider) -> dict:
     try:
         p = factory()
     except ProviderError as exc:
-        return {"configured": False, "provider": "", "model": "", "detail": str(exc), "tiers": [], "escalation": None, "capabilities": None}
+        return {"configured": False, "provider": "", "model": "", "detail": str(exc), "tiers": [], "escalation": None, "capabilities": None, "fallbacks": []}
     tiers: list[dict] = []
     escalation = None
     capabilities = None
+    fallbacks: list[dict] = []
     if isinstance(p, AIService):
         tiers = [
             {"tier": t.value, "provider": p.profiles.profile_for(t).provider.name, "model": p.profiles.profile_for(t).provider.model}
             for t in Tier
         ]
+        fallbacks = [{"provider": f.provider.name, "model": f.provider.model} for f in p.profiles.fallbacks]
         if p.profiles.escalation is not None:
             escalation = {"provider": p.profiles.escalation.provider.name, "model": p.profiles.escalation.provider.model}
         found = getattr(p.profiles.default.provider, "capabilities", None)
@@ -38,5 +40,5 @@ def provider_status(factory=env_provider) -> dict:
             capabilities = {"structured_output": found.structured_output, "max_input_tokens": found.max_input_tokens}
     return {
         "configured": True, "provider": p.name, "model": p.model, "detail": "", "tiers": tiers, "escalation": escalation,
-        "capabilities": capabilities,
+        "capabilities": capabilities, "fallbacks": fallbacks,
     }

@@ -82,3 +82,39 @@ def test_default_errors_are_the_ones_provider_from_env_gives():
         load_profiles({})
     with pytest.raises(ProviderError, match="GOOGLE_API_KEY is empty"):
         load_profiles({"LLM_PROVIDER": "gemini", "LLM_MODEL": "m"})
+
+
+# ---- fallbacks: other providers, tried in order when the first cannot answer ------------------------------
+
+KEYS = {**GEMINI, "GROQ_API_KEY": "key-groq-12345678", "OPENAI_API_KEY": "key-openai-12345678"}
+
+
+def test_fallbacks_are_read_in_order_from_provider_colon_model():
+    ps = load_profiles({**KEYS, "LLM_FALLBACKS": " groq:openai/gpt-oss-120b , openai:gpt-x ,"})
+    assert [(p.provider.name, p.provider.model, p.tier) for p in ps.fallbacks] == [
+        ("groq", "openai/gpt-oss-120b", "fallback"), ("openai", "gpt-x", "fallback"),
+    ]  # only the first colon separates the provider from a model name that has slashes in it
+
+
+def test_no_fallbacks_unless_set_and_a_copy_of_the_default_is_ignored():
+    assert load_profiles(GEMINI).fallbacks == ()
+    ps = load_profiles({**KEYS, "LLM_FALLBACKS": "gemini:m-default,groq:g1,groq:g1"})
+    assert [p.provider.model for p in ps.fallbacks] == ["g1"]
+
+
+@pytest.mark.parametrize("bad, message", [
+    ("groq", "LLM_FALLBACKS.*'groq'.*provider:model"),
+    ("groq:", "LLM_FALLBACKS.*'groq:'.*provider:model"),
+    (":model", "LLM_FALLBACKS.*':model'.*provider:model"),
+    ("nonsense:m", "LLM_FALLBACKS.*nonsense.*Supported: anthropic"),
+    ("anthropic:m", "LLM_FALLBACKS.*ANTHROPIC_API_KEY is empty"),
+])
+def test_a_broken_fallback_stops_at_start_up_and_says_what_to_fix(bad, message):
+    with pytest.raises(ProviderError, match=message):
+        load_profiles({**KEYS, "LLM_FALLBACKS": bad})
+
+
+def test_fallback_keys_are_listed_for_redaction():
+    ps = load_profiles({**KEYS, "LLM_FALLBACKS": "groq:g1,openai:o1"})
+    assert set(ps.secrets()) == {"key-one", "key-groq-12345678", "key-openai-12345678"}
+    assert len(ps.all()) == 1 + 4 + 2  # the default, one profile per tier, two fallbacks

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from typing import Any
@@ -21,6 +22,7 @@ from .graph import query
 from .graph.build import build_graph
 from .library import Library, LibraryError, compare_with_risk, export_skill, import_skill, install_skill, rescan, rollback
 from .ai import service_from_env
+from .ai.doctor import check_models, describe
 from .providers import LLMProvider, ProviderError
 from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
@@ -434,13 +436,58 @@ def _run_serve(args: argparse.Namespace) -> int:
     import uvicorn  # only needed here, so the other commands never import the web server
 
     from .api import create_app
+    from .api.hosted import Hosted, HostedConfigError
     from .builder import Builder
 
+    try:
+        hosted = Hosted.from_env(os.environ)
+    except HostedConfigError as exc:
+        raise ValueError(str(exc)) from exc
+    if args.host not in ("127.0.0.1", "localhost", "::1") and hosted is None:
+        raise ValueError(
+            f"Listening on {args.host} would let other machines reach an API that has no sign-in. "
+            "Set SKILLFORGE_MODE=hosted and SKILLFORGE_ACCESS_TOKEN first (docs/hosting.md), or leave --host out."
+        )
     library = Library()
     builder = Builder.default(library)  # opens and migrates the database now, and marks work a crash left half-done
-    print(f"SkillForge API on http://127.0.0.1:{args.port}/api/docs  (this machine only; Ctrl+C stops it)")
-    uvicorn.run(create_app(library, builder=builder), host="127.0.0.1", port=args.port, log_level="info")
+    if hosted is None:
+        print(f"SkillForge API on http://{args.host}:{args.port}/api/docs  (this machine only; Ctrl+C stops it)")
+    else:
+        print(f"SkillForge API (hosted version: sign-in required) on {args.host}:{args.port}  (Ctrl+C stops it)")
+    uvicorn.run(create_app(library, builder=builder, hosted=hosted), host=args.host, port=args.port, log_level="info")
     return 0
+
+
+def _render_models(info: dict, checks: list[dict] | None) -> str:
+    lines = ["Models set up", f"  default        {info['default']['provider']} / {info['default']['model']}"]
+    for t in info["tiers"]:
+        if (t["provider"], t["model"]) != (info["default"]["provider"], info["default"]["model"]):
+            lines.append(f"  {t['tier'] + ' tier':<14} {t['provider']} / {t['model']}")
+    for f in info["fallbacks"]:
+        lines.append(f"  {'backup':<14} {f['provider']} / {f['model']}   (asked when the one before cannot answer)")
+    if info["escalation"]:
+        lines.append(f"  {'stronger':<14} {info['escalation']['provider']} / {info['escalation']['model']}   (asked once if a design still fails its checks)")
+    lines.append("Keys found for: " + (", ".join(info["keys_present"]) or "none"))
+    lines += [f"  note: {u['hint']}" for u in info["unused"]]
+    if checks is not None:
+        lines.append("Checks (one tiny call each):")
+        for c in checks:
+            who = f"{c['provider']}/{c['model']}"
+            if c["ok"]:
+                tokens = f"{c['input_tokens']} in / {c['output_tokens']} out" if c["input_tokens"] is not None else "no token counts"
+                lines.append(f"  OK      {who}  ({', '.join(c['roles'])})  {c['latency_ms'] / 1000:.1f} s, {tokens}")
+            else:
+                lines.append(f"  FAILED  {who}  ({', '.join(c['roles'])})  {c['kind']}: {c['detail']}")
+    return "\n".join(lines)
+
+
+def _run_models(args: argparse.Namespace) -> int:
+    load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
+    service = provider_from_env()
+    info = describe(service, os.environ)
+    checks = check_models(service) if args.test else None
+    print(json.dumps({**info, "checks": checks}, indent=2) if args.json else _render_models(info, checks))
+    return 0 if checks is None or all(c["ok"] for c in checks) else 1
 
 
 def _run_sandbox_status(args: argparse.Namespace) -> int:
@@ -687,6 +734,9 @@ def _parser() -> argparse.ArgumentParser:
     v.add_argument("--json", action="store_true", help="print machine-readable JSON")
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
+    md = area.add_parser("models", help="which models are set up, which keys are unused; with --test, ask each model one tiny question")
+    md.add_argument("--test", action="store_true", help="make one tiny call to each model (uses a little of your quota)")
+    md.add_argument("--json", action="store_true")
 
     pl = area.add_parser("plan", help="plan a task before doing it: scope, size, process, rules, token use (reads and changes nothing)")
     pl.add_argument("prompt", nargs="?", help="the task, in your own words")
@@ -703,6 +753,7 @@ def _parser() -> argparse.ArgumentParser:
 
     sv = area.add_parser("serve", help="start the local HTTP API for the web UI (127.0.0.1 only)")
     sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument("--host", default="127.0.0.1", help="the address to listen on; anything but this machine needs SKILLFORGE_MODE=hosted (docs/hosting.md)")
 
     lib = area.add_parser("library", help="keep skills as versions: import (checked first), diff, rollback, export, install")
     ops = lib.add_subparsers(dest="command", required=True)
@@ -749,11 +800,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan", "eval"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan", "eval", "models"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
-            "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval,
+            "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval, "models": _run_models,
         }[args.area]
         try:
             return handler(args)

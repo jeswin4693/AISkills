@@ -18,6 +18,7 @@ AISkills/
 ├── backend/
 │   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
 │   ├── skillforge/library/ # skill versions: import (checked), diff, rollback, export, install (no AI)
+│   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
 │   ├── skillforge/cli.py   # `python -m skillforge ...`
 │   ├── tests/              # offline tests, no key or network needed
 │   └── scripts/            # Step 0 smoke test for the LLM provider
@@ -98,6 +99,16 @@ python -m skillforge library rollback my-skill --to 1            # a new version
 python -m skillforge library export my-skill --out my-skill.zip
 python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>
 ```
+
+## Run the local API (for the web UI that is coming)
+
+```powershell
+cd backend
+python -m skillforge serve        # http://127.0.0.1:8000/api/docs, this machine only
+```
+
+The same library, validate, sandbox and language features over HTTP, locked to localhost
+([docs/api.md](docs/api.md), plan in [docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Setup
 

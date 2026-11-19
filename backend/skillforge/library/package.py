@@ -25,6 +25,14 @@ class LibraryError(Exception):
     """Something the person can act on. Nothing was changed."""
 
 
+class NotFound(LibraryError):
+    """The skill or version asked for is not in the library."""
+
+
+class Conflict(LibraryError):
+    """Something is already there and was left alone; `force` replaces it where that is allowed."""
+
+
 @dataclass
 class SkillSource:
     files: dict[str, bytes]
@@ -41,24 +49,31 @@ def read_source(path: Path) -> SkillSource:
         return SkillSource(files, problems, "folder", path.resolve().name, path.resolve().name)
     if path.is_file():
         if zipfile.is_zipfile(path):
-            return _read_zip(path)
+            return _read_zip(path, path.name)
         raise LibraryError(f"{path.name} is a file but not a zip. Give a skill folder or a .zip of one.")
     raise LibraryError(f"{path} does not exist. Give a skill folder or a .zip of one.")
 
 
-def _read_zip(path: Path) -> SkillSource:
+def read_zip_bytes(data: bytes, label: str) -> SkillSource:
+    """A zip that arrived as bytes (an upload). Read in memory with the same limits; nothing touches the disk."""
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        raise LibraryError(f"{label} is not a zip file.")
+    return _read_zip(io.BytesIO(data), label)
+
+
+def _read_zip(source: Path | io.BytesIO, label: str) -> SkillSource:
     problems: list[tuple[str, str]] = []
     files: dict[str, bytes] = {}
     try:
-        archive = zipfile.ZipFile(path)
+        archive = zipfile.ZipFile(source)
     except (zipfile.BadZipFile, OSError) as exc:
-        raise LibraryError(f"{path.name} cannot be read as a zip: {exc}") from exc
+        raise LibraryError(f"{label} cannot be read as a zip: {exc}") from exc
     with archive:
         infos = [i for i in archive.infolist() if not i.is_dir() and not i.filename.startswith(IGNORED)]
         infos = [i for i in infos if PurePosixPath(i.filename).name != ".DS_Store"]
         if len(infos) > MAX_ENTRIES:
             problems.append(("size", f"the zip holds {len(infos)} files (limit {MAX_ENTRIES})"))
-            return SkillSource({}, problems, "zip", path.name, None)
+            return SkillSource({}, problems, "zip", label, None)
         total = 0
         for info in infos:
             name = info.filename
@@ -88,7 +103,7 @@ def _read_zip(path: Path) -> SkillSource:
                 problems.append(("size", f"the zip unpacks to more than {MAX_TOTAL} bytes"))
                 break
             files[name] = data
-    return _strip_top_folder(files, problems, path.name)
+    return _strip_top_folder(files, problems, label)
 
 
 def _strip_top_folder(files: dict[str, bytes], problems: list[tuple[str, str]], label: str) -> SkillSource:

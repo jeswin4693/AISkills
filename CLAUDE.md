@@ -7,8 +7,9 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 **Status and plan: [docs/roadmap.md](docs/roadmap.md) is the source of truth. Read it (and the docs it links)
 before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
-sandbox), Library (`library import|list|versions|diff|rollback|export|install`, see [docs/library.md](docs/library.md)).
-Next: UI and database, Agent Builder last.
+sandbox), Library (`library import|list|versions|diff|rollback|export|install`, see [docs/library.md](docs/library.md)),
+local API (`serve`, see [docs/api.md](docs/api.md)). Next: database + build sessions, then the web UI
+([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
 
 ## Commands (run from `backend/`)
 
@@ -20,6 +21,7 @@ python -m skillforge build "<what the skill should do>"
 python -m skillforge validate <skill-folder>
 python -m skillforge sandbox-status
 python -m skillforge library <import|list|versions|diff|rollback|export|install> ...
+python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only
 ```
 
 Setup, the layout and what each part does are in [README.md](README.md). The development machine notes are in

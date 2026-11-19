@@ -22,7 +22,7 @@ from ..build.scripts import SANDBOX_ROW, ScriptRunner, check_scripts, run_script
 from ..results import FAILED, NOT_RUN, WARNING, CheckResult
 from ..validate import validate_files
 from ..validate.static import SLUG
-from .package import LibraryError, SkillSource, read_source, write_tree, zip_bytes
+from .package import Conflict, LibraryError, NotFound, SkillSource, read_source, write_tree, zip_bytes
 from .store import MAX_NAME, FileChange, Library, Version, diff_files
 
 
@@ -80,6 +80,29 @@ def _failed(checks: list[CheckResult]) -> list[CheckResult]:
     return [c for c in checks if c.status == FAILED]
 
 
+def check_source(src: SkillSource) -> list[CheckResult]:
+    """Every static check on a source, storing nothing and running nothing."""
+    return _gate(src.files, src.folder, src.problems)
+
+
+def compare(library: Library, name: str, frm: int | None = None, to: int | None = None) -> tuple[Version, Version, list[FileChange]]:
+    """(older, newer, changes). Default: the latest version against the one before it."""
+    versions = library.versions(name)
+    if not versions:
+        raise NotFound(f"There is no skill named '{name}' in the library.")
+    newer = library.pick(name, to) if to is not None else versions[-1]
+    if frm is not None:
+        older = library.pick(name, frm)
+    else:
+        before = [v for v in versions if v.version < newer.version]
+        if not before:
+            raise LibraryError(f"{name} {newer.tag} is the first version, so there is nothing before it. Give the older version.")
+        older = before[-1]
+    _, old_files = library.read(name, older.version)
+    _, new_files = library.read(name, newer.version)
+    return older, newer, diff_files(old_files, new_files)
+
+
 # ---- import ------------------------------------------------------------------------------------------
 
 
@@ -104,8 +127,15 @@ def import_skill(
     """Read a folder or zip, run every static check, and keep it as the next version only if none failed.
 
     A refused skill leaves the library untouched."""
-    src: SkillSource = read_source(source)
-    checks = _gate(src.files, src.folder, src.problems)
+    return import_source(read_source(source), library, test_scripts=test_scripts, runner=runner, note=note, now=now)
+
+
+def import_source(
+    src: SkillSource, library: Library, *, test_scripts: bool = False, runner: ScriptRunner | None = None,
+    note: str = "", now: datetime | None = None,
+) -> ImportReport:
+    """The same as import_skill, for a source that is already in memory (an upload)."""
+    checks = check_source(src)
     name = skill_name_of(src.files)
     has_scripts = any(rel.startswith("scripts/") for rel in src.files)
     if has_scripts:
@@ -148,6 +178,34 @@ def rollback(library: Library, name: str, to: int, *, now: datetime | None = Non
 
 
 @dataclass
+class Package:
+    """One version as a zip, in memory."""
+
+    version: Version
+    data: bytes
+    files: int
+    dropped: list[str]
+    has_scripts: bool
+
+    @property
+    def filename(self) -> str:
+        return f"{self.version.name}-{self.version.tag}.zip"
+
+
+def package_skill(library: Library, name: str, version: int | None, *, without_spec: bool = False) -> Package:
+    """One version as a zip with a single `<name>/` folder, ready to share. It is checked again first."""
+    v, files = library.read(name, version)
+    failed = _failed(_gate(files, name))
+    if failed:
+        raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not exported.")
+    dropped: list[str] = []
+    if without_spec and "spec.json" in files:  # spec.json holds the requester's own words
+        files = {rel: d for rel, d in files.items() if rel != "spec.json"}
+        dropped.append("spec.json")
+    return Package(v, zip_bytes(name, files), len(files), dropped, any(rel.startswith("scripts/") for rel in files))
+
+
+@dataclass
 class ExportReport:
     path: Path
     version: Version
@@ -159,21 +217,14 @@ class ExportReport:
 def export_skill(
     library: Library, name: str, version: int | None, out: Path | None, *, without_spec: bool = False, force: bool = False,
 ) -> ExportReport:
-    """Write one version as a zip with a single `<name>/` folder, ready to share. It is checked again first."""
-    v, files = library.read(name, version)
-    failed = _failed(_gate(files, name))
-    if failed:
-        raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not exported.")
-    dropped: list[str] = []
-    if without_spec and "spec.json" in files:  # spec.json holds the requester's own words
-        files = {rel: d for rel, d in files.items() if rel != "spec.json"}
-        dropped.append("spec.json")
-    target = Path(out) if out else Path.cwd() / f"{name}-{v.tag}.zip"
+    """Write one version as a zip file. Never overwrites a file unless force is given."""
+    pkg = package_skill(library, name, version, without_spec=without_spec)
+    target = Path(out) if out else Path.cwd() / pkg.filename
     if target.exists() and not force:
-        raise LibraryError(f"{target} already exists. Use --force to replace it, or choose another --out.")
+        raise Conflict(f"{target} already exists. Use --force to replace it, or choose another --out.")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(zip_bytes(name, files))
-    return ExportReport(target, v, len(files), dropped, any(rel.startswith("scripts/") for rel in files))
+    target.write_bytes(pkg.data)
+    return ExportReport(target, pkg.version, pkg.files, pkg.dropped, pkg.has_scripts)
 
 
 # ---- install -----------------------------------------------------------------------------------------
@@ -204,7 +255,7 @@ def install_skill(
         raise LibraryError(f"{target} is a link. It was left alone.")
     if target.exists():
         if not force:
-            raise LibraryError(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
+            raise Conflict(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
         stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
         backup = library.backups / f"{name}-{stamp}"
         shutil.copytree(target, backup, symlinks=True)

@@ -16,8 +16,7 @@ from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, r
 from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
-from .library import Library, LibraryError, export_skill, import_skill, install_skill, rollback
-from .library.store import diff_files
+from .library import Library, LibraryError, compare, export_skill, import_skill, install_skill, rollback
 from .providers import ProviderError, provider_from_env
 from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
@@ -349,6 +348,16 @@ def _run_languages(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_serve(args: argparse.Namespace) -> int:
+    import uvicorn  # only needed here, so the other commands never import the web server
+
+    from .api import create_app
+
+    print(f"SkillForge API on http://127.0.0.1:{args.port}/api/docs  (this machine only; Ctrl+C stops it)")
+    uvicorn.run(create_app(), host="127.0.0.1", port=args.port, log_level="info")
+    return 0
+
+
 def _run_sandbox_status(args: argparse.Namespace) -> int:
     s = probe_sandbox()
     print(("AVAILABLE: " if s.available else "UNAVAILABLE: ") + s.reason)
@@ -435,20 +444,7 @@ def _run_library(args: argparse.Namespace) -> int:
             )
         return 0
     if cmd == "diff":
-        versions = lib.versions(args.name)
-        if not versions:
-            raise LibraryError(f"There is no skill named '{args.name}' in the library.")
-        newer = lib.pick(args.name, args.to) if args.to else versions[-1]
-        if args.frm is not None:
-            older = lib.pick(args.name, args.frm)
-        else:
-            before = [v for v in versions if v.version < newer.version]
-            if not before:
-                raise LibraryError(f"{args.name} {newer.tag} is the first version, so there is nothing before it. Use --from.")
-            older = before[-1]
-        _, old_files = lib.read(args.name, older.version)
-        _, new_files = lib.read(args.name, newer.version)
-        changes = diff_files(old_files, new_files)
+        older, newer, changes = compare(lib, args.name, args.frm, args.to)
         print(f"{args.name}: {older.tag} -> {newer.tag}: " + (f"{len(changes)} file(s) differ" if changes else "identical"))
         print("\n".join(_render_changes(changes, with_text=True)))
         return 0
@@ -554,6 +550,9 @@ def _parser() -> argparse.ArgumentParser:
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
 
+    sv = area.add_parser("serve", help="start the local HTTP API for the web UI (127.0.0.1 only)")
+    sv.add_argument("--port", type=int, default=8000)
+
     lib = area.add_parser("library", help="keep skills as versions: import (checked first), diff, rollback, export, install")
     ops = lib.add_subparsers(dest="command", required=True)
     p = ops.add_parser("import", help="check a skill folder or .zip and keep it as the next version (refused if a check fails)")
@@ -596,11 +595,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
-            "library": _run_library,
+            "library": _run_library, "serve": _run_serve,
         }[args.area]
         try:
             return handler(args)

@@ -24,7 +24,7 @@ from pathlib import Path
 from ..graph.store import data_dir
 from ..results import CheckResult
 from ..validate.static import SLUG, read_dir
-from .package import LibraryError, write_tree
+from .package import Conflict, LibraryError, NotFound, write_tree
 
 MAX_NAME = 64
 SCHEMA = 1
@@ -142,13 +142,13 @@ class Library:
     def pick(self, name: str, version: int | None = None) -> Version:
         found = self.versions(name)
         if not found:
-            raise LibraryError(f"There is no skill named '{name}' in the library. See: library list")
+            raise NotFound(f"There is no skill named '{name}' in the library. See: library list")
         if version is None:
             return found[-1]
         for v in found:
             if v.version == version:
                 return v
-        raise LibraryError(f"'{name}' has no version v{version}. It has: " + ", ".join(v.tag for v in found))
+        raise NotFound(f"'{name}' has no version v{version}. It has: " + ", ".join(v.tag for v in found))
 
     def read(self, name: str, version: int | None = None) -> tuple[Version, dict[str, bytes]]:
         """A version and its files, after checking every file against the manifest."""
@@ -190,7 +190,7 @@ class Library:
             (staging / "manifest.json").write_text(json.dumps(asdict(version), indent=2) + "\n", encoding="utf-8", newline="\n")
             final = skill / version.tag
             if final.exists():
-                raise LibraryError(f"{final.name} of '{name}' already exists. Another run may be using the library.")
+                raise Conflict(f"{final.name} of '{name}' already exists. Another run may be using the library.")
             os.replace(staging, final)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)

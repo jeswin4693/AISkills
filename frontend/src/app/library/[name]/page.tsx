@@ -115,7 +115,7 @@ function VersionDetails({
       <div className="mt-5 space-y-6">
         <section>
           <h3 className="mb-2 font-semibold">Files</h3>
-          <FileViewer name={v.name} version={v.version} files={v.files} />
+          <FileViewer id={`${v.name}/${v.version}`} paths={Object.keys(v.files)} hashes={v.files} load={(p) => api.file(v.name, v.version, p)} />
         </section>
         <section>
           <h3 className="mb-2 font-semibold">Checks when it was imported</h3>

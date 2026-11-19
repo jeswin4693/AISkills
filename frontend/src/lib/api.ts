@@ -1,6 +1,6 @@
 import type {
-  DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus, SandboxStatus,
-  SkillSummary, VersionInfo,
+  BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus,
+  SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -88,6 +88,28 @@ export const api = {
     post<{ created: boolean; version: VersionInfo }>(`/api/library/${encodeURIComponent(name)}/rollback`, { to }),
 
   install: (name: string, req: InstallRequest) => post<InstallResult>(`/api/library/${encodeURIComponent(name)}/install`, req),
+
+  // ---- the builder: a session you poll; each action returns the session as it is right after the action ----
+  builds: () => get<BuildSummary[]>("/api/builds"),
+  build: (id: string) => get<BuildSession>(`/api/builds/${encodeURIComponent(id)}`),
+  startBuild: (description: string, withScripts: boolean) => post<BuildSession>("/api/builds", { description, with_scripts: withScripts }),
+  answer: (id: string, answers: Record<string, string>) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/answers`, { answers }),
+  approve: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/approve`, {}),
+  retry: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/retry`, {}),
+  buildFile: (id: string, path: string) => get<FileText>(`/api/builds/${encodeURIComponent(id)}/files/${encodePath(path)}`),
+
+  /** 200 and 422 both carry a report (kept, or refused with the checks that failed). 409 (a draft not accepted) is an error. */
+  async saveBuild(id: string, opts: { acceptDraft?: boolean; note?: string } = {}): Promise<SaveResult> {
+    const res = await send(`/api/builds/${encodeURIComponent(id)}/save`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accept_draft: opts.acceptDraft ?? false, note: opts.note ?? "" }),
+    });
+    return json<SaveResult>(res, [422]);
+  },
+
+  async discardBuild(id: string): Promise<void> {
+    await json<unknown>(await send(`/api/builds/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  },
 
   /** The zip as a Blob, with the file name the API suggested. */
   async exportZip(name: string, version: number, withoutSpec: boolean): Promise<{ blob: Blob; filename: string }> {

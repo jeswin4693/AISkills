@@ -1,9 +1,12 @@
-// End-to-end check in a real browser: the real API (a scratch data folder), the built UI, and Microsoft Edge.
+// End-to-end check in a real browser: the real API (a scratch data folder, a fake scripted model), the built UI, and
+// Microsoft Edge.
 //
 //   npm run build && npm run e2e
 //
 // Needs Edge (Windows has it) or set E2E_BROWSER_CHANNEL=chrome. No browser is downloaded: playwright-core drives the
 // installed one. Set SKILLFORGE_PYTHON to the Python that has the backend installed. Screenshots go to E2E_SHOTS if set.
+// The model is fake on purpose (e2e/mock_server.py): the run is deterministic and needs no key and no network. Everything
+// else is real. A run against a real model is a separate, manual check (see docs/ui.md).
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -17,11 +20,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const frontend = path.resolve(here, "..");
 const backend = path.resolve(frontend, "..", "backend");
 const python = process.env.SKILLFORGE_PYTHON ?? "python";
-const UI = "http://127.0.0.1:3000";
-const API = "http://127.0.0.1:8000";
+// The ports are configurable so this can run next to your own `serve` and `npm run dev`. If you change them, build the UI
+// for the new API address first:  $env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8100"; npm run build
+const UI_PORT = process.env.E2E_UI_PORT ?? "3000";
+const API_PORT = process.env.E2E_API_PORT ?? "8000";
+const UI = `http://127.0.0.1:${UI_PORT}`;
+const API = `http://127.0.0.1:${API_PORT}`;
 const shots = process.env.E2E_SHOTS;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "skillforge-e2e-"));
 const installRoot = path.join(scratch, "project", ".claude", "skills");
+const modelFlag = path.join(scratch, "model-ready"); // the fake model counts as "not set up" until this file exists
 
 // ---- a store-only zip writer, so the test needs no zip library --------------------------------------
 function makeZip(entries) {
@@ -120,8 +128,14 @@ let api;
 let ui;
 let browser;
 try {
-  api = start(python, ["-m", "skillforge", "serve", "--port", "8000"], { cwd: backend, env: { ...process.env, SKILLFORGE_DATA_DIR: path.join(scratch, "data") } });
-  ui = start(process.execPath, [path.join(frontend, "node_modules", "next", "dist", "bin", "next"), "start", "--hostname", "127.0.0.1", "--port", "3000"], {
+  api = start(python, [path.join(here, "mock_server.py")], {
+    cwd: backend,
+    env: {
+      ...process.env, PYTHONPATH: backend, SKILLFORGE_DATA_DIR: path.join(scratch, "data"), E2E_MODEL_FLAG: modelFlag,
+      E2E_API_PORT: API_PORT, SKILLFORGE_UI_ORIGINS: UI, // the API only accepts changes from origins it was told about
+    },
+  });
+  ui = start(process.execPath, [path.join(frontend, "node_modules", "next", "dist", "bin", "next"), "start", "--hostname", "127.0.0.1", "--port", UI_PORT], {
     cwd: frontend,
     env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
   });
@@ -141,14 +155,21 @@ try {
   const upload = (name, buffer, type = "application/zip") => page.locator('input[type="file"]').setInputFiles({ name, mimeType: type, buffer });
   const alert = (re) => page.locator('[role="alert"], [role="status"]').filter({ hasText: re }).first();
 
-  console.log("The library page");
-  await step("/ redirects to /library and the status panel finds the API", async () => {
+  console.log("The front door");
+  await step("/ opens the builder, and the status panel finds the API", async () => {
     await page.goto(UI + "/");
-    await page.waitForURL("**/library");
-    await page.getByRole("heading", { name: "Library", level: 1 }).waitFor();
+    await page.waitForURL("**/builder");
+    await page.getByRole("heading", { name: "Build a skill", level: 1 }).waitFor();
     await page.getByText(/online · v/).waitFor();
     await page.getByText("Linux, ready").waitFor({ timeout: 30000 }).catch(() => {}); // the sandbox may be absent on another machine
   });
+  await step("the sidebar leads to the library", async () => {
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Library" }).click();
+    await page.waitForURL("**/library");
+    await page.getByRole("heading", { name: "Library", level: 1 }).waitFor();
+  });
+
+  console.log("The library page");
   await step("an empty library says so", async () => {
     await page.getByText("No skills yet").waitFor();
     await shot(page, "01-empty-library");
@@ -256,10 +277,131 @@ try {
     await page.getByRole("link", { name: "Back to the library" }).waitFor();
   });
 
+  console.log("The builder");
+  let convoPath = "";
+  const describe = (text) => page.getByLabel("What should the skill do?").fill(text);
+  const startBtn = () => page.getByRole("button", { name: "Start", exact: true });
+  await step("without a model the builder says what to set up and never asks for a key", async () => {
+    await page.goto(UI + "/builder");
+    await page.getByText("No AI model is set up yet").waitFor();
+    await page.getByText("Supported: custom, gemini").first().waitFor(); // the server's own explanation of what is missing
+    assert.equal(await page.locator('input[type="password"]').count(), 0);
+    assert.equal(await page.getByLabel(/key/i).count(), 0, "the page must not ask for a key");
+    await describe("A skill that counts TODO and FIXME comments in a folder.");
+    assert.ok(await startBtn().isDisabled(), "Start must wait for a model");
+    await shot(page, "13-no-model");
+  });
+  await step("after the model is set up, 'Check again' lets the person start", async () => {
+    fs.writeFileSync(modelFlag, "ready");
+    await page.getByRole("button", { name: "Check again" }).click();
+    await page.getByText("No AI model is set up yet").waitFor({ state: "detached" });
+    await page.getByText("Model: mock-1").waitFor();
+    await page.getByRole("region", { name: "Status" }).getByText("mock-1").waitFor(); // the sidebar updates without a reload
+    assert.ok(await startBtn().isEnabled());
+  });
+  await step("a sentence starts a session that is 'working', then asks only what is missing", async () => {
+    await startBtn().click();
+    await page.waitForURL(/\/builder\/[0-9a-f]{32}$/);
+    convoPath = new URL(page.url()).pathname;
+    await page.getByText(/Reading your words/).first().waitFor();
+    await page.getByText("A few details are missing").waitFor();
+    assert.equal(await page.locator("form textarea").count(), 4, "only the 4 missing items should be asked");
+    await page.locator('[aria-current="step"]').getByText("Answer").waitFor();
+    assert.ok(await page.getByRole("button", { name: "Send answers" }).isDisabled(), "needs at least one answer");
+    await shot(page, "14-questions");
+  });
+  await step("the answers go back, and the requirement shows each item next to the person's own words", async () => {
+    await page.getByLabel(/What it produces/).fill("It should give a report of counts per file.");
+    await page.getByLabel(/Rules it must respect/).fill("It must never edit any file.");
+    await page.getByLabel(/How we will know it works/).fill("It works when it lists every file with its counts.");
+    await page.getByLabel(/When something goes wrong/).fill("If the folder cannot be read it stops and says so.");
+    await page.getByRole("button", { name: "Send answers" }).click();
+    await page.getByText("Check the requirement").waitFor();
+    await page.getByText("“never edit any file”").waitFor();
+    await page.getByText("“in a folder”").waitFor();
+    assert.equal(await page.getByRole("button", { name: "Approve and build" }).count(), 1);
+    await shot(page, "15-requirement");
+  });
+  await step("approving builds the skill with progress, then shows which test covers each acceptance criterion", async () => {
+    await page.getByRole("button", { name: "Approve and build" }).click();
+    await page.getByText(/Writing the skill/).first().waitFor();
+    await page.getByRole("heading", { name: "todo-counter-e2e", level: 1 }).waitFor({ timeout: 30000 });
+    await page.getByText("every check that ran passed").first().waitFor();
+    await page.getByText("What you asked for, and what covers it").waitFor();
+    await page.getByText("AC1", { exact: true }).first().waitFor();
+    for (const t of ["counts a file", "unreadable folder", "empty folder"]) await page.getByText(t).first().waitFor();
+    assert.equal(await page.getByText("No test case covers this.").count(), 0);
+    await page.getByLabel("Text of SKILL.md").filter({ hasText: "name: todo-counter-e2e" }).waitFor();
+    await shot(page, "16-built");
+  });
+  await step("saving puts it in the library, and the library shows it as v1", async () => {
+    await page.getByRole("button", { name: "Save to the library" }).click();
+    await page.getByText("Saved to the library as 'todo-counter-e2e' v1").waitFor();
+    await page.getByRole("link", { name: "Open it in the library" }).click();
+    await page.getByRole("heading", { name: "todo-counter-e2e", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: /^v1/ }).waitFor();
+  });
+  await step("a model failure is shown plainly, and 'Try again' continues from the same place", async () => {
+    await page.goto(UI + "/builder");
+    await describe("A skill that counts TODO and FIXME comments in a folder. [model-down]");
+    await startBtn().click();
+    await page.getByText("It stopped").waitFor();
+    await page.getByText(/could not be reached/).first().waitFor();
+    await shot(page, "17-failed");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await page.getByText("A few details are missing").waitFor();
+  });
+  await step("a DRAFT is flagged and cannot be saved until the person says they understand it", async () => {
+    await page.goto(UI + "/builder");
+    await describe(
+      "A skill that counts TODO and FIXME comments in a folder. [draft] It should give a report of counts per file. It must never edit any file. " +
+        "It works when it lists every file with its counts. If the folder cannot be read it stops and says so.",
+    );
+    await startBtn().click();
+    await page.getByText("Check the requirement").waitFor(); // everything was in the first sentence: no questions
+    await page.getByRole("button", { name: "Approve and build" }).click();
+    await page.getByText("This skill is a DRAFT").waitFor({ timeout: 30000 });
+    await page.getByText("Built as a DRAFT").waitFor(); // the badge at the top does not say a plain, green "Built"
+    await page.getByText("No test case covers this.").first().waitFor();
+    const save = page.getByRole("button", { name: "Save to the library" });
+    assert.ok(await save.isDisabled(), "a draft must not be saveable by accident");
+    await page.getByLabel(/I understand it is a draft/).check();
+    assert.ok(await save.isEnabled());
+    await shot(page, "18-draft");
+    await save.click();
+    await page.getByText(/Saved to the library as 'todo-counter-e2e' v2/).waitFor();
+  });
+  await step("past sessions are listed, and a discarded one disappears", async () => {
+    await page.goto(UI + "/builder");
+    const rows = page.locator('a[href^="/builder/"]');
+    await rows.first().waitFor();
+    const before = await rows.count();
+    assert.ok(before >= 3, `expected at least 3 sessions, saw ${before}`);
+    await page.getByText("saved v1").first().waitFor();
+    await page.getByText("DRAFT").first().waitFor();
+    await shot(page, "19-builds-list");
+    await rows.filter({ hasText: "Needs your answers" }).first().click();
+    await page.getByRole("button", { name: "Discard this session…" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Discard", exact: true }).click();
+    await page.waitForURL("**/builder");
+    await page.waitForFunction((n) => document.querySelectorAll('a[href^="/builder/"]').length === n, before - 1);
+  });
+  await step("a session that does not exist shows a plain error with a way back", async () => {
+    await page.goto(UI + "/builder/" + "0".repeat(32));
+    await page.getByText("Something went wrong").waitFor();
+    await page.getByText("There is no such builder session.").waitFor();
+    await page.getByRole("link", { name: "Back to the builder" }).waitFor();
+  });
+  await step("leaving a finished session and coming back shows it as it was", async () => {
+    await page.goto(UI + convoPath);
+    await page.getByRole("heading", { name: "todo-counter-e2e", level: 1 }).waitFor();
+    await page.getByText("Saved to the library as 'todo-counter-e2e' v1").waitFor();
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });
-    for (const url of ["/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2"]) {
+    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2"]) {
       await page.goto(UI + url);
       await page.getByRole("heading", { level: 1 }).first().waitFor();
       await page.waitForTimeout(400);

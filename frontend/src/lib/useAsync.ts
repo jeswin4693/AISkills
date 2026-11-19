@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/** Something changed that the status panel shows (for example the model was just set up): it should look again now. */
+export const STATUS_EVENT = "skillforge:status-changed";
+
+export function notifyStatusChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(STATUS_EVENT));
+}
+
 export interface AsyncState<T> {
   data?: T;
   error?: Error;

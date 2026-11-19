@@ -1,19 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
 import { shortHash } from "@/lib/format";
+import type { FileText } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 import { ErrorBox, Loading } from "./ui";
 
-/** The files of one version, and the text of the one you pick. The API checks the whole version against its hashes first. */
-export function FileViewer({ name, version, files }: { name: string; version: number; files: Record<string, string> }) {
-  const paths = Object.keys(files).sort((a, b) => (a === "SKILL.md" ? -1 : b === "SKILL.md" ? 1 : a.localeCompare(b)));
+/**
+ * A list of files and the text of the one you pick. Used for a stored version and for a build that is not saved yet:
+ * `load` says how to fetch one file, `id` says which collection of files this is (it keys the cache of what was loaded).
+ */
+export function FileViewer({
+  id, paths: given, hashes, load,
+}: {
+  id: string;
+  paths: string[];
+  hashes?: Record<string, string>;
+  load: (path: string) => Promise<FileText>;
+}) {
+  const paths = [...given].sort((a, b) => (a === "SKILL.md" ? -1 : b === "SKILL.md" ? 1 : a.localeCompare(b)));
   const [picked, setPicked] = useState<string | null>(null);
   const path = picked && paths.includes(picked) ? picked : (paths[0] ?? null);
-  const file = useAsync(() => (path ? api.file(name, version, path) : Promise.resolve(undefined)), `${name}/${version}/${path}`);
+  const file = useAsync(() => (path ? load(path) : Promise.resolve(undefined)), `${id}/${path}`);
 
-  if (paths.length === 0) return <p className="text-sm text-muted">This version has no files.</p>;
+  if (paths.length === 0) return <p className="text-sm text-muted">There are no files.</p>;
   return (
     <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
       <ul aria-label="Files" className="max-h-96 space-y-0.5 overflow-y-auto text-sm md:max-h-[28rem]">
@@ -23,7 +33,7 @@ export function FileViewer({ name, version, files }: { name: string; version: nu
               type="button"
               onClick={() => setPicked(p)}
               aria-current={p === path ? "true" : undefined}
-              title={`sha256 ${shortHash(files[p])}…`}
+              title={hashes?.[p] ? `sha256 ${shortHash(hashes[p])}…` : undefined}
               className={`block w-full rounded px-2 py-1 text-left font-mono text-xs break-all ${p === path ? "bg-accent-soft text-accent" : "hover:bg-surface-2"}`}
             >
               {p}

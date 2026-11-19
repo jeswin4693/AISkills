@@ -146,7 +146,7 @@ def not_run_checks(sandbox_note: str | None = None, has_scripts: bool = False) -
     else:
         note = f" Sandbox on this machine: {sandbox_note}" if sandbox_note else ""
         first = CheckResult(
-            "scripts run in a sandbox", NOT_RUN, "This skill has no scripts, so there was nothing to run. Build with --scripts to add some." + note
+            "scripts run in a sandbox", NOT_RUN, "This skill has no scripts, so there was nothing to run. To add some, build with helper scripts switched on (the checkbox in the web builder, or --scripts on the command line)." + note
         )
     return [
         first,

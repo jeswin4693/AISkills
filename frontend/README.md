@@ -47,11 +47,26 @@ npm test               # unit tests (api client, diff reader, formatters), no br
 npm run e2e            # a real browser against the real API and the built UI (see below)
 ```
 
-`npm run e2e` starts the API (with a throwaway data folder) and the production build, drives **Microsoft Edge** with
-`playwright-core` (no browser is downloaded; set `E2E_BROWSER_CHANNEL=chrome` to use Chrome), and checks 19 behaviours
-from import to install to "the API is gone". Run `npm run build` first, and point it at the Python that has the backend
-installed: `$env:SKILLFORGE_PYTHON = "C:\dev\venvs\aiskills\Scripts\python.exe"`. Ports 3000 and 8000 must be free.
-Set `E2E_SHOTS` to a folder to keep screenshots of each state.
+`npm run e2e` starts a real API (`e2e/mock_server.py`: real database, checklist and checks, but a **scripted fake model**,
+so it needs no key and no network) and the production build, drives **Microsoft Edge** with `playwright-core` (no browser
+is downloaded; set `E2E_BROWSER_CHANNEL=chrome` to use Chrome), and checks 31 behaviours from import to install, the whole
+builder conversation, and "the API is gone". Run `npm run build` first, and point it at the Python that has the backend
+installed: `$env:SKILLFORGE_PYTHON = "C:\dev\venvs\aiskills\Scripts\python.exe"`. Set `E2E_SHOTS` to a folder to keep
+screenshots of each state.
+
+It uses ports 3000 and 8000 by default. **If your own `serve` or `npm run dev` is running, use other ports**: the UI
+learns the API's address when it is built, so build for the new address first.
+
+```powershell
+$env:NEXT_PUBLIC_API_URL = "http://127.0.0.1:8100"; npm run build
+$env:E2E_UI_PORT = "3100"; $env:E2E_API_PORT = "8100"; npm run e2e
+```
+
+(Run `npm run build` again without `NEXT_PUBLIC_API_URL` afterwards if you then want `npm start` against port 8000.)
+
+**A run against your real model** (uses the key in `.env` and a few model calls; the key is never printed):
+`node e2e/live.mjs`, with the same ports and build as above. It is not part of `npm run e2e`, which stays repeatable
+and free.
 
 ## Telemetry
 

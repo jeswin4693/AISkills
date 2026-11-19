@@ -1,7 +1,9 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { API_URL, api } from "@/lib/api";
-import { useAsync, type AsyncState } from "@/lib/useAsync";
+import { STATUS_EVENT, useAsync, type AsyncState } from "@/lib/useAsync";
 import { Spinner } from "./ui";
 
 function Row({ label, state, ok, bad, hint }: { label: string; state: AsyncState<unknown>; ok: string | null; bad: string; hint?: string }) {
@@ -35,16 +37,31 @@ function Row({ label, state, ok, bad, hint }: { label: string; state: AsyncState
   );
 }
 
-/** What the local server can do right now. Each row loads on its own: the sandbox check takes a moment. */
+/**
+ * What the local server can do right now. Each row loads on its own: the sandbox check takes a moment, so it is only
+ * repeated on "Refresh". The API and model rows are cheap: they look again on every page change, and at once when
+ * a page says the setup changed.
+ */
 export function StatusPanel() {
-  const health = useAsync(api.health, "health");
+  const path = usePathname();
+  const health = useAsync(api.health, `health:${path}`);
   const sandbox = useAsync(api.sandbox, "sandbox");
-  const provider = useAsync(api.provider, "provider");
+  const provider = useAsync(api.provider, `provider:${path}`);
   const reload = () => {
     health.reload();
     sandbox.reload();
     provider.reload();
   };
+  const { reload: reloadHealth } = health;
+  const { reload: reloadProvider } = provider;
+  useEffect(() => {
+    const again = () => {
+      reloadHealth();
+      reloadProvider();
+    };
+    window.addEventListener(STATUS_EVENT, again);
+    return () => window.removeEventListener(STATUS_EVENT, again);
+  }, [reloadHealth, reloadProvider]);
   return (
     <section aria-label="Status" className="rounded-lg border border-border bg-surface p-3 text-xs">
       <div className="mb-2 flex items-center justify-between">

@@ -5,7 +5,10 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { StatusPanel } from "./StatusPanel";
 
-const NAV = [{ href: "/library", label: "Library", hint: "Your skills and their versions" }];
+const NAV = [
+  { href: "/builder", label: "Builder", hint: "Describe a skill and build it" },
+  { href: "/library", label: "Library", hint: "Your skills and their versions" },
+];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
@@ -13,7 +16,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="border-b border-border bg-surface md:sticky md:top-0 md:h-dvh md:overflow-y-auto md:border-r md:border-b-0">
         <div className="flex flex-col gap-4 p-4 md:h-full">
-          <Link href="/library" className="flex items-center gap-2 font-semibold tracking-tight">
+          <Link href="/builder" className="flex items-center gap-2 font-semibold tracking-tight">
             <span aria-hidden className="grid size-7 place-items-center rounded-md bg-accent text-sm text-accent-fg">
               S
             </span>
@@ -36,11 +39,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </li>
                 );
               })}
-              <li>
-                <span className="flex items-center justify-between gap-2 rounded-md px-3 py-1.5 text-sm text-muted" title="The builder chat comes in the next step">
-                  Builder <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs">soon</span>
-                </span>
-              </li>
             </ul>
           </nav>
           <div className="md:mt-auto">

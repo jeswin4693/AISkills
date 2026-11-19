@@ -1,7 +1,8 @@
 # Web UI
 
-Step H3 of [ui-and-database-plan.md](ui-and-database-plan.md): a browser front end for the local API
-([api.md](api.md)). **Built so far: the app shell and the Library.** The builder chat is the next step (H4).
+Steps H3 and H4 of [ui-and-database-plan.md](ui-and-database-plan.md): a browser front end for the local API
+([api.md](api.md)). **Built so far: the app shell, the Library (H3) and the Builder (H4).** Suggestions, the graph and
+Settings are next (H5).
 
 How to run it: [../frontend/README.md](../frontend/README.md).
 
@@ -9,6 +10,8 @@ How to run it: [../frontend/README.md](../frontend/README.md).
 
 | Page | What you can do |
 |---|---|
+| **Builder** (`/builder`, the front door) | Describe a skill in a sentence and press Start. If no model is set up it says what to put in `.env` (never asks for a key) and keeps Start disabled. Below the form, your earlier builds with their state (needs answers, needs approval, built, DRAFT, saved vN). |
+| **A build** (`/builder/<id>`) | The whole conversation on one page, with a strip showing Describe, Answer, Approve, Build, Save. **Working:** what the server is doing now, with live messages, polled once a second. You can leave and come back. **Needs answers:** only the items your words did not cover, as questions, and "Why am I being asked?" shows which quotes were rejected. **Needs approval:** the requirement, every item next to **your own words** that back it; nothing is built until you press Approve. **Built:** the skill's checks, **each acceptance criterion next to the tests that cover it** (and a plain "No test case covers this" when none does), the files, the report, and **Save to the library**, which goes through the same checked import as any skill. A **DRAFT** cannot be saved until you tick that you understand it is one. **Failed:** the reason in words, and "Try again" when a second try can help (a missing key, an unreachable model). |
 | **Library** (`/library`) | Import a skill `.zip` by choosing or dropping it (optional note; optional re-run of the skill's own script tests in the sandbox). The result is shown in plain words: kept as vN with the files that changed, unchanged, or **refused** with the failed checks. Below it, every skill with its latest version, age, source and check counts. |
 | **A skill** (`/library/<name>`) | Every version, newest first. Pick one to read its files (the API verifies the whole version against its hashes first) and the checks it passed at import. **Export** a `.zip` (optionally without `spec.json`, which holds the requester's own words), **Install** it (to `~/.claude/skills` or a folder you type, with a backup-and-replace step when it exists), **Restore** an older version (asks first; it adds a new version and deletes nothing), or open the changes since the version before. |
 | **Compare** (`/library/<name>/diff`) | Two version pickers and, per file, added / removed / changed with the changed lines coloured and also announced as "added line" / "removed line" for screen readers. |
@@ -37,14 +40,27 @@ Choices worth knowing:
 
 ## What was checked
 
-- `npm run typecheck`: clean. `npm test`: **20 unit tests** (the API client's error handling, the diff reader, formatters).
+- `npm run typecheck`: clean. `npm test`: **39 unit tests** (the API client's error handling for the library and the
+  builder, the diff reader, formatters, the requirement-to-rows reading, the traceability of criteria to tests, the
+  progress strip, the answer rules).
 - `npm run build`: succeeds.
-- `npm run e2e`: **19 behaviours in a real Edge browser** against the real API and the production build: the empty
-  library; importing v1, an identical zip, a changed zip (v2), a skill with a hidden character (refused, nothing added)
-  and a file that is not a zip; opening a skill; the diff including a removed Markdown `---` rule shown as removed; the
-  version pickers; restoring v1 (asks first, adds v3, keeps the rest); a real zip download; install needing a folder,
-  writing the files, and asking before replacing; an unknown skill; a phone-sized window with no sideways scrolling;
-  dark mode; the keyboard; no script errors; and "the API is not running" when the server is stopped.
+- `npm run e2e`: **31 behaviours in a real Edge browser** against the real API (database, checklist, quote verification,
+  checks and library all real; **the model is a scripted fake**, so the run is deterministic and needs no key) and the
+  production build.
+  - Library: the empty library; importing v1, an identical zip, a changed zip (v2), a skill with a hidden character
+    (refused, nothing added) and a file that is not a zip; the diff including a removed Markdown `---` rule shown as
+    removed; the version pickers; restoring v1; a real zip download; install and the replace prompt.
+  - Builder: no model set up (explains what to put in `.env`, never asks for a key, Start disabled), then "Check again"
+    and the sidebar updating without a reload; a sentence that starts a session shown as *working* and then asking
+    **only the four missing items**; the answers; the requirement with **each item next to the person's own words**;
+    Approve, live progress, and the result with **the acceptance criterion next to the three tests that cover it**;
+    Save to the library as v1; a model failure shown plainly with "Try again" continuing from the same place; a
+    **DRAFT** flagged at the top, with "No test case covers this", and not saveable until the person ticks that they
+    understand; the list of past sessions; discarding one; an unknown session; leaving and coming back.
+  - Everywhere: a phone-sized window with no sideways scrolling; dark mode; the keyboard; no script errors; and "the API
+    is not running" when the server is stopped.
+- **Python backend** (`python -m pytest`): unchanged except one check's wording, which no longer tells a web user to
+  use a command-line flag.
 - The browser test itself found a real bug on its first run: the "Restored" message vanished the moment it appeared
   (the panel was re-created for the new version and took its message with it). It also showed that a select inside a
   label was announced as "From v1" instead of "From".
@@ -53,8 +69,19 @@ Choices worth knowing:
 
 ## Limits
 
-- **Only the Library so far.** The builder chat, suggestions, the graph, Settings, the Testing Lab and the Quality
-  Report views are planned (H4 and H5). The sidebar's "Builder (soon)" is a placeholder, not a link.
+- **Suggestions, the graph, Settings, the Testing Lab and the Quality Report views are not built yet** (H5).
+- **The Builder's automated browser test uses a fake model**, so it is repeatable and needs no key. The real thing was
+  checked by hand with `node e2e/live.mjs` (real API, real model from your `.env`, real Edge): on 2026-11-19, with
+  Gemini (`gemini-3.5-flash-lite`), one sentence, one round of five questions, approval, build and save took about
+  21 seconds and 3 model calls, and produced `todo-fixme-counter` with its acceptance criterion covered by a positive, a
+  negative and an edge test, saved as v1. That is one run of one skill with one provider, not a benchmark. (Earlier runs
+  of the script failed twice, both times because of races in the script itself; a model that leaves an item unanswered
+  is simply asked again, which is the checklist working.)
+- **The Builder cannot edit a requirement.** If the reading of your words is wrong you start over with a clearer
+  description. Editing in place would need an API change.
+- **A running build cannot be cancelled** (the API has no cancel). You can leave the page and come back.
+- **Scripts in the builder** (the checkbox) have been tested over the API with a fake sandbox runner only, not through
+  this page with a real sandbox.
 - **Not tested in Chrome, Firefox or Safari**, only Edge (Chromium). Not tested with a screen reader: the semantics
   are there (landmarks, labels, live regions, a real `<dialog>`), but nobody has listened to it.
 - **No automated accessibility audit** (such as axe) has been run.

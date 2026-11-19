@@ -9,8 +9,10 @@ before asking what exists or what is next.** Built and tested: Understand (repos
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
 sandbox), Library (`library import|list|versions|diff|rollback|export|install`, see [docs/library.md](docs/library.md)),
 local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)),
-web UI shell + Library pages in `frontend/` ([docs/ui.md](docs/ui.md)).
-Next: the builder chat page (H4), then the other pages and Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
+web UI (Builder + Library pages) in `frontend/` ([docs/ui.md](docs/ui.md)).
+Next: pick a differentiator ([docs/differentiators.md](docs/differentiators.md): the generic skill-tool features are crowded; the gaps are code-level
+evidence + drift, a behavioural canary scan, and a risk diff per version), then the other UI pages and Settings (H5)
+([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
 
 ## Commands (run from `backend/`)
 

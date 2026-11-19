@@ -122,9 +122,12 @@ cd backend;  python -m skillforge serve     # terminal 1: the API
 cd frontend; npm run dev                    # terminal 2: the UI, at http://127.0.0.1:3000
 ```
 
-The Library is built: import a skill `.zip`, read its versions and files, compare versions, export, install and
-restore, all with the safety checks shown in plain words. The builder chat comes next. First-time setup and what was
-checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md).
+The **Builder** is the front door: describe a skill in a sentence, answer only what is missing, approve the requirement
+(each line shown beside the words of yours that back it), watch it build, see which tests cover each way you said you
+would know it works, and save it. The **Library** manages what you keep: versions, files, compare, export, install,
+restore, all with the safety checks shown in plain words. The Builder needs a model set up in `.env`. First-time setup and
+what was checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md). Where this project can be
+genuinely different from other skill tools: [docs/differentiators.md](docs/differentiators.md).
 
 ## Setup
 

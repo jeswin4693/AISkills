@@ -15,6 +15,7 @@ _SHAPES = (
     re.compile(r"AIza[0-9A-Za-z_\-]{20,}"),  # Google
     re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}"),  # Anthropic
     re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),  # OpenAI and compatible
+    re.compile(r"gsk_[A-Za-z0-9]{20,}"),  # Groq
     re.compile(r"\bbearer\s+[A-Za-z0-9._\-]{16,}", re.IGNORECASE),
 )
 

@@ -78,5 +78,11 @@ def test_redact_removes_exact_secrets_and_common_key_shapes():
     assert out.count("[redacted]") == 5
 
 
+def test_a_groq_shaped_key_is_removed_even_when_it_was_never_configured():
+    fake = "gsk_" + "X" * 52  # made up for this test: never a real key
+    out = redact(f"Invalid API Key: {fake} was rejected")
+    assert fake not in out and "gsk_" not in out and out.count("[redacted]") == 1
+
+
 def test_short_values_are_not_treated_as_secrets():
     assert redact("the word key appears", ["key", ""]) == "the word key appears"

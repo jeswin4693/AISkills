@@ -145,6 +145,125 @@ def test_adapter_reports_a_refusal():
         adapter(lambda request: httpx2.Response(200, json=body)).generate_structured(Answer, "q")
 
 
+# ---- usage, options and error kinds ------------------------------------------------------------------
+
+
+def ok_handler(seen=None, usage=None):
+    def handler(request):
+        if seen is not None:
+            seen["body"] = json.loads(request.content)
+            seen["request"] = request
+        body = completion(json.dumps({"word": "ok", "count": 3}))
+        if usage:
+            body["usage"] = usage
+        return httpx2.Response(200, json=body)
+    return handler
+
+
+def test_adapter_returns_usage_latency_and_served_model():
+    g = adapter(ok_handler(usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18})).generate(Answer, "q")
+    assert g.value == Answer(word="ok", count=3)
+    assert (g.usage.input_tokens, g.usage.output_tokens) == (11, 7)
+    assert g.model == "m" and g.latency_s >= 0
+
+
+def test_adapter_without_usage_reports_none_not_zero():
+    body = completion(json.dumps({"word": "ok", "count": 3}))
+    del body["usage"]
+    g = adapter(lambda request: httpx2.Response(200, json=body)).generate(Answer, "q")
+    assert (g.usage.input_tokens, g.usage.output_tokens) == (None, None)
+
+
+def test_adapter_forwards_options_only_when_set():
+    seen = {}
+    adapter(ok_handler(seen)).generate(Answer, "q", options=CallOptions(max_output_tokens=50, timeout_s=5.0))
+    assert seen["body"]["max_completion_tokens"] == 50
+    assert seen["request"].extensions["timeout"]["read"] == 5.0
+    seen.clear()
+    adapter(ok_handler(seen)).generate(Answer, "q")
+    assert "max_completion_tokens" not in seen["body"] and "max_tokens" not in seen["body"]
+
+
+def test_generate_structured_still_returns_just_the_value():
+    assert adapter(ok_handler()).generate_structured(Answer, "q") == Answer(word="ok", count=3)
+
+
+def test_default_client_has_no_hidden_retries_and_a_bounded_timeout():
+    p = OpenAICompatibleProvider(name="x", model="m", api_key="k", key_env="K", base_url="https://example.test/v1")
+    assert p._client.max_retries == 0
+    assert p._client.timeout.read == 90.0 and p._client.timeout.connect == 5.0
+    assert OpenAICompatibleProvider(name="x", model="m", api_key="k", key_env="K", timeout_s=30.0)._client.timeout.read == 30.0
+
+
+def test_adapter_declares_its_capabilities_and_secrets():
+    p = OpenAICompatibleProvider(name="x", model="m", api_key="the-key-value", key_env="K")
+    assert p.capabilities.structured_output == "json_schema" and p.secrets == ("the-key-value",)
+
+
+@pytest.mark.parametrize(
+    "status, body, kind",
+    [
+        (401, {"error": {"message": "bad key"}}, "auth"),
+        (403, {"error": {"message": "no permission"}}, "auth"),
+        (404, {"error": {"message": "model retired"}}, "model_missing"),
+        (400, {"error": {"message": "bad shape"}}, "bad_request"),
+        (408, {"error": {"message": "too slow"}}, "timeout"),
+        (429, {"error": {"message": "slow down"}}, "rate_limit"),
+        (429, {"error": {"message": "pay up", "code": "insufficient_quota"}}, "quota"),
+        (429, {"error": {"message": "You have no credits remaining"}}, "quota"),
+        (500, {"error": {"message": "oops"}}, "overloaded"),
+        (503, {"error": {"message": "overloaded"}}, "overloaded"),
+    ],
+)
+def test_http_errors_get_kinds(status, body, kind):
+    with pytest.raises(ProviderError) as info:
+        adapter(lambda request: httpx2.Response(status, json=body)).generate(Answer, "q")
+    assert info.value.kind == kind
+
+
+def test_network_failures_are_timeout_or_connection_and_retryable():
+    def timeout(request):
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    def refused(request):
+        raise httpx2.ConnectError("down", request=request)
+
+    with pytest.raises(ProviderError) as t:
+        adapter(timeout).generate(Answer, "q")
+    with pytest.raises(ProviderError) as c:
+        adapter(refused).generate(Answer, "q")
+    assert (t.value.kind, t.value.retryable) == ("timeout", True)
+    assert (c.value.kind, c.value.retryable) == ("connection", True)
+
+
+def test_429_reads_retry_after_from_the_header_or_the_message():
+    with pytest.raises(ProviderError) as h:
+        adapter(lambda request: httpx2.Response(429, json={"error": {"message": "x"}}, headers={"retry-after": "7"})).generate(Answer, "q")
+    assert h.value.retry_after_s == 7.0
+    with pytest.raises(ProviderError) as m:
+        adapter(lambda request: httpx2.Response(429, json={"error": {"message": "Quota hit. Please retry in 12.5s."}})).generate(Answer, "q")
+    assert m.value.retry_after_s == 12.5
+    with pytest.raises(ProviderError) as n:
+        adapter(lambda request: httpx2.Response(429, json={"error": {"message": "x"}}, headers={"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"})).generate(Answer, "q")
+    assert n.value.retry_after_s is None
+
+
+def test_a_length_cut_off_is_too_long_and_is_not_retried_with_the_same_prompt():
+    body = completion('{"word": "ok", "co')
+    body["choices"][0]["finish_reason"] = "length"
+    with pytest.raises(ProviderError) as info:
+        adapter(lambda request: httpx2.Response(200, json=body)).generate(Answer, "q")
+    assert info.value.kind == "too_long" and info.value.retryable is False
+
+
+def test_invalid_json_is_invalid_output_with_a_short_detail():
+    provider = adapter(lambda request: httpx2.Response(200, json=completion('{"word": "x"}')))
+    with pytest.raises(ProviderError) as info:
+        provider.generate(Answer, "q")
+    assert info.value.kind == "invalid_output" and info.value.retryable
+    assert 0 < len(info.value.detail) <= 600
+
+
 # ---- the provider contract ---------------------------------------------------------------------------
 
 

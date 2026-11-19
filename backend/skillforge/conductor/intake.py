@@ -15,6 +15,7 @@ from pathlib import PurePosixPath
 from ..build.requirements import normalise
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from .models import Assumption, Gap, Mention, Reading, StatedItem, TaskReading
 from .sizing import CODE_TASKS
 
@@ -53,7 +54,7 @@ def read_task(provider: LLMProvider, words: str, facts: str | None) -> tuple[Tas
     prompt = f"<user_words>\n{safe}\n</user_words>"
     if facts:
         prompt += f"\n\n<repository_facts>\n{facts}\n</repository_facts>"
-    return generate_with_retry(provider, TaskReading, prompt, INTAKE_SYSTEM)
+    return generate_with_retry(provider, TaskReading, prompt, INTAKE_SYSTEM, task=Task.EXTRACT)
 
 
 def _verified(items, source: str, label: str, notes: list[str]) -> list[StatedItem]:

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from .models import RequirementSpec, Script, SkillDraft
 from .scriptfiles import script_views
 
@@ -66,4 +67,4 @@ def design(
             "\n\nYour previous design did not pass these automatic checks. Fix every one of them and keep the rest:\n"
             + "\n".join(f"- {f}" for f in failures)
         )
-    return generate_with_retry(provider, SkillDraft, prompt, DESIGN_SYSTEM_WITH_SCRIPTS if scripts else DESIGN_SYSTEM)
+    return generate_with_retry(provider, SkillDraft, prompt, DESIGN_SYSTEM_WITH_SCRIPTS if scripts else DESIGN_SYSTEM, task=Task.DESIGN)

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from .models import SLOTS, Extraction, RequirementSpec
 
 QUESTIONS = {
@@ -97,7 +98,7 @@ def extract_spec(provider: LLMProvider, user_words: str, rounds: int = 1) -> tup
     """Returns (spec, notes about rejected quotes, model calls used)."""
     safe = user_words.replace("</user_words>", "").replace("<user_words>", "")
     prompt = f"<user_words>\n{safe}\n</user_words>"
-    ext, calls = generate_with_retry(provider, Extraction, prompt, EXTRACT_SYSTEM)
+    ext, calls = generate_with_retry(provider, Extraction, prompt, EXTRACT_SYSTEM, task=Task.EXTRACT)
     spec, notes = verify_extraction(ext, user_words, rounds)
     return spec, notes, calls
 

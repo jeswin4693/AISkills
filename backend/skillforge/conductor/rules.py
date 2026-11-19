@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from .models import AppliedRule, Rule, RuleSelection, StatedItem
 
 RULE_FILES = ("CLAUDE.md", "AGENTS.md", ".claude/CLAUDE.md")
@@ -93,7 +94,7 @@ def select_rules(provider: LLMProvider, words: str, rules: list[Rule]) -> tuple[
     listing = "\n".join(f"{r.id} [{r.heading or 'no heading'}] {r.text}" for r in rules).replace("</rules>", "")
     safe = words.replace("</user_words>", "").replace("<user_words>", "")
     prompt = f"<user_words>\n{safe}\n</user_words>\n\n<rules>\n{listing}\n</rules>"
-    answer, calls = generate_with_retry(provider, RuleSelection, prompt, SELECT_SYSTEM)
+    answer, calls = generate_with_retry(provider, RuleSelection, prompt, SELECT_SYSTEM, task=Task.SELECT)
     by_id = {r.id: r for r in rules}
     chosen: list[tuple[Rule, str]] = []
     notes: list[str] = []

@@ -43,7 +43,7 @@ class ProfileSet:
         return tuple(dict.fromkeys(s for p in self.all() for s in getattr(p.provider, "secrets", ())))
 
 
-def _positive(env: Mapping[str, str], name: str, cast: Callable[[str], float]) -> float | None:
+def positive_number(env: Mapping[str, str], name: str, cast: Callable[[str], float]) -> float | None:
     raw = env.get(name, "").strip()
     if not raw:
         return None
@@ -58,8 +58,8 @@ def _positive(env: Mapping[str, str], name: str, cast: Callable[[str], float]) -
 
 def load_profiles(env: Mapping[str, str] | None = None) -> ProfileSet:
     env = os.environ if env is None else env
-    global_timeout = _positive(env, "LLM_TIMEOUT_S", float)
-    max_input = _positive(env, "LLM_MAX_INPUT_TOKENS", int)
+    global_timeout = positive_number(env, "LLM_TIMEOUT_S", float)
+    max_input = positive_number(env, "LLM_MAX_INPUT_TOKENS", int)
     default_timeout = global_timeout or DEFAULT_TIMEOUT_S
     default_provider = build_provider(env.get("LLM_PROVIDER", ""), env.get("LLM_MODEL", ""), env, timeout_s=default_timeout)
     default = Profile("default", default_provider, CallOptions(timeout_s=default_timeout), int(max_input) if max_input else None)
@@ -84,9 +84,9 @@ def load_profiles(env: Mapping[str, str] | None = None) -> ProfileSet:
     tiers: dict[Tier, Profile] = {}
     for tier in Tier:
         prefix = tier.name
-        own_timeout = _positive(env, f"LLM_{prefix}_TIMEOUT_S", float)
+        own_timeout = positive_number(env, f"LLM_{prefix}_TIMEOUT_S", float)
         timeout = own_timeout or global_timeout or (CODE_TIMEOUT_S if tier is Tier.CODE else DEFAULT_TIMEOUT_S)
-        max_out = _positive(env, f"LLM_{prefix}_MAX_OUTPUT_TOKENS", int)
+        max_out = positive_number(env, f"LLM_{prefix}_MAX_OUTPUT_TOKENS", int)
         provider = override(prefix, f"the {tier.value} tier", timeout) or default_provider
         tiers[tier] = Profile(
             tier.value, provider, CallOptions(timeout_s=timeout, max_output_tokens=int(max_out) if max_out else None), default.max_input_tokens

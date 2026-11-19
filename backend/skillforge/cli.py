@@ -20,7 +20,8 @@ from .evaluate import load_files, run_eval
 from .graph import query
 from .graph.build import build_graph
 from .library import Library, LibraryError, compare_with_risk, export_skill, import_skill, install_skill, rescan, rollback
-from .providers import ProviderError, provider_from_env
+from .ai import service_from_env
+from .providers import LLMProvider, ProviderError
 from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
 from .suggest.pipeline import SuggestReport
@@ -168,6 +169,11 @@ def _render_suggestions(r: SuggestReport) -> str:
         lines += [f"  - {d.title}: {d.reason}" for d in r.dropped]
     lines += [f"\nnote: {n}" for n in r.notes]
     return "\n".join(lines)
+
+
+def provider_from_env() -> LLMProvider:
+    """The model service for this run. The commands look it up by this name, so a test can replace it."""
+    return service_from_env()
 
 
 def _run_suggest(args: argparse.Namespace) -> int:

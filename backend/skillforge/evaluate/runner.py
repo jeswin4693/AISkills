@@ -26,6 +26,7 @@ from ..build.models import SkillTest
 from ..build.quality import estimate_tokens
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from ..results import NOT_RUN, PASSED, WARNING, CheckResult
 from .grade import AssertionResult, grade
 
@@ -203,7 +204,7 @@ def _clean(text: str, tag: str) -> str:
 
 
 def _ask(provider: LLMProvider, system: str, message: str) -> tuple[str, int]:
-    reply, used = generate_with_retry(provider, Reply, USER_PROMPT.format(message=_clean(message, "request")), system)
+    reply, used = generate_with_retry(provider, Reply, USER_PROMPT.format(message=_clean(message, "request")), system, task=Task.ACT)
     return reply.text, used
 
 

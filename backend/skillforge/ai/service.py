@@ -14,13 +14,14 @@ import logging
 import random
 import threading
 import time
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 from ..providers.base import CallOptions, Generation, LLMProvider, ProviderError, T, Usage
 from .policy import NO_WAIT, Policy, decide
-from .profiles import Profile, ProfileSet
+from .profiles import Profile, ProfileSet, load_profiles, positive_number
 from .redact import redact
 from .tasks import TIER_OF, Task
 
@@ -222,3 +223,14 @@ class AIService:
             ))
         except Exception:  # noqa: BLE001 - keeping count must never break the call it is counting
             log.exception("could not record model usage")
+
+
+def service_from_env(env: Mapping[str, str] | None = None) -> AIService:
+    """The model service for this run, built from an environment mapping (`os.environ` when none is given).
+
+    Settings are read here and nowhere else (docs/ai-engine.md). With none of the optional ones set this is one model for every
+    task: the behaviour from before tiers existed."""
+    env = os.environ if env is None else env
+    profiles = load_profiles(env)
+    limit = positive_number(env, "LLM_MAX_CALLS", int)
+    return AIService(profiles, max_calls=int(limit) if limit else None)

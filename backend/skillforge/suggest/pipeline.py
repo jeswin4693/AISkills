@@ -10,6 +10,7 @@ from ..graph import query
 from ..graph.model import RepoGraph
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
+from ..ai.tasks import Task
 from .facts import Fact, collect_facts
 from .ground import Dropped, GroundedSuggestion, ground
 from .models import SuggestionSet
@@ -52,7 +53,7 @@ class SuggestReport:
 
 
 def _ask(provider: LLMProvider, prompt: str, system: str, attempts: int) -> tuple[SuggestionSet, int]:
-    return generate_with_retry(provider, SuggestionSet, prompt, system, attempts)
+    return generate_with_retry(provider, SuggestionSet, prompt, system, attempts, task=Task.SUGGEST)
 
 
 def suggest(

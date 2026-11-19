@@ -1,0 +1,133 @@
+"""Skill packages: read a folder or a zip into memory safely, and write a zip that is the same every time.
+
+Nothing here runs or evaluates anything. A downloaded zip is untrusted: it is read with limits (entry count, size
+per file, size in total), links and encrypted entries are reported, and a name that would leave the folder is kept
+as it is so that the static validator fails it. Nothing is extracted to disk by this module.
+"""
+
+from __future__ import annotations
+
+import io
+import stat
+import zipfile
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+from ..validate.static import MAX_FILE, MAX_TOTAL, read_dir
+
+MAX_ENTRIES = 1000
+ZIP_DATE = (1980, 1, 1, 0, 0, 0)  # a fixed time stamp, so the same files always give the same zip
+IGNORED = ("__MACOSX/",)  # what macOS adds to a zip; never part of a skill
+
+
+class LibraryError(Exception):
+    """Something the person can act on. Nothing was changed."""
+
+
+@dataclass
+class SkillSource:
+    files: dict[str, bytes]
+    problems: list[tuple[str, str]]  # (kind, message), as read_dir reports them
+    kind: str  # "folder" or "zip"
+    label: str  # the name of the folder or file, never its full path
+    folder: str | None  # the folder name the skill sat in, when there was one
+
+
+def read_source(path: Path) -> SkillSource:
+    path = Path(path)
+    if path.is_dir():
+        files, problems = read_dir(path)
+        return SkillSource(files, problems, "folder", path.resolve().name, path.resolve().name)
+    if path.is_file():
+        if zipfile.is_zipfile(path):
+            return _read_zip(path)
+        raise LibraryError(f"{path.name} is a file but not a zip. Give a skill folder or a .zip of one.")
+    raise LibraryError(f"{path} does not exist. Give a skill folder or a .zip of one.")
+
+
+def _read_zip(path: Path) -> SkillSource:
+    problems: list[tuple[str, str]] = []
+    files: dict[str, bytes] = {}
+    try:
+        archive = zipfile.ZipFile(path)
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise LibraryError(f"{path.name} cannot be read as a zip: {exc}") from exc
+    with archive:
+        infos = [i for i in archive.infolist() if not i.is_dir() and not i.filename.startswith(IGNORED)]
+        infos = [i for i in infos if PurePosixPath(i.filename).name != ".DS_Store"]
+        if len(infos) > MAX_ENTRIES:
+            problems.append(("size", f"the zip holds {len(infos)} files (limit {MAX_ENTRIES})"))
+            return SkillSource({}, problems, "zip", path.name, None)
+        total = 0
+        for info in infos:
+            name = info.filename
+            if name in files:
+                problems.append(("duplicate", f"{name} appears twice in the zip"))
+                continue
+            if stat.S_ISLNK(info.external_attr >> 16):
+                problems.append(("symlink", f"{name} is a symbolic link"))
+                continue
+            if info.flag_bits & 0x1:
+                problems.append(("unreadable", f"{name} is encrypted"))
+                continue
+            if info.file_size > MAX_FILE:
+                problems.append(("size", f"{name} is {info.file_size} bytes (limit {MAX_FILE})"))
+                continue
+            try:
+                with archive.open(info) as handle:
+                    data = handle.read(MAX_FILE + 1)  # never trust the size the zip declares
+            except (zipfile.BadZipFile, RuntimeError, NotImplementedError, OSError, EOFError) as exc:
+                problems.append(("unreadable", f"{name}: {exc}"))
+                continue
+            if len(data) > MAX_FILE:
+                problems.append(("size", f"{name} unpacks to more than {MAX_FILE} bytes"))
+                continue
+            total += len(data)
+            if total > MAX_TOTAL:
+                problems.append(("size", f"the zip unpacks to more than {MAX_TOTAL} bytes"))
+                break
+            files[name] = data
+    return _strip_top_folder(files, problems, path.name)
+
+
+def _strip_top_folder(files: dict[str, bytes], problems: list[tuple[str, str]], label: str) -> SkillSource:
+    """A skill zip usually holds one folder named after the skill. Use what is inside it."""
+    tops = {PurePosixPath(n).parts[0] for n in files if PurePosixPath(n).parts}
+    if "SKILL.md" not in files and len(tops) == 1:
+        top = next(iter(tops))
+        if f"{top}/SKILL.md" in files and top not in ("", ".", ".."):
+            stripped = {n[len(top) + 1:]: d for n, d in files.items() if n.startswith(top + "/")}
+            return SkillSource(stripped, problems, "zip", label, top)
+    return SkillSource(files, problems, "zip", label, None)
+
+
+def zip_bytes(name: str, files: Mapping[str, bytes]) -> bytes:
+    """A zip holding `<name>/<file>` for every file, sorted, with fixed time stamps and modes.
+
+    The same files always give the same bytes on the same machine (the compressed bytes can differ between
+    versions of the zlib library)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for rel in sorted(files):
+            info = zipfile.ZipInfo(f"{name}/{rel}", ZIP_DATE)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            info.create_system = 3
+            archive.writestr(info, files[rel])
+    return buffer.getvalue()
+
+
+def write_tree(out_dir: Path, files: Mapping[str, bytes]) -> None:
+    """Write files under out_dir. A path that leaves the folder is refused, whatever checked it before."""
+    out_dir = out_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for rel, data in files.items():
+        parts = PurePosixPath(rel).parts
+        if not parts or rel.startswith("/") or "\\" in rel or ".." in parts or (len(rel) > 1 and rel[1] == ":"):
+            raise ValueError(f"Refusing to write outside the folder: {rel}")
+        target = (out_dir / rel).resolve()
+        if out_dir not in target.parents:
+            raise ValueError(f"Refusing to write outside the folder: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)

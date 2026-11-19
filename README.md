@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build, Safety and Scripts are built and tested; Suggest, Build and Scripts are verified live with Gemini.**
+Status: **Understand, Suggest, Build, Safety, Scripts and the skill Library (import, versions, export, install) are built and tested; Suggest, Build and Scripts are verified live with Gemini.**
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -17,6 +17,7 @@ See [docs/roadmap.md](docs/roadmap.md).
 AISkills/
 ├── backend/
 │   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
+│   ├── skillforge/library/ # skill versions: import (checked), diff, rollback, export, install (no AI)
 │   ├── skillforge/cli.py   # `python -m skillforge ...`
 │   ├── tests/              # offline tests, no key or network needed
 │   └── scripts/            # Step 0 smoke test for the LLM provider
@@ -80,6 +81,22 @@ your machine directly.
 cd backend
 python -m skillforge validate C:\path\to\skill-folder   # exit code 1 if a check failed
 python -m skillforge sandbox-status                     # is a safe place to run scripts available?
+```
+
+## Keep skills as versions
+
+Import a skill folder or `.zip` (made here or downloaded): it is checked first and **refused if a check fails**.
+Accepted skills are kept as v1, v2, ... that you can diff, roll back, export as a `.zip` or install where an agent
+reads them ([docs/library.md](docs/library.md)). Needs no AI and no key; importing never runs a script.
+
+```powershell
+cd backend
+python -m skillforge library import generated-skills\my-skill    # or a .zip
+python -m skillforge library list
+python -m skillforge library diff my-skill                       # what changed since the version before
+python -m skillforge library rollback my-skill --to 1            # a new version with the content of v1
+python -m skillforge library export my-skill --out my-skill.zip
+python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>
 ```
 
 ## Setup

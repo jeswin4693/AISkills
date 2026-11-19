@@ -1,0 +1,221 @@
+"""Import, export, install and roll back skills. Every path that lets a skill in or out is gated by the static checks.
+
+Nothing here runs a script on this machine. An import can ask the sandbox to re-run the skill's own test cases
+(`test_scripts=True`); without a Linux sandbox those cases are reported as "not run", never as passed.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+from ..build.models import SkillDefinition
+from ..build.scriptfiles import script_files
+from ..build.scripts import SANDBOX_ROW, ScriptRunner, check_scripts, run_script_tests
+from ..results import FAILED, NOT_RUN, WARNING, CheckResult
+from ..validate import validate_files
+from ..validate.static import SLUG
+from .package import LibraryError, SkillSource, read_source, write_tree, zip_bytes
+from .store import MAX_NAME, FileChange, Library, Version, diff_files
+
+
+def skill_name_of(files: Mapping[str, bytes]) -> str | None:
+    """The name in SKILL.md's front matter, or None when it is missing or not a safe name."""
+    try:
+        text = files["SKILL.md"].decode("utf-8").replace("\r\n", "\n")
+        match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
+        meta = yaml.safe_load(match.group(1)) if match else None
+    except (KeyError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    name = meta.get("name") if isinstance(meta, dict) else None
+    return name if isinstance(name, str) and SLUG.match(name) and len(name) <= MAX_NAME else None
+
+
+def _definition(files: Mapping[str, bytes]) -> SkillDefinition | None:
+    try:
+        return SkillDefinition.model_validate_json(files["skill.sdm.json"].decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _same_text(a: bytes | None, b: str) -> bool:
+    return a is not None and a.decode("utf-8", errors="replace").replace("\r\n", "\n") == b
+
+
+def retest_scripts(files: Mapping[str, bytes], runner: ScriptRunner | None = None) -> list[CheckResult]:
+    """Run the skill's own script cases in the sandbox. Only skills built here carry cases (in skill.sdm.json).
+
+    The cases are run from the definition, so first the folder's scripts must be exactly what the definition says:
+    otherwise the test would not be testing what ships."""
+    def not_run(why: str) -> list[CheckResult]:
+        return [CheckResult(SANDBOX_ROW, NOT_RUN, why)]
+
+    sdm = _definition(files)
+    if sdm is None:
+        return not_run("this skill has no readable skill.sdm.json, so it carries no test cases that can be run")
+    if not sdm.scripts:
+        return not_run("skill.sdm.json lists no scripts, but the folder has some")
+    expected = script_files(sdm.scripts, sdm.script_cases)
+    shipped = {rel for rel in files if rel.startswith("scripts/") or rel.startswith("tests/fixtures/")}
+    differs = sorted({rel for rel, text in expected.items() if not _same_text(files.get(rel), text)} | (shipped - set(expected)))
+    if differs:
+        return not_run("the folder's scripts or fixtures differ from skill.sdm.json (" + ", ".join(differs[:4]) + "), so a re-test would not test what ships")
+    structural = [c for c in check_scripts(sdm.scripts, sdm.script_cases) if c.status in (FAILED, WARNING)]
+    return structural + run_script_tests(sdm.scripts, sdm.script_cases, runner).results
+
+
+def _gate(files: Mapping[str, bytes], folder: str | None, problems: list[tuple[str, str]] | None = None) -> list[CheckResult]:
+    """Every static check. `folder` is the folder name the skill sat in, or None when there was none to compare."""
+    return validate_files(files, folder=folder, problems=problems)
+
+
+def _failed(checks: list[CheckResult]) -> list[CheckResult]:
+    return [c for c in checks if c.status == FAILED]
+
+
+# ---- import ------------------------------------------------------------------------------------------
+
+
+@dataclass
+class ImportReport:
+    checks: list[CheckResult]
+    name: str | None = None
+    version: Version | None = None  # None when the skill was refused
+    created: bool = False  # False: refused, or identical to the latest version
+    previous: Version | None = None
+    changes: list[FileChange] = field(default_factory=list)  # against the previous version
+
+    @property
+    def refused(self) -> bool:
+        return self.version is None
+
+
+def import_skill(
+    source: Path, library: Library, *, test_scripts: bool = False, runner: ScriptRunner | None = None,
+    note: str = "", now: datetime | None = None,
+) -> ImportReport:
+    """Read a folder or zip, run every static check, and keep it as the next version only if none failed.
+
+    A refused skill leaves the library untouched."""
+    src: SkillSource = read_source(source)
+    checks = _gate(src.files, src.folder, src.problems)
+    name = skill_name_of(src.files)
+    has_scripts = any(rel.startswith("scripts/") for rel in src.files)
+    if has_scripts:
+        if test_scripts and not _failed(checks):
+            checks += retest_scripts(src.files, runner)
+        else:
+            why = "not asked for (add --test-scripts)" if not test_scripts else "the static checks failed first"
+            checks.append(CheckResult(SANDBOX_ROW, NOT_RUN, why))
+    if name is None or _failed(checks):
+        return ImportReport(checks, name)
+    previous = (library.versions(name) or [None])[-1]
+    sdm = _definition(src.files)
+    version, created = library.add(
+        name, src.files, source_kind=src.kind, source_label=src.label, note=note,
+        skill_version=sdm.version if sdm else "", checks=checks, now=now,
+    )
+    changes: list[FileChange] = []
+    if created and previous is not None:
+        _, old_files = library.read(name, previous.version)
+        changes = diff_files(old_files, src.files)
+    return ImportReport(checks, name, version, created, previous, changes)
+
+
+# ---- rollback ----------------------------------------------------------------------------------------
+
+
+def rollback(library: Library, name: str, to: int, *, now: datetime | None = None) -> tuple[Version, bool]:
+    """A new version with the content of an old one. History is never rewritten or deleted."""
+    old, files = library.read(name, to)
+    checks = _gate(files, name)
+    if _failed(checks):
+        raise LibraryError(f"{name} {old.tag} no longer passes the checks ({_failed(checks)[0].name}), so it was not restored.")
+    return library.add(
+        name, files, source_kind="rollback", source_label=old.tag, note=f"restored the content of {old.tag}",
+        skill_version=old.skill_version, checks=checks, now=now,
+    )
+
+
+# ---- export ------------------------------------------------------------------------------------------
+
+
+@dataclass
+class ExportReport:
+    path: Path
+    version: Version
+    files: int
+    dropped: list[str]
+    has_scripts: bool
+
+
+def export_skill(
+    library: Library, name: str, version: int | None, out: Path | None, *, without_spec: bool = False, force: bool = False,
+) -> ExportReport:
+    """Write one version as a zip with a single `<name>/` folder, ready to share. It is checked again first."""
+    v, files = library.read(name, version)
+    failed = _failed(_gate(files, name))
+    if failed:
+        raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not exported.")
+    dropped: list[str] = []
+    if without_spec and "spec.json" in files:  # spec.json holds the requester's own words
+        files = {rel: d for rel, d in files.items() if rel != "spec.json"}
+        dropped.append("spec.json")
+    target = Path(out) if out else Path.cwd() / f"{name}-{v.tag}.zip"
+    if target.exists() and not force:
+        raise LibraryError(f"{target} already exists. Use --force to replace it, or choose another --out.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(zip_bytes(name, files))
+    return ExportReport(target, v, len(files), dropped, any(rel.startswith("scripts/") for rel in files))
+
+
+# ---- install -----------------------------------------------------------------------------------------
+
+
+@dataclass
+class InstallReport:
+    path: Path
+    version: Version
+    backup: Path | None
+    has_scripts: bool
+
+
+def install_skill(
+    library: Library, name: str, version: int | None, skills_dir: Path, *, force: bool = False, now: datetime | None = None,
+) -> InstallReport:
+    """Copy one version to `<skills_dir>/<name>`, where an agent such as Claude Code reads skills. Checked again first.
+
+    An existing folder is never touched unless force is given, and then it is copied to the library's backups first."""
+    v, files = library.read(name, version)
+    failed = _failed(_gate(files, name))
+    if failed:
+        raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not installed.")
+    skills_dir = Path(skills_dir)
+    target = skills_dir / name
+    backup: Path | None = None
+    if target.is_symlink():
+        raise LibraryError(f"{target} is a link. It was left alone.")
+    if target.exists():
+        if not force:
+            raise LibraryError(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
+        stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
+        backup = library.backups / f"{name}-{stamp}"
+        shutil.copytree(target, backup, symlinks=True)
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=skills_dir))  # built aside, then moved into place
+    try:
+        write_tree(staging, files)
+        if target.exists():
+            shutil.rmtree(target)
+        staging.rename(target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return InstallReport(target, v, backup, any(rel.startswith("scripts/") for rel in files))

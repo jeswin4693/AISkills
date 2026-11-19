@@ -17,7 +17,7 @@ python -m skillforge validate C:\path\to\skill-folder --json
 |---|---|
 | `SKILL.md` exists, front matter is valid YAML, name is a safe slug, description is present and within 1024 characters | failed |
 | folder name matches the skill name | warning |
-| no symbolic links, no paths that leave the folder | failed |
+| no symbolic links, no repeated file names (zips), no paths that leave the folder | failed |
 | file sizes within limits (1 MB per file, 5 MB total, `SKILL.md` 100 KB) | failed |
 | no invisible or direction-changing characters (zero-width, bidi overrides, tag characters) in text files | failed, with file and line |
 | no HTML comments or script tags in Markdown | warning |

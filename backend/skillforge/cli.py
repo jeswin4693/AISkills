@@ -16,6 +16,8 @@ from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, r
 from .build.requirements import Question
 from .graph import query
 from .graph.build import build_graph
+from .library import Library, LibraryError, export_skill, import_skill, install_skill, rollback
+from .library.store import diff_files
 from .providers import ProviderError, provider_from_env
 from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
@@ -355,6 +357,129 @@ def _run_sandbox_status(args: argparse.Namespace) -> int:
     return 0 if s.available else 1
 
 
+def _when(stamp: str) -> str:
+    return stamp[:16].replace("T", " ")
+
+
+def _render_check_lines(checks: list) -> list[str]:
+    lines = [f"  FAILED: {c.name}: {c.detail}" for c in checks if c.status == "failed"]
+    lines += [f"  warning: {c.name}: {c.detail}" for c in checks if c.status == "warning"]
+    lines += [f"  not run: {c.name}" + (f" ({c.detail})" if c.detail else "") for c in checks if c.status == "not run"]
+    return lines
+
+
+def _render_changes(changes: list, with_text: bool) -> list[str]:
+    lines = []
+    for c in changes:
+        lines.append(f"  {c.status:8} {c.path}" + ("  (binary)" if c.binary else ""))
+        if with_text and c.text:
+            lines += ["    " + t for t in c.text.splitlines()]
+    return lines
+
+
+def _render_import(r) -> str:
+    ran = [c for c in r.checks if c.status != "not run"]
+    failed = [c for c in ran if c.status == "failed"]
+    warned = [c for c in ran if c.status == "warning"]
+    counts = f"{len(ran) - len(failed) - len(warned)} passed, {len(warned)} warning(s), {len(failed)} failed, {len(r.checks) - len(ran)} not run"
+    if r.refused:
+        lines = [f"Refused: nothing was added to the library. Checks: {counts}"]
+        if r.name is None and not failed:
+            lines.append("  FAILED: SKILL.md has no usable name")
+        return "\n".join(lines + _render_check_lines(r.checks))
+    v = r.version
+    if not r.created:
+        head = f"Unchanged: '{r.name}' is identical to {v.tag} in the library, so no new version was made."
+    elif r.previous is None:
+        head = f"Imported '{r.name}' as {v.tag} (first version)."
+    else:
+        head = f"Imported '{r.name}' as {v.tag} (new version after {r.previous.tag}; {len(r.changes)} file(s) differ)."
+    lines = [head, f"Checks: {counts}", *_render_check_lines(r.checks)]
+    if r.created and r.changes:
+        lines += ["Changes since " + r.previous.tag + ":", *_render_changes(r.changes, with_text=False)]
+    lines.append("Static checks only: nothing was run unless a line above says so, and passing is not proof the skill is safe.")
+    return "\n".join(lines)
+
+
+def _run_library(args: argparse.Namespace) -> int:
+    lib = Library()
+    cmd = args.command
+    if cmd == "import":
+        report = import_skill(Path(args.source), lib, test_scripts=args.test_scripts, note=args.note or "")
+        print(_render_import(report))
+        return 1 if report.refused else 0
+    if cmd == "list":
+        names = lib.names()
+        print(f"Library: {lib.root}")
+        if not names:
+            print("No skills yet. Add one with: library import <folder or .zip>")
+        for name in names:
+            try:
+                versions = lib.versions(name)
+                latest = versions[-1]
+                print(f"  {name:30} {latest.tag:5} {len(versions)} version(s), updated {_when(latest.created_at)}")
+            except (LibraryError, IndexError) as exc:
+                print(f"  {name:30} DAMAGED: {exc}")
+        return 0
+    if cmd == "versions":
+        versions = lib.versions(args.name)
+        if not versions:
+            raise LibraryError(f"There is no skill named '{args.name}' in the library.")
+        for v in reversed(versions):
+            extra = f"  skill version {v.skill_version}" if v.skill_version else ""
+            note = f"  \"{v.note}\"" if v.note else ""
+            print(
+                f"{v.tag:5} {_when(v.created_at)}  from {v.source_kind} {v.source_label}{extra}{note}\n"
+                f"      {len(v.files)} file(s), content {v.content_hash[:12]}; checks: {v.count('passed')} passed, "
+                f"{v.count('warning')} warning(s), {v.count('failed')} failed, {v.count('not run')} not run"
+            )
+        return 0
+    if cmd == "diff":
+        versions = lib.versions(args.name)
+        if not versions:
+            raise LibraryError(f"There is no skill named '{args.name}' in the library.")
+        newer = lib.pick(args.name, args.to) if args.to else versions[-1]
+        if args.frm is not None:
+            older = lib.pick(args.name, args.frm)
+        else:
+            before = [v for v in versions if v.version < newer.version]
+            if not before:
+                raise LibraryError(f"{args.name} {newer.tag} is the first version, so there is nothing before it. Use --from.")
+            older = before[-1]
+        _, old_files = lib.read(args.name, older.version)
+        _, new_files = lib.read(args.name, newer.version)
+        changes = diff_files(old_files, new_files)
+        print(f"{args.name}: {older.tag} -> {newer.tag}: " + (f"{len(changes)} file(s) differ" if changes else "identical"))
+        print("\n".join(_render_changes(changes, with_text=True)))
+        return 0
+    if cmd == "rollback":
+        version, created = rollback(lib, args.name, args.to)
+        if created:
+            print(f"Restored: '{args.name}' is now {version.tag}, with the content of v{args.to}. Older versions are kept.")
+        else:
+            print(f"Nothing to do: the latest version of '{args.name}' already has the content of v{args.to}.")
+        return 0
+    if cmd == "export":
+        r = export_skill(lib, args.name, args.version, Path(args.out) if args.out else None, without_spec=args.without_spec, force=args.force)
+        print(f"Exported '{args.name}' {r.version.tag} ({r.files} file(s)) to {r.path}")
+        if r.dropped:
+            print(f"Left out on request: {', '.join(r.dropped)}")
+        elif "spec.json" in r.version.files:
+            print("It includes spec.json, which holds the words of the person who asked for the skill. Use --without-spec to leave it out.")
+        if r.has_scripts:
+            print("This skill has scripts. Whoever uses it should read them first: an agent runs them on that machine, not in a sandbox.")
+        return 0
+    # install
+    skills_dir = Path.home() / ".claude" / "skills" if args.personal else Path.cwd() / ".claude" / "skills" if args.project else Path(args.to)
+    r = install_skill(lib, args.name, args.version, skills_dir, force=args.force)
+    print(f"Installed '{args.name}' {r.version.tag} to {r.path}")
+    if r.backup:
+        print(f"The folder that was there was copied to {r.backup} first.")
+    if r.has_scripts:
+        print("This skill has scripts. When an agent uses it they run on this machine, not in the sandbox. Read them first.")
+    return 0
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("repo", help="path of the repository to analyse")
     p.add_argument("--focus", help="only analyse this folder of the repository")
@@ -429,6 +554,37 @@ def _parser() -> argparse.ArgumentParser:
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
 
+    lib = area.add_parser("library", help="keep skills as versions: import (checked first), diff, rollback, export, install")
+    ops = lib.add_subparsers(dest="command", required=True)
+    p = ops.add_parser("import", help="check a skill folder or .zip and keep it as the next version (refused if a check fails)")
+    p.add_argument("source", help="a skill folder (the one with SKILL.md) or a .zip of one")
+    p.add_argument("--test-scripts", action="store_true", help="also re-run the skill's own script cases in the Linux sandbox")
+    p.add_argument("--note", help="a short note stored with the version")
+    ops.add_parser("list", help="the skills in the library")
+    p = ops.add_parser("versions", help="every version of one skill")
+    p.add_argument("name")
+    p = ops.add_parser("diff", help="what changed between two versions (default: the latest and the one before)")
+    p.add_argument("name")
+    p.add_argument("--from", dest="frm", type=int, metavar="N", help="the older version number")
+    p.add_argument("--to", type=int, metavar="N", help="the newer version number")
+    p = ops.add_parser("rollback", help="make a new version with the content of an old one (nothing is deleted)")
+    p.add_argument("name")
+    p.add_argument("--to", type=int, required=True, metavar="N", help="the version whose content to restore")
+    p = ops.add_parser("export", help="write a version as a .zip to share (checked again first)")
+    p.add_argument("name")
+    p.add_argument("--version", type=int, metavar="N", help="default: the latest")
+    p.add_argument("--out", help="the .zip to write (default: NAME-vN.zip in the current folder)")
+    p.add_argument("--without-spec", action="store_true", help="leave out spec.json, which holds the requester's own words")
+    p.add_argument("--force", action="store_true", help="replace an existing .zip")
+    p = ops.add_parser("install", help="copy a version to a skills folder where an agent reads it (checked again first)")
+    p.add_argument("name")
+    p.add_argument("--version", type=int, metavar="N", help="default: the latest")
+    where = p.add_mutually_exclusive_group(required=True)
+    where.add_argument("--personal", action="store_true", help="~/.claude/skills: every Claude Code session on this machine")
+    where.add_argument("--project", action="store_true", help=".claude/skills in the current folder: this project only")
+    where.add_argument("--to", metavar="DIR", help="any skills folder; the skill goes to DIR/NAME")
+    p.add_argument("--force", action="store_true", help="replace an existing folder (the old one is copied to a backup first)")
+
     lg = area.add_parser("languages", help="which programming languages are supported, and how deeply")
     lg.add_argument("--download", action="store_true", help="fetch the grammars of the standard languages now")
     lg.add_argument("--download-all", action="store_true", help="fetch every grammar in the table now")
@@ -440,17 +596,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
+            "library": _run_library,
         }[args.area]
         try:
             return handler(args)
         except NeedAnswers as exc:
             print(_need_answers_message(exc), file=sys.stderr)
             return 2
-        except (ProviderError, BuildError, query.QueryError, NotADirectoryError, OSError, ValueError) as exc:
+        except (ProviderError, BuildError, LibraryError, query.QueryError, NotADirectoryError, OSError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     try:

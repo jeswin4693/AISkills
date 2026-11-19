@@ -86,6 +86,11 @@ def test_paths_that_leave_the_folder_and_oversized_files_fail():
     assert status(run(good(), problems=[("size", "huge.bin is 9999999 bytes (limit 1000000)")]), N_SIZE) == FAILED
 
 
+def test_a_name_that_appears_twice_in_a_package_fails_the_path_check():
+    r = run(good(), problems=[("duplicate", "SKILL.md appears twice in the zip")])[N_PATHS]
+    assert r.status == FAILED and "appears twice" in r.detail
+
+
 # ---- hidden text and injection patterns --------------------------------------------------------------------
 
 

@@ -126,7 +126,7 @@ def _check_skill_md(files: Mapping[str, bytes], folder: str | None) -> list[Chec
 
 
 def _check_paths_and_size(files: Mapping[str, bytes], problems: list[tuple[str, str]]) -> list[CheckResult]:
-    bad = [msg for kind, msg in problems if kind == "symlink"]
+    bad = [msg for kind, msg in problems if kind in ("symlink", "duplicate")]  # a repeated name: which copy would an agent read?
     for rel in files:
         parts = PurePosixPath(rel).parts
         if ".." in parts or rel.startswith("/") or "\\" in rel or re.match(r"^[A-Za-z]:", rel):

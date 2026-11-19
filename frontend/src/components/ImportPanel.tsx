@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
 import type { ImportResult } from "@/lib/types";
 import { CheckList } from "./CheckList";
+import { RiskSummary } from "./RiskSummary";
 import { Alert, Card } from "./ui";
 
 function ImportResultView({ result, onDismiss }: { result: ImportResult; onDismiss: () => void }) {
@@ -146,6 +147,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
       <div aria-live="polite" className="mt-3 space-y-2">
         {error && <Alert tone="bad" title="The import could not be done" onDismiss={() => setError(null)}>{error}</Alert>}
         {result && <ImportResultView result={result} onDismiss={() => setResult(null)} />}
+        {result?.risk && <RiskSummary risk={result.risk} />}
         {result && (
           <p className="text-xs text-muted">Static checks only: nothing was run unless a line says so, and passing is not proof that a skill is safe.</p>
         )}

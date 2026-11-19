@@ -56,6 +56,9 @@ Build a small version first and measure it against known-bad examples before cla
 
 ### 3. A risk diff on every version, and a re-scan of the whole library (the cheapest, visible in the UI)
 
+**Built on 2026-11-19** (the first one built, because it was the cheapest): see [library.md](library.md), "Risk diff" and
+"Rescan". It was tested on synthetic skills only; its false-alarm rate on real skills is not measured.
+
 Orca's central finding is that skills are scanned once, then changed: **a one-time scan is bypassed**. Researchers passed
 a clean skill, then edited it. The library already stores the check results of every version and refuses a stored file
 that was changed. The next step costs little:
@@ -80,8 +83,9 @@ that was changed. The next step costs little:
 
 ## Suggested order
 
-1. **Risk diff + `library rescan`** (small): immediately visible in the Library page, and it answers a real, documented attack.
+1. ~~**Risk diff + `library rescan`**~~ (small): **built.** Immediately visible in the Library page, and it answers a real, documented attack.
 2. **Evidence-linked skills + `library recheck`** (medium): the identity of the project. Needs a way to attach graph references to a skill.
 3. **Canary behavioural scan** (large, experimental): a research spike with measured results before it becomes a feature.
 
-Decision needed from you: which of the three is the headline.
+Decision still needed from you: which of the remaining two is the headline. (Evidence-linked skills with code-level drift
+is the recommendation: it is the one that uses the graph, which is the part of this project that is not a prompt.)

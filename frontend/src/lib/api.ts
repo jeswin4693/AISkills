@@ -1,6 +1,6 @@
 import type {
   BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus,
-  SandboxStatus, SaveResult, SkillSummary, VersionInfo,
+  RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -74,6 +74,9 @@ export const api = {
   },
   file: (name: string, version: number, path: string) =>
     get<FileText>(`/api/library/${encodeURIComponent(name)}/versions/${version}/files/${encodePath(path)}`),
+
+  /** Today's static checks on stored versions (every skill, or one). Reads only: nothing is changed or run. */
+  rescan: (name?: string) => get<RescanResult>(`/api/rescan${name ? `?name=${encodeURIComponent(name)}` : ""}`),
 
   /** 200 and 422 both carry a report (kept, or refused with the checks that failed); anything else is an error. */
   async importZip(file: File, opts: { note?: string; testScripts?: boolean } = {}): Promise<ImportResult> {

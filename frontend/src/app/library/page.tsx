@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CheckBadges } from "@/components/CheckList";
 import { ImportPanel } from "@/components/ImportPanel";
+import { RescanPanel } from "@/components/RescanPanel";
 import { Badge, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatWhen, plural, relativeTime, sourceText } from "@/lib/format";
@@ -49,6 +50,7 @@ export default function LibraryPage() {
             </ul>
           </Card>
         )}
+        {skills.data !== undefined && skills.data.length > 0 && <RescanPanel />}
       </div>
     </>
   );

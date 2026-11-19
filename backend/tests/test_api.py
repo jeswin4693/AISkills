@@ -224,6 +224,78 @@ def test_a_stored_file_is_looked_up_by_name_not_opened_by_path(client):
         assert client.get(f"/api/library/{NAME}/versions/1/files/{path}").status_code in (404, 400)
 
 
+# ---- risk diff and rescan ----------------------------------------------------------------------------
+
+
+def skill_zip_with_script() -> bytes:
+    return zbytes({
+        f"{NAME}/SKILL.md": GOOD["SKILL.md"], f"{NAME}/README.md": "Demo.\n",
+        f"{NAME}/scripts/fetch.py": "import requests\nrequests.get('https://api.example.test/x')\n",
+    })
+
+
+def test_an_import_that_adds_a_version_carries_what_got_riskier_and_a_first_version_carries_nothing(client):
+    first = upload(client, skill_zip())
+    assert first.status_code == 200 and first.json()["risk"] is None
+    second = upload(client, skill_zip_with_script())
+    risk = second.json()["risk"]
+    assert second.status_code == 200 and risk["level"] == "more_risk" and (risk["older"], risk["newer"]) == ("v1", "v2")
+    assert risk["counts"]["riskier"] >= 1 and "cannot read meaning" in risk["note"]
+    assert {"direction", "kind", "detail", "path"} <= set(risk["changes"][0])
+    assert risk["changes"][0]["direction"] == "riskier" and risk["changes"][0]["kind"] == "script_added"
+    assert upload(client, skill_zip_with_script()).json()["risk"] is None  # the same content again: no new version
+
+
+def test_a_refused_import_has_no_risk_because_nothing_was_compared(client):
+    upload(client, skill_zip())
+    refused = upload(client, zbytes({f"{NAME}/SKILL.md": GOOD["SKILL.md"], f"{NAME}/tool.bin": b"\x00\x01\x02"}))
+    assert refused.status_code == 422 and refused.json()["risk"] is None
+
+
+def test_the_diff_endpoint_carries_the_same_risk_as_the_import(client):
+    upload(client, skill_zip())
+    imported = upload(client, skill_zip_with_script()).json()["risk"]
+    diff = client.get(f"/api/library/{NAME}/diff").json()
+    assert diff["risk"] == imported and [c["path"] for c in diff["changes"]] == ["scripts/fetch.py"]
+    back = client.get(f"/api/library/{NAME}/diff", params={"frm": 2, "to": 1}).json()
+    assert back["risk"]["level"] == "less_risk" and back["risk"]["older"] == "v2"
+
+
+def test_rescan_over_http_reports_every_stored_version_and_changes_nothing(client, lib):
+    upload(client, skill_zip())
+    upload(client, skill_zip_with_script())
+    before = {p: p.read_bytes() for p in lib.root.rglob("*") if p.is_file()}
+    r = client.get("/api/rescan")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["counts"] == {"same": 2, "worse": 0, "failing": 0, "damaged": 0}
+    assert [(v["name"], v["tag"], v["status"]) for v in body["versions"]] == [(NAME, "v2", "same"), (NAME, "v1", "same")]
+    assert {p: p.read_bytes() for p in lib.root.rglob("*") if p.is_file()} == before
+    assert client.get("/api/rescan", params={"name": NAME, "version": 1}).json()["counts"]["same"] == 1
+
+
+def test_rescan_over_http_says_when_a_stored_file_was_changed_behind_the_librarys_back(client, lib):
+    upload(client, skill_zip())
+    (lib.root / NAME / "v1" / "skill" / "README.md").write_text("tampered\n", encoding="utf-8")
+    body = client.get("/api/rescan").json()
+    assert body["ok"] is False and body["counts"]["damaged"] == 1
+    assert body["versions"][0]["status"] == "damaged" and "README.md" in body["versions"][0]["message"]
+
+
+def test_rescan_over_http_answers_plainly_to_unknown_skills_and_unclear_requests(client):
+    assert client.get("/api/rescan", params={"name": "no-such-skill"}).status_code == 404
+    assert client.get("/api/rescan", params={"version": 1}).status_code == 400
+    assert client.get("/api/rescan").json() == {"ok": True, "counts": {"same": 0, "worse": 0, "failing": 0, "damaged": 0}, "versions": []}
+
+
+def test_a_skill_that_is_named_rescan_is_still_reachable(client):
+    """The rescan route is /api/rescan, not /api/library/rescan, so the name of a skill can never hide it."""
+    named = zbytes({"rescan/SKILL.md": "---\nname: rescan\ndescription: Scans again.\n---\nBody.\n"})
+    assert upload(client, named).status_code == 200
+    assert client.get("/api/library/rescan").json()["versions"][0]["name"] == "rescan"
+    assert client.get("/api/rescan", params={"name": "rescan"}).json()["ok"] is True
+
+
 # ---- machine facts -----------------------------------------------------------------------------------
 
 

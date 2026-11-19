@@ -166,21 +166,35 @@ def _check_hidden_characters(files: Mapping[str, bytes]) -> CheckResult:
     return CheckResult(name, FAILED, "found at " + ", ".join(found[:5]) + (f" and {len(found) - 5} more" if len(found) > 5 else "")) if found else CheckResult(name, PASSED)
 
 
-def _check_markup_and_wording(files: Mapping[str, bytes]) -> list[CheckResult]:
-    markup: list[str] = []
-    wording: list[str] = []
+def markup_findings(files: Mapping[str, bytes]) -> list[tuple[str, str, int]]:
+    """(file, the markup found, line) for each HTML comment or script-like tag in a Markdown file."""
+    found: list[tuple[str, str, int]] = []
     for rel, data in files.items():
-        suffix = PurePosixPath(rel).suffix.lower()
-        if suffix not in TEXT_SUFFIXES:
+        if PurePosixPath(rel).suffix.lower() != ".md":
             continue
         text = _text(data)
-        if suffix == ".md":
-            for m in re.finditer(r"<!--|<\s*(script|iframe|object|embed)\b", text, re.I):
-                markup.append(f"{rel}:{_loc(text, m.start())} ({m.group(0).strip()})")
+        for m in re.finditer(r"<!--|<\s*(script|iframe|object|embed)\b", text, re.I):
+            found.append((rel, m.group(0).strip(), _loc(text, m.start())))
+    return found
+
+
+def wording_findings(files: Mapping[str, bytes]) -> list[tuple[str, str, int]]:
+    """(file, what the wording matches, line): the first match of each attack-like pattern, in each text file."""
+    found: list[tuple[str, str, int]] = []
+    for rel, data in files.items():
+        if PurePosixPath(rel).suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        text = _text(data)
         for label, pattern in SUSPICIOUS:
             m = pattern.search(text)
             if m:
-                wording.append(f"{rel}:{_loc(text, m.start())} {label}")
+                found.append((rel, label, _loc(text, m.start())))
+    return found
+
+
+def _check_markup_and_wording(files: Mapping[str, bytes]) -> list[CheckResult]:
+    markup = [f"{rel}:{line} ({what})" for rel, what, line in markup_findings(files)]
+    wording = [f"{rel}:{line} {label}" for rel, label, line in wording_findings(files)]
     return [
         CheckResult("no hidden markup (HTML comments, script tags) in Markdown", WARNING, "found at " + ", ".join(markup[:5]) + ". Comments are invisible when the page is rendered, but an agent still reads them.") if markup else CheckResult("no hidden markup (HTML comments, script tags) in Markdown", PASSED),
         CheckResult("no wording that matches known attack patterns", WARNING, "; ".join(wording[:5]) + ". These are patterns, not understanding: read the lines, they may be harmless.") if wording else CheckResult("no wording that matches known attack patterns", PASSED, "a pattern check only; passing is not proof of safety"),

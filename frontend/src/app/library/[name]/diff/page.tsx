@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { DiffView } from "@/components/DiffView";
+import { RiskSummary } from "@/components/RiskSummary";
 import { Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { plural } from "@/lib/format";
@@ -78,6 +79,7 @@ function Diff() {
         <Empty title={`${diff.data.from} and ${diff.data.to} are identical`}>Every file has the same content.</Empty>
       ) : (
         <div className="space-y-3">
+          <RiskSummary risk={diff.data.risk} />
           {diff.data.changes.map((c) => (
             <DiffView key={c.path} change={c} />
           ))}

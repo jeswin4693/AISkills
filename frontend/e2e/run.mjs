@@ -190,6 +190,15 @@ try {
     await page.getByText("extra.md").first().waitFor();
     await shot(page, "03-imported-v2");
   });
+  await step("the import also says what to look at, in words that never call a skill safe", async () => {
+    await alert(/v1 → v2: Worth a look/).waitFor();
+    await page.getByText("The instructions in SKILL.md changed").waitFor();
+    await page.getByText(/A new Markdown file, extra\.md/).waitFor();
+    await page.getByText(/cannot read meaning/).waitFor();
+    assert.equal(await page.getByText("More risk", { exact: true }).count(), 0, "nothing in this change adds a capability");
+    const summary = await alert(/v1 → v2: Worth a look/).innerText();
+    assert.doesNotMatch(summary, /\bsafe\b/i, "the risk summary must never call a skill safe");
+  });
   await step("a skill with a hidden character is refused, shows the failed check, and adds nothing", async () => {
     await upload("bad.zip", makeZip({ "SKILL.md": "---\nname: sneaky\ndescription: Looks fine.\n---\nHello‮ there\n" }));
     await alert(/Refused: nothing was added/).waitFor();
@@ -275,6 +284,64 @@ try {
     await page.goto(UI + "/library/nothing-here");
     await page.getByText("Something went wrong").waitFor();
     await page.getByRole("link", { name: "Back to the library" }).waitFor();
+  });
+
+  console.log("Risk diff and re-check");
+  const riskyZip = (desc, extra = {}) =>
+    makeZip({ "risky-demo/SKILL.md": `---\nname: risky-demo\ndescription: ${desc}\n---\n# Risky demo\n\nRead the notes.\n`, "risky-demo/README.md": "A demo.\n", ...extra });
+  const riskyStored = path.join(scratch, "data", "library", "risky-demo", "v1", "skill", "README.md");
+  await step("a first version has nothing to compare with, so no risk is shown", async () => {
+    await page.goto(UI + "/library");
+    await upload("risky-demo.zip", riskyZip("A demo skill for the risk check."));
+    await alert(/Imported 'risky-demo' as v1/).waitFor();
+    assert.equal(await page.getByText(/More risk|Worth a look|No new risk/).count(), 0);
+  });
+  await step("a version that adds a script using the network is flagged as more risk, with the reasons", async () => {
+    await upload("risky-demo.zip", riskyZip("A demo skill for the risk check, now with a helper.", {
+      "risky-demo/scripts/fetch.py": "import requests\nrequests.get('https://api.example.test/data')\n",
+    }));
+    await alert(/Imported 'risky-demo' as v2/).waitFor();
+    await alert(/v1 → v2: More risk than the version before/).waitFor();
+    await page.getByText("A new script, scripts/fetch.py: it uses network.").waitFor();
+    await page.getByText(/A web address that the version before did not mention: api\.example\.test/).waitFor();
+    await page.getByText(/The description changed/).waitFor();
+    await page.getByText(/cannot read meaning/).waitFor();
+    await shot(page, "10-risk-after-import");
+  });
+  await step("the compare page shows the same risk above the file changes", async () => {
+    await page.goto(UI + "/library/risky-demo/diff");
+    await alert(/v1 → v2: More risk than the version before/).waitFor();
+    await page.getByText("A new script, scripts/fetch.py: it uses network.").waitFor();
+    await page.getByText("scripts/fetch.py").first().waitFor();
+    await shot(page, "11-risk-on-compare");
+  });
+  await step("re-checking one skill says nothing got worse, and says it checks only what code can see", async () => {
+    await page.goto(UI + "/library/risky-demo");
+    await page.getByRole("heading", { name: "Re-check this skill" }).waitFor();
+    await page.getByRole("button", { name: "Re-check now" }).click();
+    await alert(/Nothing got worse: 2 versions checked/).waitFor();
+    await page.getByText(/passing is not proof that a skill is safe/).last().waitFor();
+  });
+  await step("re-checking the whole library lists every version, with links", async () => {
+    await page.goto(UI + "/library");
+    await page.getByRole("button", { name: "Re-check now" }).click();
+    await alert(/Nothing got worse: \d+ versions checked/).waitFor();
+    await page.getByRole("link", { name: "risky-demo v2", exact: true }).waitFor();
+    await page.getByRole("link", { name: "e2e-demo v1", exact: true }).waitFor();
+  });
+  await step("a stored file edited behind the library's back is reported damaged, and again fine once restored", async () => {
+    const original = fs.readFileSync(riskyStored);
+    fs.writeFileSync(riskyStored, "tampered\n");
+    try {
+      await page.getByRole("button", { name: "Re-check again" }).click();
+      await alert(/1 version damaged/).waitFor();
+      await page.getByText(/was changed after import \(README\.md\)/).waitFor();
+      await shot(page, "12-rescan-damaged");
+    } finally {
+      fs.writeFileSync(riskyStored, original);
+    }
+    await page.getByRole("button", { name: "Re-check again" }).click();
+    await alert(/Nothing got worse/).waitFor();
   });
 
   console.log("The builder");

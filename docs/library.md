@@ -7,7 +7,7 @@ Works on any skill folder: made here, downloaded, or written by hand. Needs no A
 ```
  folder or .zip --> IMPORT (checks) --> LIBRARY v1, v2, v3 ... --> EXPORT (.zip to share)
                     refused if a                |                --> INSTALL (to .claude/skills)
-                    check fails                 +--> diff, rollback
+                    check fails                 +--> diff + risk diff, rescan, rollback
 ```
 
 ## Run it
@@ -17,7 +17,8 @@ cd backend
 python -m skillforge library import generated-skills\my-skill          # or a .zip; add --test-scripts to re-run its script cases
 python -m skillforge library list
 python -m skillforge library versions my-skill
-python -m skillforge library diff my-skill                             # latest against the one before (--from N --to M)
+python -m skillforge library diff my-skill                             # latest against the one before (--from N --to M), with what got riskier
+python -m skillforge library rescan [my-skill] [--version N]           # today's checks on stored versions: which are now worse?
 python -m skillforge library rollback my-skill --to 1                  # a NEW version with the content of v1
 python -m skillforge library export my-skill --out my-skill.zip        # --version N, --without-spec, --force
 python -m skillforge library install my-skill --project                # or --personal, or --to <skills folder>
@@ -29,10 +30,60 @@ python -m skillforge library install my-skill --project                # or --pe
 |---|---|
 | `import <folder or .zip>` | Reads the source into memory (nothing is unpacked to disk), runs every static check, and keeps it as the next version only if **no check failed**. Warnings are allowed and stored. The same content again makes no new version. |
 | `list`, `versions` | The skills, and each version with its date, source, file count, content hash and check counts. |
-| `diff <name>` | Files added, removed or changed between two versions, with the changed lines. Long diffs are cut and say so. |
+| `diff <name>` | Files added, removed or changed between two versions, with the changed lines. Long diffs are cut and say so. It starts with the **risk diff** (below). `import` prints the same risk section when it adds a version after another. |
+| `rescan [name]` | Runs **today's** static checks on versions already stored and says which are now worse than at import (below). Changes nothing; exit code 1 if a version fails today or is damaged. |
 | `rollback <name> --to N` | A **new** version with the content of vN. History only grows; nothing is deleted. |
 | `export <name>` | A `.zip` holding one `<name>/` folder (the shape Claude and other agents accept). Same files, same bytes. Checked again first. Never overwrites a file without `--force`. `--without-spec` leaves out `spec.json`, which holds the requester's own words. |
 | `install <name>` | Copies a version to `<skills folder>/<name>`. You **must** say where: `--personal` (`~/.claude/skills`, every Claude Code session on this machine), `--project` (`.claude/skills` here), or `--to DIR`. Checked again first. An existing folder is left alone unless `--force`, and then it is copied to a backup first. |
+
+## Risk diff: what got riskier since the version before
+
+Why: research on skill marketplaces found that a skill can pass a scan, then be edited into a bad one, so **a scan that
+happens once is a scan an attacker can wait out** ([differentiators.md](differentiators.md)). The library already keeps
+every version and refuses a stored file that was changed. The risk diff adds the missing question: *what did this new
+version change that matters?* Code answers it, from the two versions' files. No model reads the skill and nothing is run.
+
+| Looks at | Says "more risk" when | Says "less risk" when |
+|---|---|---|
+| Scripts | a script was added (always, with what it uses); a script now uses `network`, `run_commands` or `write_files`, or `eval` and similar (Python, JavaScript, TypeScript, by syntax analysis) | a script was removed, or no longer uses one of those |
+| Permissions | `skill.sdm.json` declares more, or `allowed-tools` in the SKILL.md front matter lists more tools | fewer |
+| Attack wording and hidden markup | a text file now matches a known attack pattern, or a Markdown file now has an HTML comment or script-like tag (a pattern match: the line is shown, it may be harmless) | the match is gone |
+| Web addresses | a script now mentions an address the version before did not | an address is no longer mentioned |
+| Any other check | a check that did not fail before now warns or fails | a check got better |
+
+Two more kinds of change are labelled **worth a look**, because code can count them but cannot judge them: the
+**description** changed (an agent reads it to decide when to use the skill; both texts are shown), and **instructions**
+changed (how many lines of `SKILL.md`, and of any other Markdown file an agent may be sent to read, were added or
+removed), and a new web address in plain text. Both versions are checked with **today's** checks, so a rule added after
+v1 was imported is not mistaken for a change in v2 (that is what `rescan` is for).
+
+The headline is one of: *more risk*, *worth a look*, *less risk*, *no new risk found by these checks*. It is never
+"safe". The limits are printed with every result:
+
+- It compares only what code can see. **Reworded instructions can change what an agent does and no pattern sees it.**
+  `diff` shows the lines: read them.
+- Capabilities are found by syntax, only for Python and JavaScript/TypeScript. Other languages and shell scripts are
+  reported as "not analysed". Code that is built while it runs cannot be analysed.
+- A new script is always flagged as more risk, even if nothing was found in it: it is new code that runs on a machine.
+- Wording patterns and web addresses are heuristics. A harmless link counts as "worth a look"; a rewritten attack can
+  slip past.
+- It never blocks anything. A version with more risk is still imported (it passed the checks); you decide what to do.
+
+## Rescan: today's checks on what is already stored
+
+Checks improve. A skill that passed last month may not pass this month's rules, and a one-time scan can be waited out.
+`library rescan` runs the current static checks on every stored version (or one skill, or one version) and compares the
+result with what the checks said at import. Each version is one of:
+
+| Result | Meaning |
+|---|---|
+| **same** | no check is worse than it was at import (a warning that was already there at import is not "worse") |
+| **worse** | a check that passed now warns, or a check that did not exist at import now warns |
+| **failing** | a check fails today: the version would be refused if imported now, and `export` and `install` already refuse it |
+| **damaged** | the stored files no longer match their manifest, or the manifest cannot be read, so nothing was checked |
+
+It **changes nothing** (stored versions are never edited: the history only grows) and **runs nothing**. It is also
+static checks only. Exit code 1 if any version is failing or damaged; a warning alone exits 0.
 
 ## Where things are kept
 
@@ -94,3 +145,9 @@ Test cases exist only for skills built here: they live in `skill.sdm.json`. So:
 - One person, one machine: there is no locking for two processes writing at once (a clash is detected and refused,
   not merged). Sharing a library between people is for the database step.
 - Tests that need a symbolic-link-capable account skip where there is none.
+- **The risk diff only advises.** There is no setting that refuses or holds an import because it got riskier, and a
+  rollback or an install does not print one (use `diff`). A rescan is computed when you ask: its results are not stored,
+  so the library has no "last scanned" date and nothing runs a rescan by itself.
+- The risk diff and the rescan were tested on synthetic skills (a script that gains the network, hidden markup, a new
+  rule added after import, a file edited behind the library's back), not on a collection of real skills from other people.
+  How often they raise a false alarm on real skills is not measured.

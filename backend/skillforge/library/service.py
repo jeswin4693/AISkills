@@ -23,6 +23,7 @@ from ..results import FAILED, NOT_RUN, WARNING, CheckResult
 from ..validate import validate_files
 from ..validate.static import SLUG
 from .package import Conflict, LibraryError, NotFound, SkillSource, read_source, replace_dir, write_tree, zip_bytes
+from .risk import RiskDiff, risk_diff
 from .store import MAX_NAME, FileChange, Library, Version, diff_files
 
 
@@ -85,8 +86,16 @@ def check_source(src: SkillSource) -> list[CheckResult]:
     return _gate(src.files, src.folder, src.problems)
 
 
-def compare(library: Library, name: str, frm: int | None = None, to: int | None = None) -> tuple[Version, Version, list[FileChange]]:
-    """(older, newer, changes). Default: the latest version against the one before it."""
+@dataclass
+class Comparison:
+    older: Version
+    newer: Version
+    changes: list[FileChange]
+    risk: RiskDiff  # what got riskier in those changes (library/risk.py)
+
+
+def compare_with_risk(library: Library, name: str, frm: int | None = None, to: int | None = None) -> Comparison:
+    """Two versions of a skill: the changed files, and what got riskier. Default: the latest against the one before it."""
     versions = library.versions(name)
     if not versions:
         raise NotFound(f"There is no skill named '{name}' in the library.")
@@ -100,7 +109,13 @@ def compare(library: Library, name: str, frm: int | None = None, to: int | None 
         older = before[-1]
     _, old_files = library.read(name, older.version)
     _, new_files = library.read(name, newer.version)
-    return older, newer, diff_files(old_files, new_files)
+    return Comparison(older, newer, diff_files(old_files, new_files), risk_diff(old_files, new_files, older.tag, newer.tag))
+
+
+def compare(library: Library, name: str, frm: int | None = None, to: int | None = None) -> tuple[Version, Version, list[FileChange]]:
+    """(older, newer, changes). Default: the latest version against the one before it."""
+    c = compare_with_risk(library, name, frm, to)
+    return c.older, c.newer, c.changes
 
 
 # ---- import ------------------------------------------------------------------------------------------
@@ -114,6 +129,7 @@ class ImportReport:
     created: bool = False  # False: refused, or identical to the latest version
     previous: Version | None = None
     changes: list[FileChange] = field(default_factory=list)  # against the previous version
+    risk: RiskDiff | None = None  # what got riskier against the previous version; None for a first version or no change
 
     @property
     def refused(self) -> bool:
@@ -153,10 +169,12 @@ def import_source(
         skill_version=sdm.version if sdm else "", checks=checks, now=now,
     )
     changes: list[FileChange] = []
+    risk: RiskDiff | None = None
     if created and previous is not None:
         _, old_files = library.read(name, previous.version)
         changes = diff_files(old_files, src.files)
-    return ImportReport(checks, name, version, created, previous, changes)
+        risk = risk_diff(old_files, src.files, previous.tag, version.tag)
+    return ImportReport(checks, name, version, created, previous, changes, risk)
 
 
 # ---- rollback ----------------------------------------------------------------------------------------

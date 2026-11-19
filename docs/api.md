@@ -17,9 +17,10 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 | `GET /api/languages` | Every language with its level, grammar status and extensions. Never downloads a grammar. |
 | `POST /api/validate` | Body: a `.zip`. Runs every static check. Stores nothing, runs nothing. |
 | `GET /api/library` | The skills, each with its version count and latest version. |
-| `POST /api/library/import` | Body: a `.zip` (`?filename=`, `?note=`, `?test_scripts=true`). **200** when kept (or identical to the latest, `created: false`); **422** when a check failed, with the checks, and nothing is stored. `test_scripts` runs the skill's cases in the sandbox and the request waits for them. |
+| `POST /api/library/import` | Body: a `.zip` (`?filename=`, `?note=`, `?test_scripts=true`). **200** when kept (or identical to the latest, `created: false`); **422** when a check failed, with the checks, and nothing is stored. `test_scripts` runs the skill's cases in the sandbox and the request waits for them. The answer has a `risk` object (as in `diff`) when it added a version after another, and `null` otherwise. |
 | `GET /api/library/{name}` | Every version, newest first, with checks and file hashes. |
-| `GET /api/library/{name}/diff` | `?frm=N&to=M`; default is the latest against the one before. |
+| `GET /api/library/{name}/diff` | `?frm=N&to=M`; default is the latest against the one before. Returns the file `changes` and a `risk` object: `level` (`more_risk`, `look`, `less_risk`, `no_new_risk`), `counts`, `changes` (each with `direction` riskier / look / safer, `kind`, a plain `detail`, `path`) and the `note` that says what code cannot see. See [library.md](library.md). |
+| `GET /api/rescan` | `?name=<skill>&version=N` (both optional; a version needs a name). Today's static checks on stored versions: `{ok, counts: {same, worse, failing, damaged}, versions: [{name, tag, status, findings, message}]}`. Reads only: nothing is changed or run. **404** for an unknown skill. It is `/api/rescan`, not `/api/library/rescan`, so a skill named "rescan" is never shadowed. |
 | `GET /api/library/{name}/versions/{n}/files/{path}` | One stored file's text, after the whole version was verified against its manifest. A lookup by name, never a disk path. |
 | `POST /api/library/{name}/rollback` | `{"to": N}` makes a new version with the content of vN. |
 | `GET /api/library/{name}/export` | The `.zip` (`?version=N`, `?without_spec=true`). |

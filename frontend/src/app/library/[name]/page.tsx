@@ -6,6 +6,7 @@ import { useState } from "react";
 import { CheckBadges, CheckList } from "@/components/CheckList";
 import { FileViewer } from "@/components/FileViewer";
 import { InstallDialog } from "@/components/InstallDialog";
+import { RescanPanel } from "@/components/RescanPanel";
 import { Alert, Badge, Button, ButtonLink, Card, ErrorBox, Loading, Modal, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatWhen, plural, relativeTime, shortHash, sourceText } from "@/lib/format";
@@ -228,6 +229,7 @@ export default function SkillPage() {
             data.reload();
           }}
         />
+        <RescanPanel name={name} />
       </div>
     </>
   );

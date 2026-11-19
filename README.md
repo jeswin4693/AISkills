@@ -17,7 +17,7 @@ See [docs/roadmap.md](docs/roadmap.md).
 AISkills/
 ├── backend/
 │   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
-│   ├── skillforge/library/ # skill versions: import (checked), diff, rollback, export, install (no AI)
+│   ├── skillforge/library/ # skill versions: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
 │   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
 │   ├── skillforge/builder/ # the skill builder as a database-backed conversation with background jobs
 │   ├── skillforge/db/      # SQLAlchemy models + Alembic migrations (SQLite first)
@@ -107,11 +107,17 @@ Import a skill folder or `.zip` (made here or downloaded): it is checked first a
 Accepted skills are kept as v1, v2, ... that you can diff, roll back, export as a `.zip` or install where an agent
 reads them ([docs/library.md](docs/library.md)). Needs no AI and no key; importing never runs a script.
 
+A skill that was clean when you imported it can be edited into a bad one later, so every new version is compared with
+the one before it and **what got riskier is listed** (a script that now uses the network, a new permission or web
+address, wording that matches an attack pattern, a changed description). `library rescan` runs today's checks again on
+every version already stored. Both are done by code, never by a model, and say what they cannot see.
+
 ```powershell
 cd backend
 python -m skillforge library import generated-skills\my-skill    # or a .zip
 python -m skillforge library list
-python -m skillforge library diff my-skill                       # what changed since the version before
+python -m skillforge library diff my-skill                       # what changed since the version before, and what got riskier
+python -m skillforge library rescan                              # today's checks on every stored version: which are now worse?
 python -m skillforge library rollback my-skill --to 1            # a new version with the content of v1
 python -m skillforge library export my-skill --out my-skill.zip
 python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>

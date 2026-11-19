@@ -17,7 +17,7 @@ from .build.requirements import Question
 from .conductor import PlanError
 from .graph import query
 from .graph.build import build_graph
-from .library import Library, LibraryError, compare, export_skill, import_skill, install_skill, rollback
+from .library import Library, LibraryError, compare_with_risk, export_skill, import_skill, install_skill, rescan, rollback
 from .providers import ProviderError, provider_from_env
 from .sandbox import probe_sandbox
 from .suggest.facts import collect_facts
@@ -415,6 +415,41 @@ def _render_changes(changes: list, with_text: bool) -> list[str]:
     return lines
 
 
+_RISK_HEADLINE = {
+    "more_risk": "MORE RISK", "look": "worth a look", "less_risk": "less risk",
+    "no_new_risk": "no new risk found by these checks",
+}
+
+
+def _render_risk(risk) -> list[str]:
+    """What got riskier between two versions (library/risk.py), in words, riskiest first."""
+    counts = f"{risk.count('riskier')} riskier, {risk.count('look')} to look at, {risk.count('safer')} safer"
+    lines = [f"Risk {risk.older} -> {risk.newer}: {_RISK_HEADLINE[risk.level]} ({counts})"]
+    lines += [f"  {c.direction + ':':8} {c.detail}" for c in risk.changes]
+    return lines + [f"  {risk.note}"]
+
+
+def _render_rescan(scans: list) -> str:
+    if not scans:
+        return "No skills yet. Add one with: library import <folder or .zip>"
+    lines = [f"Checked {len(scans)} stored version(s) again with today's checks. Nothing was changed, and nothing was run."]
+    for s in scans:
+        label = f"{s.name} {s.tag}".strip()
+        if s.status == "damaged":
+            lines.append(f"  {label:34} DAMAGED: {s.message}")
+            continue
+        lines.append(f"  {label:34} {s.status.upper() if s.status != 'same' else 'same'}")
+        for f in s.findings:
+            was = "did not exist at import" if f.was == "found now" else f"was {f.was} at import"
+            lines.append(f"      {'FAILED' if f.status == 'failed' else 'warning'}: {f.name} ({was})" + (f": {f.detail}" if f.detail else ""))
+    tally = {k: sum(s.status == k for s in scans) for k in ("same", "worse", "failing", "damaged")}
+    lines.append("Result: " + ", ".join(f"{n} {k}" for k, n in tally.items()))
+    if tally["failing"]:
+        lines.append("A failing version would be refused if imported today, and export and install refuse it. Import a fixed version.")
+    lines.append("Static checks only: passing is not proof that a skill is safe.")
+    return "\n".join(lines)
+
+
 def _render_import(r) -> str:
     ran = [c for c in r.checks if c.status != "not run"]
     failed = [c for c in ran if c.status == "failed"]
@@ -433,6 +468,8 @@ def _render_import(r) -> str:
     else:
         head = f"Imported '{r.name}' as {v.tag} (new version after {r.previous.tag}; {len(r.changes)} file(s) differ)."
     lines = [head, f"Checks: {counts}", *_render_check_lines(r.checks)]
+    if r.created and r.risk is not None:
+        lines += _render_risk(r.risk)
     if r.created and r.changes:
         lines += ["Changes since " + r.previous.tag + ":", *_render_changes(r.changes, with_text=False)]
     lines.append("Static checks only: nothing was run unless a line above says so, and passing is not proof the skill is safe.")
@@ -473,10 +510,16 @@ def _run_library(args: argparse.Namespace) -> int:
             )
         return 0
     if cmd == "diff":
-        older, newer, changes = compare(lib, args.name, args.frm, args.to)
-        print(f"{args.name}: {older.tag} -> {newer.tag}: " + (f"{len(changes)} file(s) differ" if changes else "identical"))
-        print("\n".join(_render_changes(changes, with_text=True)))
+        c = compare_with_risk(lib, args.name, args.frm, args.to)
+        print(f"{args.name}: {c.older.tag} -> {c.newer.tag}: " + (f"{len(c.changes)} file(s) differ" if c.changes else "identical"))
+        if c.changes:
+            print("\n".join(_render_risk(c.risk)))
+        print("\n".join(_render_changes(c.changes, with_text=True)))
         return 0
+    if cmd == "rescan":
+        scans = rescan(lib, args.name, args.version)
+        print(_render_rescan(scans))
+        return 1 if any(s.status in ("failing", "damaged") for s in scans) else 0
     if cmd == "rollback":
         version, created = rollback(lib, args.name, args.to)
         if created:
@@ -604,10 +647,13 @@ def _parser() -> argparse.ArgumentParser:
     ops.add_parser("list", help="the skills in the library")
     p = ops.add_parser("versions", help="every version of one skill")
     p.add_argument("name")
-    p = ops.add_parser("diff", help="what changed between two versions (default: the latest and the one before)")
+    p = ops.add_parser("diff", help="what changed between two versions, and what got riskier (default: the latest and the one before)")
     p.add_argument("name")
     p.add_argument("--from", dest="frm", type=int, metavar="N", help="the older version number")
     p.add_argument("--to", type=int, metavar="N", help="the newer version number")
+    p = ops.add_parser("rescan", help="check the stored versions again with today's checks and say which are now worse (changes nothing)")
+    p.add_argument("name", nargs="?", help="one skill; default: every skill in the library")
+    p.add_argument("--version", type=int, metavar="N", help="only this version (needs the name)")
     p = ops.add_parser("rollback", help="make a new version with the content of an old one (nothing is deleted)")
     p.add_argument("name")
     p.add_argument("--to", type=int, required=True, metavar="N", help="the version whose content to restore")

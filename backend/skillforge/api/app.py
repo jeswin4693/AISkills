@@ -22,14 +22,16 @@ from .. import __version__
 from ..builder import Builder, BuilderError, SessionNotFound, WrongState
 from ..graph import languages
 from ..library import (
-    Conflict, Library, LibraryError, NotFound, check_source, compare, import_source, install_skill, package_skill,
-    read_zip_bytes, rollback,
+    Conflict, Library, LibraryError, NotFound, check_source, compare_with_risk, import_source, install_skill, package_skill,
+    read_zip_bytes, rescan, rollback,
 )
 from ..sandbox import probe_sandbox
 from .builds import builds_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
 from .views import import_view as _import_report
+from .views import rescan_view as _rescan
+from .views import risk_view as _risk
 from .views import version_view as _version
 
 MAX_UPLOAD = 6_000_000  # bytes of zip; the library's own limits on what it holds when unpacked still apply
@@ -172,8 +174,14 @@ def create_app(library: Library | None = None, origins: list[str] | None = None,
 
     @api.get("/library/{name}/diff")
     def diff(name: str, request: Request, frm: int | None = None, to: int | None = None) -> dict:
-        older, newer, changes = compare(_library(request), name, frm, to)
-        return {"name": name, "from": older.tag, "to": newer.tag, "changes": [asdict(c) for c in changes]}
+        c = compare_with_risk(_library(request), name, frm, to)
+        return {"name": name, "from": c.older.tag, "to": c.newer.tag, "changes": [asdict(x) for x in c.changes], "risk": _risk(c.risk)}
+
+    @api.get("/rescan")
+    def rescan_library(request: Request, name: str | None = None, version: int | None = None) -> dict:
+        """Today's static checks on versions already stored, and which of them are now worse. Reads only; nothing is
+        changed or run. Without `name` it covers every skill."""
+        return _rescan(rescan(_library(request), name, version))
 
     @api.get("/library/{name}/versions/{number}/files/{path:path}")
     def read_file(name: str, number: int, path: str, request: Request) -> dict:

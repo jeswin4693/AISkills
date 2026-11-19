@@ -36,6 +36,26 @@ export interface FileChange {
   binary: boolean;
 }
 
+/** What got riskier between two versions (docs/library.md, "Risk diff"). Worked out by code; no model reads the skill. */
+export type RiskDirection = "riskier" | "look" | "safer";
+export type RiskLevel = "more_risk" | "look" | "less_risk" | "no_new_risk";
+
+export interface RiskChange {
+  direction: RiskDirection;
+  kind: string;
+  detail: string; // a plain sentence
+  path: string;
+}
+
+export interface RiskInfo {
+  older: string;
+  newer: string;
+  level: RiskLevel;
+  counts: Record<RiskDirection, number>;
+  changes: RiskChange[]; // riskiest first
+  note: string; // what this can and cannot see
+}
+
 export interface ImportResult {
   refused: boolean;
   created: boolean;
@@ -44,6 +64,7 @@ export interface ImportResult {
   previous: string | null;
   checks: Check[];
   changes: FileChange[];
+  risk: RiskInfo | null; // null for a first version, a refused skill, or content that is already stored
 }
 
 export interface DiffResult {
@@ -51,6 +72,31 @@ export interface DiffResult {
   from: string;
   to: string;
   changes: FileChange[];
+  risk: RiskInfo;
+}
+
+/** Today's checks on a stored version (docs/library.md, "Rescan"). */
+export type ScanStatus = "same" | "worse" | "failing" | "damaged";
+
+export interface ScanFinding {
+  status: "warning" | "failed";
+  name: string;
+  detail: string;
+  was: string; // passed, warning, failed, or "found now" for a check that did not exist at import
+}
+
+export interface VersionScan {
+  name: string;
+  tag: string; // "" when the skill's manifests could not be read at all
+  status: ScanStatus;
+  findings: ScanFinding[];
+  message: string; // why, for damaged
+}
+
+export interface RescanResult {
+  ok: boolean;
+  counts: Record<ScanStatus, number>;
+  versions: VersionScan[]; // newest version of each skill first
 }
 
 export interface FileText {

@@ -6,7 +6,8 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 
 **Status and plan: [docs/roadmap.md](docs/roadmap.md) is the source of truth. Read it (and the docs it links)
 before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build (skills built to work well and cost little: description by code,
-requirement carried into SKILL.md, quality checks, token cost; `build/quality.py`),
+requirement carried into SKILL.md, quality checks, token cost; `build/quality.py`; a test harness that runs each skill's
+test cases against a model with and without the skill, graded by code: `evaluate/`, [docs/evaluate.md](docs/evaluate.md)),
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
 sandbox), Library (`library import|list|versions|diff|rescan|rollback|export|install`, with a risk diff on every new
 version, see [docs/library.md](docs/library.md)),
@@ -24,6 +25,7 @@ python -m skillforge graph <stats|callers|impact|duplicates|...> <repo>
 python -m skillforge suggest <repo> [--facts-only]    # AI parts need a provider key in .env
 python -m skillforge build "<what the skill should do>"
 python -m skillforge validate <skill-folder>
+python -m skillforge eval <skill-folder> [--runs 3]   # run its test cases against a model, with and without the skill (docs/evaluate.md)
 python -m skillforge sandbox-status
 python -m skillforge library <import|list|versions|diff|rescan|rollback|export|install> ...
 python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only
@@ -55,6 +57,9 @@ Setup, the layout and what each part does are in [README.md](README.md). The dev
   `graph/extract_generic.py` with tests. A missing grammar must degrade that one language, never the run.
 - **A check is "passed" only if it ran.** Every report lists what did not run. Heuristics (wording, markup)
   warn; structural problems fail.
+- **Models answer, code judges.** A skill's test replies are graded by the seven checks in `evaluate/grade.py`, never
+  by asking a model whether a reply is good (a judge model can be talked into anything by the text it judges). A
+  model-written regex is length-limited and refused if it repeats a repeat, because Python's `re` has no time limit.
 - **Generated code is untrusted.** Validate it statically, and run it ONLY through `skillforge.sandbox`, which
   fails closed: no Linux container engine means it does not run, never on the host. Windows containers are
   refused on purpose.

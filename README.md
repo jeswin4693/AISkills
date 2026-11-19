@@ -78,6 +78,12 @@ trigger phrases), your rules and acceptance criteria are carried into `SKILL.md`
 worked example, what is only for people lives in the README, and the result says what it costs in tokens (an estimate).
 Checks warn about vague wording, an input no step uses and similar weaknesses ([docs/build.md](docs/build.md)).
 
+Does the skill actually help? `build --eval` (or `python -m skillforge eval <skill-folder>`) runs the skill's own test
+cases against a model **with the skill and without it**, and code grades the replies by simple checks (a model never
+judges). It says whether the skill helped, adds nothing for the tokens it costs, or made things worse. It works for
+skills that are only text; a skill that reads files or runs commands cannot be tested this way
+([docs/evaluate.md](docs/evaluate.md)).
+
 With `--scripts` the skill can ship helper scripts. Every script case runs in the Linux sandbox, and a skill whose
 scripts never ran is marked DRAFT ([docs/scripts.md](docs/scripts.md)).
 

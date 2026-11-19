@@ -7,9 +7,9 @@ model: it gives simple field lists and code builds the schema, so the schema is 
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Kind = Literal["prompt", "skill", "tool", "agent"]
 FieldType = Literal["string", "integer", "number", "boolean", "list", "object"]
@@ -77,12 +77,43 @@ class Step(BaseModel):
     )
 
 
+AssertionKind = Literal["contains", "not_contains", "starts_with", "regex", "max_chars", "max_lines", "first_line_max_chars"]
+
+
+class Assertion(BaseModel):
+    """One check that CODE runs on an agent's reply. Simple on purpose: the model answers, code judges."""
+
+    kind: AssertionKind = Field(
+        description="contains, not_contains, starts_with: some text, ignoring case. regex: a short pattern. "
+        "max_chars, max_lines, first_line_max_chars: a whole number."
+    )
+    value: str = Field(description="The text, pattern or number to check. Keep it short.")
+    why: str = Field(description="Which acceptance criterion or rule of the person this checks, in a few words.")
+
+
 class SkillTest(BaseModel):
     name: str
     kind: TestKind
     input_description: str = Field(description="What the agent is given in this test. For a positive test: one concrete, literal example input.")
     expected_result: str = Field(description="What a correct run produces or does. For a positive test: the literal expected output.")
     covers: list[str] = Field(description='Ids of the acceptance criteria this test checks, such as "AC1".')
+    run_input: str = Field(
+        description="The exact message a person would send to an agent to start this test, including any text the skill "
+        "works on. Never a description of the message. Empty only if the skill needs files, commands or the network."
+    )
+    assertions: list[Assertion] = Field(
+        description="1 to 3 checks that code can run on the agent's reply to run_input. Empty only when run_input is empty."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _skills_saved_before_tests_could_be_run(cls, data: Any) -> Any:
+        """Older skill.sdm.json and tests/cases.json have neither field: they load as 'cannot be run here'."""
+        if isinstance(data, dict):
+            data = {**data}
+            data.setdefault("run_input", "")
+            data.setdefault("assertions", [])
+        return data
 
 
 class SkillDraft(BaseModel):

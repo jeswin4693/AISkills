@@ -253,6 +253,14 @@ def quality_checks(sdm: SkillDefinition) -> list[CheckResult]:
             if repeated else CheckResult(name, PASSED)
         )
 
+    if not sdm.permissions and not sdm.scripts:  # text only: a model can stand in for an agent, so its tests can be run
+        name = "every test can be run against a model and graded by code"
+        unrunnable = [t.name for t in sdm.tests if not t.run_input.strip() or not t.assertions]
+        out.append(
+            CheckResult(name, WARNING, "no message to send or no check to run in: " + ", ".join(unrunnable) + ". Without them a test cannot be run, so nobody learns whether the skill works.")
+            if unrunnable else CheckResult(name, PASSED, f"{len(sdm.tests)} test(s)")
+        )
+
     name = "every workflow step is short enough to follow"
     long_steps = [f"step {i} ({len(s.instruction.split())} words)" for i, s in enumerate(sdm.workflow, start=1) if len(s.instruction.split()) > LONG_STEP_WORDS]
     out.append(

@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..providers.base import LLMProvider
+from ..evaluate import EvalReport, LoadedSkill, eval_checks, needs_tools_reason, run_eval
+from ..providers.base import LLMProvider, ProviderError
 from .architect import criteria_ids, design
 from .checks import FAILED, NOT_RUN, SLUG, CheckResult, check_rendered, not_run_checks, run_checks
 from .models import Provenance, RequirementSpec, Script, ScriptCase, SkillDefinition, SkillDraft
@@ -54,6 +55,7 @@ class BuildResult:
     notes: list[str] = field(default_factory=list)
     draft_reason: str = ""  # why it is a draft when no check failed (untested scripts)
     tokens: TokenCost | None = None  # what the skill costs to use (an estimate), see build/quality.py
+    evaluation: EvalReport | None = None  # its own test cases run against a model, when asked for (evaluate/)
 
 
 def _assemble(
@@ -94,10 +96,39 @@ def _untested_reason(sdm: SkillDefinition, report: ScriptReport | None) -> str:
     return "This skill has scripts that were not all run in the sandbox, so they are untested." + (f" {why}" if why else "")
 
 
+def _evaluate(provider: LLMProvider, sdm: SkillDefinition, spec: RequirementSpec, *, baseline: bool, runs: int) -> EvalReport:
+    """Run the skill's own test cases against the model. A model error here must not destroy a finished design."""
+    skill = LoadedSkill(sdm.name, render_files(sdm, spec)["SKILL.md"], sdm.tests, needs_tools_reason(sdm.permissions, bool(sdm.scripts)))
+    try:
+        return run_eval(provider, skill, baseline=baseline, runs=runs)
+    except ProviderError as exc:
+        return EvalReport(sdm.name, runnable=False, reason=f"the model could not be reached while running the tests ({exc})")
+
+
+def _eval_problems(report: EvalReport) -> list[str]:
+    """What a repair is told about a skill that failed its own tests: the real message, the real reply, the failed check."""
+    out = []
+    for case in report.cases:
+        if case.with_skill.passed >= case.with_skill.runs:
+            continue
+        reply = next((r for r, each in zip(case.with_skill.replies, case.with_skill.results) if not all(x.passed for x in each)), "")
+        out.append(
+            f'test "{case.name}": the model was sent "{case.run_input[:200]}" with the skill and replied "{reply[:300]}". '
+            f"It failed: {'; '.join(case.with_skill.failures())}. Change the skill's instructions so the reply passes. "
+            "Change a check only if it does not follow from the person's acceptance criteria."
+        )
+    return out
+
+
+def _rate(report: EvalReport) -> float:
+    passed, total = report.with_passed
+    return passed / total if total else 0.0
+
+
 def finalize(
     sdm: SkillDefinition, spec: RequirementSpec, out_root: Path, *, force: bool, notes: list[str] | None = None,
     model_calls: int = 0, sandbox_note: str | None = None, script_report: ScriptReport | None = None,
-    script_runner: ScriptRunner | None = None,
+    script_runner: ScriptRunner | None = None, evaluation: EvalReport | None = None,
 ) -> BuildResult:
     """Render, run every check, write the report, then the files. No model is involved.
 
@@ -112,7 +143,8 @@ def finalize(
     script_rows = check_scripts(sdm.scripts, sdm.script_cases) + (script_report.results if script_report else [])
     checks = (
         run_checks(sdm) + quality_checks(sdm) + check_rendered(files, sdm) + rendered_quality(files, sdm, spec) + static
-        + script_rows + not_run_checks(sandbox_note, has_scripts=bool(sdm.scripts))
+        + script_rows + (eval_checks(evaluation) if evaluation is not None else [])
+        + not_run_checks(sandbox_note, has_scripts=bool(sdm.scripts), evaluated=evaluation is not None)
     )
     tokens = token_cost(files, sdm)
     if sdm.provenance.name_adjusted:
@@ -127,6 +159,7 @@ def finalize(
     failed = any(c.status == FAILED for c in checks)
     return BuildResult(
         "draft" if failed or reason else "ok", out_dir, sdm, spec, checks, sorted(files), model_calls, notes, reason, tokens,
+        evaluation,
     )
 
 
@@ -210,8 +243,13 @@ def build_from_spec(
     calls: int = 0,
     notes: list[str] | None = None,
     progress: Progress | None = None,
+    evaluate: bool = False,
+    eval_runs: int = 1,
 ) -> BuildResult:
-    """Everything after the person approved the requirement: scripts, design, one repair, checks, files."""
+    """Everything after the person approved the requirement: scripts, design, one repair, checks, files.
+
+    With `evaluate` the skill's own test cases are also run against the model (text-only skills), and a skill that fails
+    them gets one more repair. That costs model calls: about 2 per test case per run, plus a design call and a rerun."""
     now = now or datetime.now(timezone.utc)
     say = progress or (lambda message: None)
     notes = list(notes or [])
@@ -241,10 +279,30 @@ def build_from_spec(
             notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once. Failed checks and warnings went from {first[0]} and {first[1]} to {_score(sdm)[0]} and {_score(sdm)[1]}.")
         else:  # a repair must never make the skill worse
             notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once, but its second design was worse, so the first was kept.")
+    evaluation: EvalReport | None = None
+    if evaluate:  # the skill's own test cases, run against the model with the skill and without it
+        say("Running the skill's own test cases against the model, with and without the skill")
+        evaluation = _evaluate(provider, sdm, spec, baseline=True, runs=eval_runs)
+        calls += evaluation.calls
+        failing = _eval_problems(evaluation) if evaluation.runnable else []
+        if failing:  # one repair, shown the real replies; kept only if it did not fail more checks and passed more tests
+            say(f"{len(failing)} test case(s) failed with the skill; asking the model to fix the skill once")
+            before = (_score(sdm)[0], _rate(evaluation))
+            draft, used = design(provider, spec, failing, scripts=scripts)
+            calls += used
+            second = _assemble(draft, spec, provider, now, scripts, cases)
+            second_eval = _evaluate(provider, second, spec, baseline=True, runs=eval_runs)
+            calls += second_eval.calls
+            after = (_score(second)[0], _rate(second_eval))
+            if second_eval.runnable and after[0] <= before[0] and after[1] > before[1]:
+                sdm, evaluation = second, second_eval
+                notes.append(f"{len(failing)} test case(s) failed with the first design, so the model was asked to fix the skill once: the share of test runs passed went from {before[1]:.0%} to {after[1]:.0%}.")
+            else:
+                notes.append(f"{len(failing)} test case(s) failed with the first design. The model was asked to fix the skill once, but the second design did not pass more tests ({after[1]:.0%} against {before[1]:.0%}), so the first was kept.")
     say("Writing the files and running every check")
     return finalize(
         sdm, spec, out_root, force=force, notes=notes, model_calls=calls, sandbox_note=sandbox_note,
-        script_report=script_report, script_runner=script_runner,
+        script_report=script_report, script_runner=script_runner, evaluation=evaluation,
     )
 
 
@@ -261,6 +319,8 @@ def build_skill(
     sandbox_note: str | None = None,
     with_scripts: bool = False,
     script_runner: ScriptRunner | None = None,
+    evaluate: bool = False,
+    eval_runs: int = 1,
 ) -> BuildResult:
     spec, calls, notes = gather_spec(description, provider, ask, max_rounds)
     if not approve(spec):
@@ -268,6 +328,7 @@ def build_skill(
     return build_from_spec(
         spec, provider, out_root=out_root, force=force, now=now, sandbox_note=sandbox_note,
         with_scripts=with_scripts, script_runner=script_runner, calls=calls, notes=notes,
+        evaluate=evaluate, eval_runs=eval_runs,
     )
 
 

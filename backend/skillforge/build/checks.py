@@ -7,6 +7,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from ..evaluate.grade import assertion_problem
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult  # noqa: F401  (re-exported for callers)
 from .models import SkillDefinition
 from .render import schema_for
@@ -80,6 +81,9 @@ def run_checks(sdm: SkillDefinition) -> list[CheckResult]:
     kinds = {t.kind for t in sdm.tests}
     missing = [k for k in ("positive", "negative") if k not in kinds]
     out.append(_result("tests include a positive case and a negative case", [f"missing a {k} test" for k in missing]))
+
+    broken = [f"test '{t.name}': {p}" for t in sdm.tests for a in t.assertions if (p := assertion_problem(a))]
+    out.append(_result("every test's checks are well formed and can be run", broken, f"{sum(len(t.assertions) for t in sdm.tests)} check(s)"))
     if sdm.scripts:
         out += _workflow_scripts(sdm)
     return out
@@ -132,8 +136,9 @@ def check_rendered(files: dict[str, str], sdm: SkillDefinition) -> list[CheckRes
     return out
 
 
-def not_run_checks(sandbox_note: str | None = None, has_scripts: bool = False) -> list[CheckResult]:
-    """What no code has checked. With scripts, the sandbox row is replaced by the real per-case results."""
+def not_run_checks(sandbox_note: str | None = None, has_scripts: bool = False, evaluated: bool = False) -> list[CheckResult]:
+    """What no code has checked. With scripts, the sandbox row is replaced by the real per-case results, and when the
+    test cases were run against a model (`evaluated`) their own rows replace the "not run against an agent" row."""
     if has_scripts:
         first = CheckResult(
             "scripts tested on real project data", NOT_RUN,
@@ -148,9 +153,14 @@ def not_run_checks(sandbox_note: str | None = None, has_scripts: bool = False) -
         first = CheckResult(
             "scripts run in a sandbox", NOT_RUN, "This skill has no scripts, so there was nothing to run. To add some, build with helper scripts switched on (the checkbox in the web builder, or --scripts on the command line)." + note
         )
+    agent = [] if evaluated else [CheckResult(
+        "test cases executed against a real agent", NOT_RUN,
+        "Not asked for. Build with --eval, or run `skillforge eval <folder>`, to run the test cases against a model (text-only skills). "
+        "A model with no tools is not an agent: skills that read files or run commands cannot be run this way.",
+    )]
     return [
         first,
-        CheckResult("test cases executed against a real agent", NOT_RUN, "There is no agent test harness yet. The test cases are data only."),
+        *agent,
         CheckResult("instructions free of conflicting rules", NOT_RUN, "Only structural checks exist. No semantic analyser has been built."),
         CheckResult("security review of the generated text", NOT_RUN, "Not automated. Read the instructions yourself before using the skill."),
     ]

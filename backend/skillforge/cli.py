@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from typing import Any
 
 from pathlib import Path
@@ -15,6 +16,7 @@ from .build.models import SLOTS, RequirementSpec
 from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, rebuild, sandbox_note
 from .build.requirements import Question
 from .conductor import PlanError
+from .evaluate import load_files, run_eval
 from .graph import query
 from .graph.build import build_graph
 from .library import Library, LibraryError, compare_with_risk, export_skill, import_skill, install_skill, rescan, rollback
@@ -24,6 +26,7 @@ from .suggest.facts import collect_facts
 from .suggest.pipeline import SuggestReport
 from .suggest.pipeline import suggest as run_suggest
 from .validate import validate_skill_dir
+from .validate.static import read_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -225,6 +228,8 @@ def _render_build(r: BuildResult) -> str:
             f"Cost to use (estimate): about {r.tokens.always} tokens always loaded (name and description), "
             f"{r.tokens.when_used} more when the agent uses the skill."
         )
+    if r.evaluation is not None:
+        lines.append("Test cases run against the model: " + r.evaluation.verdict())
     lines += [f"note: {n}" for n in r.notes]
     lines.append("Read report.md in that folder before using the skill. It lists what was not checked.")
     return "\n".join(lines)
@@ -297,9 +302,49 @@ def _run_build(args: argparse.Namespace) -> int:
         approve=(lambda spec: True) if args.yes else _interactive_approve,
         out_root=Path(args.out) if args.out else REPO_ROOT / "generated-skills",
         force=args.force, max_rounds=args.max_rounds, sandbox_note=_sandbox_note(), with_scripts=args.scripts,
+        evaluate=args.eval, eval_runs=args.eval_runs,
     )
     print(_render_build(result))
     return 0 if result.status == "ok" else 1
+
+
+def _render_eval(report) -> str:
+    if not report.runnable or not report.cases:
+        return report.verdict() + "".join(f"\n  skipped {s}" for s in report.skipped)
+    lines = [f"Skill '{report.skill}' (about {report.skill_tokens} tokens each time it is used): {len(report.cases)} test case(s) run, {report.calls} model call(s)"]
+    for c in report.cases:
+        base = f", without it {c.baseline.passed}/{c.baseline.runs}" if c.baseline else ""
+        lines.append(f"  [{c.kind}] {c.name}: with the skill {c.with_skill.passed}/{c.with_skill.runs}{base}")
+        lines += [f"      with the skill: {f}" for f in c.with_skill.failures()]
+        if c.baseline:
+            lines += [f"      without it: {f}" for f in c.baseline.failures()]
+    lines += [f"  skipped {s}" for s in report.skipped]
+    lines.append(report.verdict())
+    return "\n".join(lines)
+
+
+def _run_eval(args: argparse.Namespace) -> int:
+    load_dotenv(REPO_ROOT / ".env")
+    if bool(args.folder) == bool(args.library):
+        raise ValueError("Give either a skill folder or --library NAME.")
+    if args.library:
+        _, files = Library().read(args.library, args.version)
+    else:
+        path = Path(args.folder)
+        if not path.is_dir():
+            raise NotADirectoryError(f"Not a directory: {path}")
+        files, problems = read_dir(path)
+        if problems:
+            raise ValueError(f"The folder cannot be read safely: {problems[0][1]}")
+    skill = load_files(files)
+    report = run_eval(provider_from_env(), skill, baseline=not args.no_baseline, runs=args.runs)
+    if args.json:
+        print(json.dumps(asdict(report) | {"verdict": report.verdict()}, indent=2))
+    else:
+        print(_render_eval(report))
+    if not report.runnable or not report.cases:
+        return 2
+    return 0 if all(c.with_skill.passed == c.with_skill.runs for c in report.cases) else 1
 
 
 def _run_render(args: argparse.Namespace) -> int:
@@ -615,6 +660,16 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--force", action="store_true", help="replace an existing skill folder")
     b.add_argument("--max-rounds", type=int, default=3, help="most question rounds before giving up")
     b.add_argument("--scripts", action="store_true", help="also write helper scripts and test them in the sandbox (needs a Linux sandbox)")
+    b.add_argument("--eval", action="store_true", help="also run the skill's own test cases against the model, with and without the skill (text-only skills; about 2 model calls per test)")
+    b.add_argument("--eval-runs", type=int, default=1, metavar="N", help="with --eval: repeat each test N times, because models vary")
+
+    ev = area.add_parser("eval", help="run a skill's own test cases against a model, with and without the skill (text-only skills)")
+    ev.add_argument("folder", nargs="?", help="a skill folder (the one with SKILL.md)")
+    ev.add_argument("--library", metavar="NAME", help="a skill in the library, instead of a folder")
+    ev.add_argument("--version", type=int, metavar="N", help="with --library: which version (default: the latest)")
+    ev.add_argument("--no-baseline", action="store_true", help="only run with the skill: half the model calls, but no comparison")
+    ev.add_argument("--runs", type=int, default=1, metavar="N", help="repeat each test N times, because models vary")
+    ev.add_argument("--json", action="store_true", help="print the result as JSON")
 
     r = area.add_parser("render", help="re-render a skill folder from its skill.sdm.json (no AI)")
     r.add_argument("sdm", help="path of a skill.sdm.json")
@@ -688,11 +743,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan", "eval"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
-            "library": _run_library, "serve": _run_serve, "plan": _run_plan,
+            "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval,
         }[args.area]
         try:
             return handler(args)

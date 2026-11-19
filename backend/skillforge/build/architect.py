@@ -27,6 +27,7 @@ _RULES_AFTER = """- name: lowercase letters, digits and hyphens only, at most 40
 - does_not: what a person might reasonably expect the skill to do but it will not.
 - error_handling: only failures that no step's on_failure and no part of the requirement already covers. An empty list is fine.
 - tests: at least one positive, one negative and one edge case. The FIRST positive test is shown to the agent as its worked example, so make it ONE concrete case: a literal input and the literal expected output. Each test lists in "covers" the ids of the acceptance criteria it checks (such as "AC1"). Every acceptance criterion must be covered by at least one test.
+- run_input and assertions: every test gives run_input, the exact message a person would send an agent (with any text the skill works on written into it), and 1 to 3 assertions: checks that code will run on the agent's reply, taken from the acceptance criteria and the person's rules (for example first_line_max_chars for a length limit, contains or regex for something that must appear, not_contains for something that must not). A negative test's assertions check that the reply does what the failure behaviour says. If permissions is not empty (the skill needs files, commands or the network), leave run_input empty and assertions an empty list.
 - permissions: only what the steps really need (read_files, write_files, run_commands, network). Empty if none.
 - An agent reads everything you write each time the skill is used. Write nothing that does not change what the agent does."""
 

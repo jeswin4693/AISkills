@@ -108,7 +108,8 @@ fails, the folder is written as a **DRAFT**, the report says so, and the command
 Scripts running in a sandbox (without `--scripts` a skill has no scripts, and the report states whether a Linux
 sandbox is available on the machine that built it; with `--scripts` the per-case results appear instead, see
 [scripts.md](scripts.md), and "scripts tested on real project data" is listed as not run); test
-cases run against a real agent (no harness yet; the cases are data); conflict analysis of the instructions;
+cases run against a real agent (only on request: `build --eval` or `skillforge eval` run them against a model with no tools,
+for text-only skills, see [evaluate.md](evaluate.md); a skill that needs files or commands is never run that way); conflict analysis of the instructions;
 a security review of the text. A report that says "every check that ran passed" also says that this is not a
 guarantee the skill works.
 
@@ -150,8 +151,8 @@ The second live run had none of those. It still has one redundant "On failure" o
   sandbox, and tested only on small samples ([scripts.md](scripts.md)).
 - The quality of the questions and the design depends on the model; a small free model gives plain results.
 - The checks are structural plus the heuristics above. They cannot tell you that the instructions are good, only that they are consistent and not
-  obviously weak. **Test cases are still never run against an agent**, so nobody has measured whether an agent that
-  loads the skill does the job better. The example is model-written and is not checked against your criteria (for
-  instance a number limit); read it.
+  obviously weak. **Whether a skill makes a model do the job better is measured only on request, and only for text-only
+  skills** ([evaluate.md](evaluate.md)): every test now carries the exact message to send and checks that code can run. The
+  example is model-written and is not checked against your criteria (for instance a number limit); read it.
 - The token numbers are estimates (4 characters per token); real tokenizers differ by model and language. Skills saved
   before step J have no `triggers`, still load and render, and get a warning.

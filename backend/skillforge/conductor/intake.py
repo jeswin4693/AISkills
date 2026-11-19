@@ -114,8 +114,10 @@ def code_gaps(mentions: list[Mention], task_type: str, has_repo: bool, measured:
     out: list[Gap] = []
     for m in mentions:
         if m.ambiguous:
+            listed = ", ".join(m.options) + (f" and {m.candidates - len(m.options)} more" if m.candidates > len(m.options) else "")
+            how = "Give its full path." if m.kind == "file" else f'Give its file, such as path/to/file::{m.text.removesuffix("()")}.'
             out.append(Gap(
-                question=f'"{m.text}" matches {m.candidates} places in the repository. Which one do you mean? (Give its file, such as path/to/file::{m.text.removesuffix("()")}.)',
+                question=f'"{m.text}" matches {m.candidates} places in the repository' + (f": {listed}" if m.options else "") + f". Which one do you mean? ({how})",
                 why="An ambiguous name is not measured, so the size of the change is unknown until you say which.", blocking=True, source="code",
             ))
     if has_repo and task_type in CODE_TASKS and not measured and not any(m.ambiguous for m in mentions):

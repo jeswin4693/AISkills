@@ -13,6 +13,9 @@ SKIP_DIRS = {
     ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", "target", "coverage", ".ria", "workspace-data",
     "site-packages", "vendor", "obj", ".gradle", ".idea", "Pods", ".dart_tool", ".build",
 }
+# Usually build output, but a Python package with one of these names is source code (this project's own
+# `skillforge/build/` is one). Real output never has an `__init__.py` directly inside: setuptools puts it under `build/lib/`.
+PACKAGE_NAMED = {"build", "dist", "out"}
 MAX_BYTES = 1_000_000
 
 
@@ -58,10 +61,22 @@ def _git_files(root: Path) -> list[str] | None:
     return [p for p in out.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 
+def _is_package(folder: Path) -> bool:
+    return (folder / "__init__.py").is_file()
+
+
+def _skipped(root: Path, folders: tuple[str, ...]) -> bool:
+    """True when a file sits under a folder that is skipped (dependencies, caches, build output)."""
+    for i, part in enumerate(folders):
+        if part in SKIP_DIRS and not (part in PACKAGE_NAMED and _is_package(root.joinpath(*folders[: i + 1]))):
+            return True
+    return False
+
+
 def _walk_files(root: Path) -> list[str]:
     found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS or (d in PACKAGE_NAMED and _is_package(Path(dirpath, d)))]
         for name in filenames:
             rel = Path(dirpath, name).relative_to(root).as_posix()
             found.append(rel)
@@ -79,7 +94,7 @@ def discover(root: Path, focus: str | None = None) -> list[str]:
         rel = rel.replace("\\", "/")
         if language_of(rel) is None:
             continue
-        if any(part in SKIP_DIRS for part in PurePosixPath(rel).parts[:-1]):
+        if _skipped(root, PurePosixPath(rel).parts[:-1]):
             continue
         if focus_prefix and not (rel == focus_prefix or rel.startswith(focus_prefix + "/")):
             continue

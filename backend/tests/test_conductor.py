@@ -143,6 +143,43 @@ def test_a_name_that_matches_two_places_is_ambiguous_and_is_not_measured(repo):
     assert m.ambiguous and m.candidates == 2 and m.target == "" and m.file == ""
 
 
+def test_a_file_name_that_matches_two_files_is_ambiguous_lists_them_and_asks_which(repo):
+    """Found when trying the plan on this repo: `pipeline.py` exists in two packages and was silently dropped."""
+    root = repo({"a/pipeline.py": "def one():\n    return 1\n", "b/pipeline.py": "def two():\n    return 2\n"})
+    g = build_graph(root, use_cache=False, with_history=False)
+    (m,) = find_mentions(g, "Change pipeline.py so it logs.")
+    assert m.kind == "file" and m.ambiguous and m.candidates == 2 and m.target == "" and m.file == ""
+    assert m.options == ["a/pipeline.py", "b/pipeline.py"]
+    plan = make_plan("Change pipeline.py so it logs.", repo=root, task_type="feature")
+    asked = plan.reading.gaps[0]
+    assert asked.blocking and asked.source == "code" and not plan.tier.measured and plan.reach == []
+    assert 'matches 2 places in the repository: a/pipeline.py, b/pipeline.py. Which one do you mean? (Give its full path.)' in asked.question
+
+
+def test_an_ambiguous_name_lists_at_most_five_places_and_says_how_many_more(repo):
+    root = repo({f"p{i}/util.py": "def f():\n    return 1\n" for i in range(7)})
+    g = build_graph(root, use_cache=False, with_history=False)
+    (m,) = find_mentions(g, "Change util.py")
+    assert m.candidates == 7 and len(m.options) == 5
+    question = make_plan("Change util.py so it logs.", repo=root, task_type="feature").reading.gaps[0].question
+    assert "p0/util.py, p1/util.py, p2/util.py, p3/util.py, p4/util.py and 2 more" in question
+
+
+def test_a_file_name_in_source_and_in_a_test_means_the_source_file_and_the_full_path_is_never_ambiguous(repo):
+    root = repo({"src/engine.py": "def run():\n    return 1\n", "tests/engine.py": "def run():\n    return 2\n", "src/other/mod.py": "def m():\n    return 3\n"})
+    g = build_graph(root, use_cache=False, with_history=False)
+    (m,) = find_mentions(g, "Change engine.py")
+    assert not m.ambiguous and m.file == "src/engine.py" and m.options == []
+    (full,) = find_mentions(g, "Change src/other/mod.py")
+    assert not full.ambiguous and full.file == "src/other/mod.py"
+
+
+def test_a_symbol_that_is_ambiguous_also_lists_where_it_is(repo):
+    root = repo({"a.py": "def handle_event():\n    return 1\n", "b.py": "def handle_event():\n    return 2\n"})
+    question = make_plan("Fix handle_event so it retries.", repo=root, task_type="bugfix").reading.gaps[0].question
+    assert "a.py::handle_event, b.py::handle_event" in question and "such as path/to/file::handle_event" in question
+
+
 def test_a_name_in_source_and_in_a_test_means_the_source(repo):
     g = build_graph(repo({"src/a.py": "def load_data():\n    return 1\n", "tests/test_a.py": "def load_data():\n    return 2\n"}), use_cache=False, with_history=False)
     (m,) = find_mentions(g, "Fix load_data")

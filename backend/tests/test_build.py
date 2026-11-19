@@ -121,6 +121,23 @@ def test_tests_and_ignored_folders_are_recognised(graph):
     assert g.files["tests/test_a.py"].is_test and not g.files["src/a.py"].is_test
 
 
+def test_a_python_package_named_build_is_source_but_real_build_output_is_still_skipped(graph):
+    """This project's own builder lives in `skillforge/build/`. A folder named build, dist or out is output in most
+    projects, so it is skipped unless it is a Python package (an `__init__.py` directly inside)."""
+    g = graph({
+        "pkg/build/__init__.py": "",
+        "pkg/build/pipeline.py": "def build_from_spec():\n    pass\n",
+        "build/lib/pkg/__init__.py": "",  # what setuptools writes: a copy, one folder deeper
+        "build/lib/pkg/old.py": "def stale():\n    pass\n",
+        "dist/bundle.js": "function y() {}\n",
+        "out/generated.py": "def gen():\n    pass\n",  # no __init__.py: output
+        "node_modules/dep/__init__.py": "",  # never source, whatever it contains
+        "src/a.py": "def a():\n    pass\n",
+    })
+    assert set(g.files) == {"pkg/build/__init__.py", "pkg/build/pipeline.py", "src/a.py"}
+    assert "pkg/build/pipeline.py::build_from_spec" in g.symbols
+
+
 def test_closures_can_call_their_siblings_and_enclosing_functions_in_python(graph):
     g = graph({
         "m.py": (

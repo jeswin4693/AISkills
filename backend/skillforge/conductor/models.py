@@ -102,6 +102,7 @@ class Mention(BaseModel):
     candidates: int  # how many places the text matched
     ambiguous: bool
     source: Literal["prompt", "model"]
+    options: list[str] = Field(default_factory=list)  # when ambiguous: up to MAX_OPTIONS of the places it matched
 
 
 class Reach(BaseModel):

@@ -59,5 +59,11 @@ A function can be named `name`, `Class.method` or `file::name`. An ambiguous nam
 - "Dead code" results are candidates: public APIs, framework entry points and dynamic use are invisible.
 - How deeply a language is understood depends on its level (full, standard, basic; see
   [languages.md](languages.md)). File types that are not programming languages are skipped, not guessed.
+- Some folders are never read: dependencies, caches and build output (`node_modules`, `.venv`, `dist`, `build`, `out`,
+  `target`, `vendor`, ...). A folder named `build`, `dist` or `out` **is** read when it is a Python package (it has an
+  `__init__.py` directly inside): this project's own `skillforge/build/` is one, and it was invisible until this was
+  found by trying the plan on this repository. Build output in any other layout that happens to look like source is still
+  skipped, and a project that keeps real source in a folder with another name on the list (say a Go package called
+  `vendor`) is not read there.
 - tsconfig path aliases other than `@/` and `~/`, and monorepo workspace packages, are not resolved.
 - Co-change needs git, and ignores commits that touch more than 40 files.

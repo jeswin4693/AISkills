@@ -145,7 +145,7 @@ Options: `--tier N` (can only raise; lowering needs `--allow-lower` and is recor
 | Part | Decided by | Notes |
 |---|---|---|
 | What the request contains, gaps, assumptions, files to create | The model reads; **code verifies** every quote, every named target and every new path | A claim without a quote in the person's words is dropped, and the plan says so |
-| Which files and functions the request names | **Code**, from the graph | A plain word such as `build` is never taken for code; a name matching several places is ambiguous: not measured, and asked about |
+| Which files and functions the request names | **Code**, from the graph | A plain word such as `build` is never taken for code; a name matching several places (a function, or a file name such as `pipeline.py` that two folders have) is ambiguous: not measured, and asked about, with the matching places listed (up to five). A file name that matches one source file and a test file means the source file |
 | The tier | **Code**, from the highest of: kind of task, files reached by proven links, a **high** risk rating, sensitive paths, risks the person named | Every signal is shown with its evidence. The tier reflects only the code the request names |
 | The phases and stop triggers | Fixed tables | `skillforge/conductor/process.py` |
 | Which rules apply | The model **chooses by id** among the rules parsed from `CLAUDE.md` / `AGENTS.md`; an id that does not exist is dropped | Rules in the prompt itself are added with the person's quote |

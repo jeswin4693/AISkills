@@ -37,6 +37,12 @@ Choices worth knowing:
   skill is safe" appears under every import result and on every version.
 - **Colour is never the only signal.** Every status has a word (FAILED, warning, passed, not run, added, removed).
 - **`node_modules` and `.next` live outside OneDrive** (junctions to `C:\dev\frontend`), like the Python venv.
+- **The hosted version adds a sign-in and nothing else.** `AppShell` asks the API once whether a sign-in is needed. The local version never
+  is, so nothing changes. When it is, the app shows a small sign-in form (one field for the access token) instead of the pages, a
+  **Sign out** button in the sidebar, and no **Install** button on a skill page (it would write on the server; use **Export**). Any call
+  answered 401 sends the person back to the form. The status panel's model line also says how many backup models wait behind the first.
+  The page and the API share one address there (the build is made with `NEXT_PUBLIC_API_URL=same-origin`). See [hosting.md](hosting.md).
+  The sign-in form has unit-tested logic and was not driven in a real browser.
 
 ## What was checked
 

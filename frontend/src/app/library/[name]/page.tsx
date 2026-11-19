@@ -6,6 +6,7 @@ import { useState } from "react";
 import { CheckBadges, CheckList } from "@/components/CheckList";
 import { FileViewer } from "@/components/FileViewer";
 import { InstallDialog } from "@/components/InstallDialog";
+import { useAuth } from "@/lib/useAuth";
 import { RescanPanel } from "@/components/RescanPanel";
 import { Alert, Badge, Button, ButtonLink, Card, ErrorBox, Loading, Modal, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -28,6 +29,7 @@ function VersionDetails({
   const [withoutSpec, setWithoutSpec] = useState(false);
   const [busy, setBusy] = useState<"export" | "restore" | null>(null);
   const [installing, setInstalling] = useState(false);
+  const { hosted } = useAuth();
   const [confirmRestore, setConfirmRestore] = useState(false);
   const hasScripts = Object.keys(v.files).some((p) => p.startsWith("scripts/"));
   const hasSpec = "spec.json" in v.files;
@@ -98,7 +100,11 @@ function VersionDetails({
           <Button busy={busy === "export"} onClick={() => void exportZip()}>
             Export .zip
           </Button>
-          <Button onClick={() => setInstalling(true)}>Install…</Button>
+          {hosted ? (
+            <p className="max-w-xs text-xs text-muted">To install, use Export and install the zip on your own computer.</p>
+          ) : (
+            <Button onClick={() => setInstalling(true)}>Install…</Button>
+          )}
           {!latest && (
             <Button variant="danger" onClick={() => setConfirmRestore(true)}>
               Restore this version…

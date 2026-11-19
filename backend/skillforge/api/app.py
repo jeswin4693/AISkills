@@ -104,7 +104,7 @@ def create_app(
     )
     if hosted is not None:
         app.add_middleware(AuthMiddleware, hosted=hosted)
-    app.add_middleware(LocalOnlyMiddleware, origins=trusted, hosts=hosted.allowed_hosts if hosted else ())  # added last, so it runs first
+    app.add_middleware(LocalOnlyMiddleware, origins=trusted, hosts=hosted.allowed_hosts if hosted else None)  # added last, so it runs first
 
     @app.exception_handler(SessionNotFound)
     async def session_not_found(_: Request, exc: SessionNotFound) -> JSONResponse:

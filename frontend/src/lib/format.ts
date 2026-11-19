@@ -1,4 +1,4 @@
-import type { Check, CheckStatus } from "./types";
+import type { Check, CheckStatus, ProviderStatus } from "./types";
 
 const ORDER: CheckStatus[] = ["failed", "warning", "not run", "passed"];
 
@@ -53,4 +53,13 @@ export function conflictPath(message: string): string {
 export function sourceText(kind: string, label: string): string {
   if (kind === "rollback") return `restored ${label}`;
   return `${kind} ${label}`;
+}
+
+/** The model line of the status panel: the model, and how many backups wait behind it (and from which providers). Null when no model is set up. */
+export function modelSummary(p: ProviderStatus): string | null {
+  if (!p.configured) return null;
+  const backups = p.fallbacks ?? [];
+  if (backups.length === 0) return p.model;
+  const providers = [...new Set(backups.map((b) => b.provider))].join(", ");
+  return `${p.model} + ${backups.length} ${backups.length === 1 ? "backup" : "backups"} (${providers})`;
 }

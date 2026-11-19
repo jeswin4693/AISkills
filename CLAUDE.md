@@ -13,8 +13,9 @@ sandbox), Library (`library import|list|versions|diff|rescan|rollback|export|ins
 version, see [docs/library.md](docs/library.md)),
 local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)),
 web UI (Builder + Library pages) in `frontend/` ([docs/ui.md](docs/ui.md)), and the AI engine (`ai/`: every model call
-goes through one service that picks a model by task, owns the retry policy, counts attempts and tokens, and redacts keys;
-[docs/ai-engine.md](docs/ai-engine.md)).
+goes through one service that picks a model by task, owns the retry policy, counts attempts and tokens, and redacts keys, and
+asks backup models (`LLM_FALLBACKS`, any provider) when the first cannot answer; [docs/ai-engine.md](docs/ai-engine.md)), and the
+hosted version (one Docker image, a sign-in, one public address: [docs/hosting.md](docs/hosting.md)).
 Next: the Component Factory ([docs/component-factory.md](docs/component-factory.md): agent, plugin and MCP-server builders on the
 same app, starting with its Phase 0 and the Agent Builder), then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
 the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
@@ -31,7 +32,8 @@ python -m skillforge validate <skill-folder>
 python -m skillforge eval <skill-folder> [--runs 3]   # run its test cases against a model, with and without the skill (docs/evaluate.md)
 python -m skillforge sandbox-status
 python -m skillforge library <import|list|versions|diff|rescan|rollback|export|install> ...
-python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only
+python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only (hosted version: docs/hosting.md)
+python -m skillforge models [--test]                  # which models and keys are set up; --test asks each model one tiny question
 python -m skillforge plan "<task>" --repo <path> [--no-ai]   # read-only task plan (docs/task-conductor.md)
 ```
 
@@ -73,5 +75,9 @@ Setup, the layout and what each part does are in [README.md](README.md). The dev
 - **Every model call names its task** (`generate_with_retry(..., task=Task.X)`, `skillforge.ai`) and never calls a
   provider directly, so the model, the retries, the budget, the usage rows and the redaction apply to it. Settings are read
   only in `service_from_env`, and `ai/` never calls `load_dotenv` (the test fixture blocks the two loaders that do).
+- **The API has no sign-in locally, so it never listens beyond this machine without one.** `serve --host` anything but loopback
+  is refused unless `SKILLFORGE_MODE=hosted` with a strong `SKILLFORGE_ACCESS_TOKEN`. Anything that writes on the server's own disk
+  (install into a folder) is off in the hosted version. A backup model never hides a mistake: a bad key or a bad request is raised,
+  not passed to a fallback.
 - **No new library without clear value.** Do not add or reintroduce Ollama.
 - **After each slice:** tests pass, README, `docs/roadmap.md` and the slice's doc are updated, then commit and push.

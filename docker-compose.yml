@@ -1,0 +1,24 @@
+# Self-hosting with Docker Compose. See docs/hosting.md.
+#
+#   1. Copy .env.example to .env.hosted and fill in: SKILLFORGE_ACCESS_TOKEN (a long random string),
+#      SKILLFORGE_ALLOWED_HOSTS (the host name people will open, for example localhost or skillforge.example.com),
+#      LLM_PROVIDER, LLM_MODEL and your provider key(s). Optionally LLM_FALLBACKS for backup models.
+#   2. docker compose up --build
+#   3. Open http://localhost:8080 and sign in with the access token.
+#
+# .env.hosted is private (git ignores .env.*) and is not copied into the image.
+services:
+  skillforge:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env.hosted
+    environment:
+      SKILLFORGE_MODE: hosted
+    volumes:
+      - skillforge-data:/data   # the library, the database and the build folders: keep this volume
+    restart: unless-stopped
+
+volumes:
+  skillforge-data:

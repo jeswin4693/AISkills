@@ -122,6 +122,14 @@ export interface InstallRequest {
 export interface Health {
   status: string;
   version: string;
+  /** "hosted" for the deployed version, which asks for a sign-in. Absent from older servers. */
+  mode?: "local" | "hosted";
+}
+
+/** Whether this server asks for a sign-in, and whether this browser is signed in. The local version never asks. */
+export interface AuthStatus {
+  required: boolean;
+  authenticated: boolean;
 }
 
 export interface SandboxStatus {
@@ -134,6 +142,9 @@ export interface ProviderStatus {
   provider: string;
   model: string;
   detail: string;
+  /** The model behind each kind of work, and the other models asked when the first cannot answer. Absent from older servers. */
+  tiers?: { tier: string; provider: string; model: string }[];
+  fallbacks?: { provider: string; model: string }[];
 }
 
 // ---- the builder (docs/api.md, "The skill builder") ----------------------------------------------------

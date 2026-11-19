@@ -1,0 +1,19 @@
+# Nothing private, and nothing heavy, goes into the image.
+.git
+.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+generated-skills
+docs
+frontend/node_modules
+frontend/.next
+frontend/e2e
+frontend/tsconfig.tsbuildinfo
+frontend/next-env.d.ts
+backend/tests

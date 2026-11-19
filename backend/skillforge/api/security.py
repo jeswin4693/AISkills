@@ -38,10 +38,11 @@ def allowed_origins(extra: Iterable[str] | None = None) -> list[str]:
 class LocalOnlyMiddleware:
     """A plain ASGI middleware: it answers 403 before the request reaches any route."""
 
-    def __init__(self, app, origins: Iterable[str], hosts: Iterable[str] = ()) -> None:
+    def __init__(self, app, origins: Iterable[str], hosts: Iterable[str] | None = None) -> None:
         self.app = app
+        self.hosted = hosts is not None  # the hosted version passes its host names (possibly none); local use passes nothing
         self.origins = {o.rstrip("/").lower() for o in origins}
-        self.hosts = {h.lower() for h in hosts}  # the hosted version's own names, besides loopback ("*" allows any)
+        self.hosts = {h.lower() for h in hosts or ()}  # the hosted version's own names, besides loopback ("*" allows any)
 
     def _trusts(self, origin: str) -> bool:
         origin = origin.rstrip("/").lower()
@@ -54,9 +55,14 @@ class LocalOnlyMiddleware:
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         refusal = None
         if "*" not in self.hosts and host_name(headers.get("host", "")) not in LOOPBACK_HOSTS | self.hosts:
-            refusal = "This API answers only on localhost." if not self.hosts else "This API does not answer on that host name."
+            refusal = (
+                "This API does not answer on that host name. Add the site's host name to SKILLFORGE_ALLOWED_HOSTS (docs/hosting.md)."
+                if self.hosted else "This API answers only on localhost."
+            )
         elif scope["method"] not in SAFE_METHODS and "origin" in headers and not self._trusts(headers["origin"]):
-            refusal = "This request comes from a page this API does not trust."
+            refusal = "This request comes from a page this API does not trust." + (
+                " Add the site's host name to SKILLFORGE_ALLOWED_HOSTS (docs/hosting.md)." if self.hosted else ""
+            )
         if refusal:
             body = json.dumps({"detail": refusal}).encode()
             await send({"type": "http.response.start", "status": 403, "headers": [

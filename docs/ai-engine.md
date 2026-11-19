@@ -75,6 +75,7 @@ LLM_TIMEOUT_S (default 90; the code tier defaults to 180 only when this is not s
               every tier), LLM_<TIER>_TIMEOUT_S
 LLM_<TIER>_MAX_OUTPUT_TOKENS (default: none), LLM_MAX_INPUT_TOKENS (default: none)
 LLM_MAX_CALLS         HTTP attempts allowed per run (default: none)
+LLM_FALLBACKS         "provider:model,provider:model": other models, asked in order when the first cannot answer
 SKILLFORGE_LLM_CACHE  1 turns the response cache on (default: off)
 ```
 
@@ -109,6 +110,23 @@ If `LLM_ESCALATION_MODEL` is set and the skill design still fails structural che
 is asked once more on that model and kept only if it scores better. Nothing is escalated by default, and a model's own
 confidence never triggers it.
 
+### Fallbacks: several providers working together
+
+`LLM_FALLBACKS=groq:<model>,openai:<model>` lists other models, in order. When the first model cannot answer for a reason that
+is not the request's fault, the next one is asked. Those reasons are a rate limit, no quota, overloaded, a timeout, no
+connection, and answers that keep failing the format (after one retry that tells the model what was wrong). A bad key, a bad
+request, a missing model or a refusal **never** hands over: another model would not help, and the mistake should show.
+
+- With a backup waiting, a rate-limited model hands over at once instead of waiting, and other failures get one retry instead of two.
+  The last model in the chain still waits for a rate limit (up to 30 s), as before.
+- Every attempt is a usage row with the model that made it (tier `fallback`), so the result page lists each model that took part.
+- Any provider works, free or paid: Gemini, Groq, OpenAI, Anthropic, OpenRouter, Mistral, or an OpenAI-compatible endpoint. Only the
+  first colon separates the provider from the model, so a model name may contain slashes.
+- A broken entry (no colon, an unknown provider, a missing key) stops start-up and names the entry. A copy of the main model is ignored.
+- `skillforge models` lists what is set up and the keys nothing uses (with the line to add); `--test` makes one tiny call to each
+  distinct model and reports its time, tokens, or why it failed; `POST /api/provider/check` does the same for the web app.
+- The escalation model (a stronger model asked once for a failing design) does not use the fallbacks.
+
 ### Secrets
 
 Provider error text is stored and shown, so every error passes through a redaction step that removes the exact key
@@ -135,10 +153,11 @@ instance (one job), not per session; a cache hit is a usage row with status `cac
 
 ## Results (2026-11-19)
 
-- **Backend:** 755 tests run, 753 passed, 2 skipped (the ones that need a Linux Docker or symlinks, as before), up from 626;
-  about 130 are new. Every old test passes unchanged except two edits to old tests that were expected: the
+- **Backend:** 802 tests run, 800 passed, 2 skipped (755 at the first AI-engine commit, before fallbacks and the hosted version) (the ones that need a Linux Docker or symlinks, as before), up from 626;
+  about 175 are new. Every old test passes unchanged except two edits to old tests that were expected: the
   "Supported providers" message now lists `anthropic`, and the migration test's list of tables now includes `model_calls`.
-- **Web UI:** typecheck clean, 53 unit tests (3 new). The real-browser suite (`npm run e2e`) was **not run** for this slice.
+- **Web UI:** typecheck clean, 57 unit tests (7 new across this and the hosted slice). The real-browser suite (`npm run e2e`) was not run
+  for the first AI-engine commit; it was run after the hosted work and passed 39 of 39.
 - **Live, Gemini (`gemini-3.5-flash-lite`), through the new service:**
   - one tiny call: 1 attempt, 10 tokens in and 25 out, 1.3 s, routed as `fast`;
   - two real builder conversations in a scratch data folder (your library and database untouched). The first stopped
@@ -150,6 +169,28 @@ instance (one job), not per session; a cache hit is a usage row with status `cac
     Groq models were refused with a `bad_request` that the adapter classified and did not retry (one does not accept JSON-schema
     output), a made-up key came back as `auth` without the key in the message, a made-up model as `model_missing`, and with the
     fast tier set to Groq and the rest on Gemini, one task went to each and each got its own usage row.
+
+## Gemini and Groq together (measured 2026-11-19)
+
+The owner's setup: Gemini (`gemini-3.5-flash-lite`) as the main model, Groq (`openai/gpt-oss-120b`) as the backup.
+
+- **The real configuration passes `skillforge models --test`:** Gemini answered in 1.4 s, Groq in 0.6 s, and the OpenAI key that is set
+  but unused was reported with the line to add it.
+- **A real failover worked:** with the fast tier forced to time out on Gemini (two attempts), Groq answered on the third attempt, and
+  each attempt is its own usage row.
+- **Extraction (the step that fills the six-item checklist from a complete description), 5 descriptions, 2 runs each:**
+
+  | | complete | slots verified per run | mean time | mean tokens | errors |
+  |---|---|---|---|---|---|
+  | Gemini flash-lite | 10 of 10 | 6.0 of 6 | 4.4 s | 604 | 0 |
+  | Groq gpt-oss-120b | 4 of 10 | 5.8 of 6 | 3.0 s | 2,301 | 5 |
+
+  Every one of Groq's five errors was a **rate limit**, not a bad answer: its free tier allows 8,000 tokens a minute on that model,
+  and a reasoning model spends about 2,300 tokens on one extraction. When it answered, it was faster and nearly as complete. So Groq
+  is a good **backup**, and Gemini stays the main model; moving the fast tier to Groq would not help on this evidence. This is a small
+  sample (one task, one prompt style, one day) and says nothing about design or code quality.
+- The same cap could refuse a single request that is larger than 8,000 tokens (a long design prompt). That was **not tried**; a refusal
+  like that would come back as a `bad_request` or a rate limit, and the chain would then report both models' errors.
 
 ## Limits and what is not verified
 

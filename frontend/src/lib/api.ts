@@ -1,9 +1,13 @@
 import type {
-  BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus,
   RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+import { SIGNED_OUT_EVENT } from "./auth";
+
+// "same-origin" (set when the hosted version is built) means the page and the API share one address, so calls are relative.
+const configured = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+export const API_URL = configured === "same-origin" ? "" : configured.replace(/\/+$/, "");
 
 /** Something the person can act on. status 0 means the API could not be reached at all. */
 export class ApiError extends Error {
@@ -39,7 +43,7 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(API_URL + path, init);
   } catch {
-    throw new ApiError(0, `Cannot reach the SkillForge API at ${API_URL}. Start it with: python -m skillforge serve`);
+    throw new ApiError(0, `Cannot reach the SkillForge API at ${API_URL || "this site"}. Start it with: python -m skillforge serve`);
   }
 }
 
@@ -50,6 +54,7 @@ async function json<T>(res: Response, accept: number[] = []): Promise<T> {
   } catch {
     /* not JSON: the fallback message below is used */
   }
+  if (res.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT_EVENT)); // the sign-in ended: ask again
   if (!res.ok && !accept.includes(res.status)) throw new ApiError(res.status, detailOf(body, `The API answered ${res.status}.`));
   return body as T;
 }
@@ -62,6 +67,11 @@ export const api = {
   health: () => get<Health>("/api/health"),
   sandbox: () => get<SandboxStatus>("/api/sandbox"),
   provider: () => get<ProviderStatus>("/api/provider"),
+
+  // ---- the hosted version's sign-in (the local version never asks) ----
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  login: (token: string) => post<{ authenticated: boolean }>("/api/auth/login", { token }),
+  logout: () => post<{ authenticated: boolean }>("/api/auth/logout", {}),
 
   listSkills: () => get<SkillSummary[]>("/api/library"),
   versions: (name: string) => get<{ name: string; versions: VersionInfo[] }>(`/api/library/${encodeURIComponent(name)}`),

@@ -160,6 +160,13 @@ restore, all with the safety checks shown in plain words. The Builder needs a mo
 what was checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md). Where this project can be
 genuinely different from other skill tools: [docs/differentiators.md](docs/differentiators.md).
 
+## Use it from your phone or any computer (the hosted version)
+
+Besides the version that runs on your own computer, there is a hosted version: one Docker image with the web pages and the API
+behind a single address and an access token. Deploy it once, then open the link on your phone or laptop and sign in. Everything
+about it, including how to deploy, what it turns off and what is protected, is in [docs/hosting.md](docs/hosting.md). Local use
+is unchanged and is still the default.
+
 ## Setup
 
 The venv lives outside OneDrive so thousands of files do not sync.
@@ -197,5 +204,11 @@ Every model call goes through one service ([docs/ai-engine.md](docs/ai-engine.md
 (you can give writing code its own model, or the tests a Claude model, with a few optional lines in `.env`), makes one
 retry policy for failures, counts every attempt and the tokens the provider reports, and keeps keys out of error text.
 With none of the optional settings, one model does everything, as before.
+
+**Use several providers together.** Put every key you have in `.env`, pick the main model with `LLM_PROVIDER` and `LLM_MODEL`,
+and list the others as backups: `LLM_FALLBACKS=groq:<model>,openai:<model>`. If the first is rate limited, out of quota,
+overloaded or unreachable, the next one answers. Any provider works, free or paid (Gemini, Groq, OpenAI, Anthropic Claude,
+OpenRouter, Mistral, or any OpenAI-compatible API). `python -m skillforge models --test` shows what is set up, which keys
+nothing uses, and tests each model with one tiny call.
 
 See [docs/environment-notes.md](docs/environment-notes.md) for machine findings, including the Docker limitation.

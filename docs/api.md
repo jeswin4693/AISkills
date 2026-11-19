@@ -12,7 +12,11 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/health` | `{"status": "ok", "version": ...}` |
+| `GET /api/health` | `{"status": "ok", "version": ..., "mode": "local" or "hosted"}`. Always public: a host can use it as its health check. |
+| `GET /api/auth/status` | `{"required", "authenticated"}`. Local mode: `{false, true}`. The hosted version asks for a sign-in ([hosting.md](hosting.md)). |
+| `POST /api/auth/login` | `{"token"}` sets the session cookie (hosted only; local mode answers 400). **401** wrong token, **429** after five wrong tries (locked for a minute, with `Retry-After`). |
+| `POST /api/auth/logout` | Ends the session. |
+| `POST /api/provider/check` | One tiny call to each distinct model that is set up, so each key and model is shown to really work: `{"configured", "detail", "checks": [{provider, model, roles, ok, kind, detail, latency_ms, input_tokens, output_tokens}]}`. It uses a little quota, so it runs only when asked. Never a key. |
 | `GET /api/sandbox` | Is a Linux sandbox available here, and why or why not. |
 | `GET /api/languages` | Every language with its level, grammar status and extensions. Never downloads a grammar. |
 | `POST /api/validate` | Body: a `.zip`. Runs every static check. Stores nothing, runs nothing. |
@@ -25,6 +29,10 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 | `POST /api/library/{name}/rollback` | `{"to": N}` makes a new version with the content of vN. |
 | `GET /api/library/{name}/export` | The `.zip` (`?version=N`, `?without_spec=true`). |
 | `POST /api/library/{name}/install` | `{"target": "personal" or "folder", "folder": "<absolute path>", "version": N, "force": false}`. **409** if the folder exists and `force` is not set. |
+
+In the **hosted version** every route under `/api/` except health and `/api/auth/*` answers **401** `{"detail": "Sign in first."}` without a
+valid cookie (or `Authorization: Bearer <token>`); installing into a folder (`POST /api/library/{name}/install`) answers **403**; the
+interactive docs are off. Local mode is unchanged.
 
 Status codes: 400 a problem the person can fix (message in `detail`), 404 not in the library, 409 something is
 already there, 413 upload over 6 MB, 422 a skill that failed its checks (import) or a malformed request body.

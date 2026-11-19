@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { API_URL, api } from "@/lib/api";
+import { modelSummary } from "@/lib/format";
 import { STATUS_EVENT, useAsync, type AsyncState } from "@/lib/useAsync";
 import { Spinner } from "./ui";
 
@@ -82,9 +83,14 @@ export function StatusPanel() {
         <Row
           label="Model"
           state={provider}
-          ok={provider.data?.configured ? provider.data.model : null}
+          ok={provider.data ? modelSummary(provider.data) : null}
           bad="not set up"
-          hint={provider.data?.detail || (provider.data ? `${provider.data.provider}` : undefined)}
+          hint={
+            provider.data?.detail ||
+            (provider.data
+              ? [provider.data.provider, ...(provider.data.fallbacks ?? []).map((b) => `backup: ${b.provider} / ${b.model}`)].join(" · ")
+              : undefined)
+          }
         />
       </dl>
       {health.error && (

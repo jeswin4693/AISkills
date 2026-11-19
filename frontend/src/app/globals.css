@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* Colours are tokens, light by default and dark when the system asks for it. Text on each surface is >= 4.5:1. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --border: #d9dde5;
+  --text: #14171f;
+  --muted: #566070;
+  --accent: #1d4ed8;
+  --accent-fg: #ffffff;
+  --accent-soft: #e4ebfd;
+
+  --ok: #166534;
+  --ok-bg: #e3f5ea;
+  --warn: #8a4b00;
+  --warn-bg: #fdf0d8;
+  --bad: #a11d1d;
+  --bad-bg: #fde8e8;
+  --info: #1e4f9a;
+  --info-bg: #e4edfb;
+
+  --add-bg: #e3f5ea;
+  --del-bg: #fde8e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1117;
+    --surface: #161a22;
+    --surface-2: #1d222c;
+    --border: #2b313d;
+    --text: #e8ebf1;
+    --muted: #9ba4b3;
+    --accent: #7ba3ff;
+    --accent-fg: #0b1020;
+    --accent-soft: #1c2742;
+
+    --ok: #86e0a4;
+    --ok-bg: #12301f;
+    --warn: #f3c571;
+    --warn-bg: #3a2a0c;
+    --bad: #ff9a9a;
+    --bad-bg: #3d1717;
+    --info: #9cc0ff;
+    --info-bg: #14263f;
+
+    --add-bg: #12301f;
+    --del-bg: #3d1717;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-add-bg: var(--add-bg);
+  --color-del-bg: var(--del-bg);
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(8 10 15 / 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

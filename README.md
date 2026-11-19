@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build, Safety, Scripts and the skill Library (import, versions, export, install) are built and tested; Suggest, Build and Scripts are verified live with Gemini.**
+Status: **Understand, Suggest, Build, Safety, Scripts, the skill Library, a local API with a database, and the web UI's Library pages are built and tested; Suggest, Build, the builder API and Scripts are verified live with Gemini.**
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -21,6 +21,7 @@ AISkills/
 │   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
 │   ├── skillforge/builder/ # the skill builder as a database-backed conversation with background jobs
 │   ├── skillforge/db/      # SQLAlchemy models + Alembic migrations (SQLite first)
+├── frontend/               # web UI: Next.js + React + TypeScript + Tailwind (talks to the local API)
 │   ├── skillforge/cli.py   # `python -m skillforge ...`
 │   ├── tests/              # offline tests, no key or network needed
 │   └── scripts/            # Step 0 smoke test for the LLM provider
@@ -113,6 +114,17 @@ The same library, validate, sandbox and language features over HTTP, locked to l
 conversation you can poll: questions, answers, approval, then a background build ([docs/api.md](docs/api.md)).
 Sessions are kept in a SQLite file ([docs/database.md](docs/database.md)); the plan for the web UI on top is in
 [docs/ui-and-database-plan.md](docs/ui-and-database-plan.md).
+
+## Open the web UI
+
+```powershell
+cd backend;  python -m skillforge serve     # terminal 1: the API
+cd frontend; npm run dev                    # terminal 2: the UI, at http://127.0.0.1:3000
+```
+
+The Library is built: import a skill `.zip`, read its versions and files, compare versions, export, install and
+restore, all with the safety checks shown in plain words. The builder chat comes next. First-time setup and what was
+checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md).
 
 ## Setup
 

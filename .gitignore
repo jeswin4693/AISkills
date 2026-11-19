@@ -26,3 +26,6 @@ node_modules/
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+
+# Frontend build artefacts
+*.tsbuildinfo

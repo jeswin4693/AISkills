@@ -8,8 +8,9 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
 sandbox), Library (`library import|list|versions|diff|rollback|export|install`, see [docs/library.md](docs/library.md)),
-local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)).
-Next: the web UI, steps H3 to H5 ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
+local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)),
+web UI shell + Library pages in `frontend/` ([docs/ui.md](docs/ui.md)).
+Next: the builder chat page (H4), then the other pages and Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
 
 ## Commands (run from `backend/`)
 
@@ -23,6 +24,11 @@ python -m skillforge sandbox-status
 python -m skillforge library <import|list|versions|diff|rollback|export|install> ...
 python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only
 ```
+
+The web UI is in `frontend/` (run from there; `node_modules` and `.next` are junctions to `C:\dev\frontend`, see
+[frontend/README.md](frontend/README.md)): `npm run dev` (UI at http://127.0.0.1:3000), `npm run typecheck`,
+`npm test` (unit), `npm run build` then `npm run e2e` (real Edge browser against the real API; needs ports 3000 and 8000).
+Run `scripts\frontend-node-modules.ps1` after every `npm install`.
 
 Setup, the layout and what each part does are in [README.md](README.md). The development machine notes are in
 [docs/environment-notes.md](docs/environment-notes.md) and [docs/sandbox-wsl.md](docs/sandbox-wsl.md).

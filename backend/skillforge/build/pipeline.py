@@ -11,6 +11,7 @@ from ..providers.base import LLMProvider
 from .architect import criteria_ids, design
 from .checks import FAILED, NOT_RUN, SLUG, CheckResult, check_rendered, not_run_checks, run_checks
 from .models import Provenance, RequirementSpec, Script, ScriptCase, SkillDefinition, SkillDraft
+from .quality import TokenCost, clean_triggers, compose_description, quality_checks, quality_warnings, rendered_quality, token_cost
 from ..sandbox import probe_sandbox
 from ..validate import validate_files
 from .render import MAX_NAME, render_files, render_report, slugify, write_files
@@ -52,6 +53,7 @@ class BuildResult:
     model_calls: int = 0
     notes: list[str] = field(default_factory=list)
     draft_reason: str = ""  # why it is a draft when no check failed (untested scripts)
+    tokens: TokenCost | None = None  # what the skill costs to use (an estimate), see build/quality.py
 
 
 def _assemble(
@@ -64,8 +66,11 @@ def _assemble(
     permissions = list(draft.permissions)
     if scripts and "run_commands" not in permissions:  # the agent has to run the scripts
         permissions.append("run_commands")
+    triggers = clean_triggers(draft.triggers)
     return SkillDefinition(
-        **{**draft.model_dump(), "name": name, "permissions": permissions},
+        # code writes the "Use when ..." part of the description from the trigger phrases, so it is never forgotten
+        **{**draft.model_dump(), "name": name, "permissions": permissions, "triggers": triggers,
+           "description": compose_description(draft.description, triggers)},
         acceptance_criteria=criteria_ids(spec),
         provenance=Provenance(
             provider=provider.name, model=provider.model, rounds=spec.rounds,
@@ -74,6 +79,11 @@ def _assemble(
         scripts=scripts or [],
         script_cases=cases or [],
     )
+
+
+def _score(sdm: SkillDefinition) -> tuple[int, int]:
+    """(failed structural checks, quality warnings): smaller is better, and a failure outweighs any number of warnings."""
+    return (sum(c.status == FAILED for c in run_checks(sdm)), len(quality_warnings(sdm)))
 
 
 def _untested_reason(sdm: SkillDefinition, report: ScriptReport | None) -> str:
@@ -101,9 +111,10 @@ def finalize(
         script_report = run_script_tests(sdm.scripts, sdm.script_cases, script_runner)
     script_rows = check_scripts(sdm.scripts, sdm.script_cases) + (script_report.results if script_report else [])
     checks = (
-        run_checks(sdm) + check_rendered(files, sdm) + static + script_rows
-        + not_run_checks(sandbox_note, has_scripts=bool(sdm.scripts))
+        run_checks(sdm) + quality_checks(sdm) + check_rendered(files, sdm) + rendered_quality(files, sdm, spec) + static
+        + script_rows + not_run_checks(sandbox_note, has_scripts=bool(sdm.scripts))
     )
+    tokens = token_cost(files, sdm)
     if sdm.provenance.name_adjusted:
         notes.append(f"The model's name was changed to '{sdm.name}' because it was not a valid skill name.")
     reason = _untested_reason(sdm, script_report)
@@ -115,7 +126,7 @@ def finalize(
         raise BuildError(str(exc)) from exc
     failed = any(c.status == FAILED for c in checks)
     return BuildResult(
-        "draft" if failed or reason else "ok", out_dir, sdm, spec, checks, sorted(files), model_calls, notes, reason,
+        "draft" if failed or reason else "ok", out_dir, sdm, spec, checks, sorted(files), model_calls, notes, reason, tokens,
     )
 
 
@@ -216,13 +227,20 @@ def build_from_spec(
     draft, used = design(provider, spec, scripts=scripts)
     calls += used
     sdm = _assemble(draft, spec, provider, now, scripts, cases)
-    failures = [f"{c.name}: {c.detail}" for c in run_checks(sdm) if c.status == FAILED]
-    if failures:  # one repair attempt, fed the exact failures
-        say(f"The design failed {len(failures)} check(s); asking the model to fix them once")
-        notes.append(f"The first design failed {len(failures)} check(s); the model was asked to fix them once.")
-        draft, used = design(provider, spec, failures, scripts=scripts)
+    # one repair attempt, fed the exact problems: failed structural checks, and quality warnings (no trigger phrases,
+    # an input no step uses, vague wording, ...), because a skill that is only structurally valid can still work badly
+    problems = [f"{c.name}: {c.detail}" for c in run_checks(sdm) if c.status == FAILED] + quality_warnings(sdm)
+    if problems:
+        say(f"The design has {len(problems)} problem(s); asking the model to fix them once")
+        first = _score(sdm)
+        draft, used = design(provider, spec, problems, scripts=scripts)
         calls += used
-        sdm = _assemble(draft, spec, provider, now, scripts, cases)
+        second = _assemble(draft, spec, provider, now, scripts, cases)
+        if _score(second) <= first:
+            sdm = second
+            notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once. Failed checks and warnings went from {first[0]} and {first[1]} to {_score(sdm)[0]} and {_score(sdm)[1]}.")
+        else:  # a repair must never make the skill worse
+            notes.append(f"The first design had {len(problems)} problem(s); the model was asked to fix them once, but its second design was worse, so the first was kept.")
     say("Writing the files and running every check")
     return finalize(
         sdm, spec, out_root, force=force, notes=notes, model_calls=calls, sandbox_note=sandbox_note,

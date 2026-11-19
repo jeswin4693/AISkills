@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
-  activityText, answersToSend, canSendAnswers, elapsedSeconds, parseTests, progressSteps, specRows, statusInfo, traceability,
+  activityText, answersToSend, canSendAnswers, elapsedSeconds, parseTests, progressSteps, specRows, statusInfo, tokenLine, traceability,
 } from "./builder";
 import type { RequirementSpec, TestCase } from "./types";
 
@@ -139,5 +139,18 @@ describe("the builder's api calls", () => {
   it("refuses a generated file path that is not a plain path", async () => {
     vi.stubGlobal("fetch", vi.fn());
     await expect(Promise.resolve().then(() => api.buildFile("a".repeat(32), "../x"))).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("what using the skill costs", () => {
+  it("says what is paid on every task and what only when the skill is used, and that these are estimates", () => {
+    expect(tokenLine({ always: 56, when_used: 1299, on_demand: 1703 })).toBe(
+      "Costs about 56 tokens on every task (its name and description) and 1,299 more when the agent uses it. Estimates.",
+    );
+  });
+
+  it("shows nothing for a session saved before the cost was worked out", () => {
+    expect(tokenLine(undefined)).toBeNull();
+    expect(tokenLine(null)).toBeNull();
   });
 });

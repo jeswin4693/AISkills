@@ -71,6 +71,7 @@ def _summary(result: BuildResult) -> dict:
         "scripts": len(result.sdm.scripts), "report_md": report,
         "counts": {"passed": len(ran) - failed - warned, "warning": warned, "failed": failed, "not_run": len(result.checks) - len(ran)},
         "checks": [asdict(c) for c in result.checks],
+        "tokens": asdict(result.tokens) if result.tokens else None,  # an estimate: build/quality.py
     }
 
 

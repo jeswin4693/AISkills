@@ -401,6 +401,13 @@ try {
     await page.getByLabel("Text of SKILL.md").filter({ hasText: "name: todo-counter-e2e" }).waitFor();
     await shot(page, "16-built");
   });
+  await step("the built skill says what it costs to use, and its SKILL.md carries the person's rules, a done-when list and an example", async () => {
+    await page.getByText(/Costs about [\d,]+ tokens on every task \(its name and description\) and [\d,]+ more when the agent uses it\. Estimates\./).waitFor();
+    const text = await page.getByLabel("Text of SKILL.md").innerText();
+    for (const heading of ["## Steps", "## Rules", "## Done when", "## Example"]) assert.ok(text.includes(heading), `SKILL.md has no '${heading}'`);
+    assert.ok(text.includes('Use when the request involves "count TODO comments"'), "the description lacks the trigger phrases");
+    for (const gone of ["## Responsibilities", "## Limitations", "## Permissions"]) assert.ok(!text.includes(gone), `'${gone}' is loaded every time but only people read it`);
+  });
   await step("saving puts it in the library, and the library shows it as v1", async () => {
     await page.getByRole("button", { name: "Save to the library" }).click();
     await page.getByText("Saved to the library as 'todo-counter-e2e' v1").waitFor();

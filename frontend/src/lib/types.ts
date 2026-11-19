@@ -178,6 +178,8 @@ export interface BuildResultInfo {
   report_md: string;
   counts: { passed: number; warning: number; failed: number; not_run: number };
   checks: Check[];
+  /** An estimate (about 4 characters per token). Absent on sessions saved before it existed. */
+  tokens?: { always: number; when_used: number; on_demand: number } | null;
 }
 
 export interface BuildSession {

@@ -5,7 +5,8 @@ and builds reusable AI skills from plain-English requirements, with a safety lay
 `backend/skillforge`.
 
 **Status and plan: [docs/roadmap.md](docs/roadmap.md) is the source of truth. Read it (and the docs it links)
-before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build,
+before asking what exists or what is next.** Built and tested: Understand (repository graph), Suggest, Build (skills built to work well and cost little: description by code,
+requirement carried into SKILL.md, quality checks, token cost; `build/quality.py`),
 Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scripts`, every case run in the
 sandbox), Library (`library import|list|versions|diff|rescan|rollback|export|install`, with a risk diff on every new
 version, see [docs/library.md](docs/library.md)),

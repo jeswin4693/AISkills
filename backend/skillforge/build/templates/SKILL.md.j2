@@ -1,42 +1,18 @@
 {{ frontmatter }}
 # {{ title }}
 
-{{ sdm.description | oneline }}
-
-## Responsibilities
-
-This skill does:
-
-{% for item in sdm.does %}
-- {{ item | oneline }}
-{% endfor %}
-
-This skill does not:
-
-{% for item in sdm.does_not %}
-- {{ item | oneline }}
-{% else %}
-- (nothing stated)
-{% endfor %}
-
+{% if sdm.inputs %}
 ## Inputs
 
 {% for f in sdm.inputs %}
 - `{{ f.name }}` ({{ f.type }}, {{ "required" if f.required else "optional" }}): {{ f.description | oneline }}
-{% else %}
-This skill takes no input.
 {% endfor %}
 
-## Workflow
+{% endif %}
+## Steps
 
-{% for s in sdm.workflow %}
-{{ loop.index }}. **{{ s.title | oneline }}**: {{ s.instruction | oneline }} If this cannot be done: {{ s.on_failure | oneline }}
-{% endfor %}
-
-## Outputs
-
-{% for f in sdm.outputs %}
-- `{{ f.name }}` ({{ f.type }}, {{ "always" if f.required else "when available" }}): {{ f.description | oneline }}
+{% for s in steps %}
+{{ loop.index }}. **{{ s.title | oneline }}**: {{ s.instruction | oneline }}{% if s.failure %} On failure: {{ s.failure | oneline }}{% endif %}{{ "" }}
 {% endfor %}
 
 {% if scripts %}
@@ -50,27 +26,44 @@ the files you give them and print a result. They are not meant to change anythin
 {% endfor %}
 
 {% endif %}
+{% if lines.rules or lines.donts %}
+## Rules
 
-## Error handling
-
-{% for item in sdm.error_handling %}
-- {{ item | oneline }}
-{% else %}
-- Stop and tell the user what went wrong.
+{% for r in lines.rules %}
+- {{ r }}
+{% endfor %}
+{% for d in lines.donts %}
+- Do not: {{ d }}
 {% endfor %}
 
-## Limitations
+{% endif %}
+{% if lines.done_when %}
+## Done when
 
-{% for item in sdm.limitations %}
-- {{ item | oneline }}
-{% else %}
-- None stated.
+Check each of these before you answer:
+
+{% for d in lines.done_when %}
+- {{ d }}
 {% endfor %}
 
-## Permissions
+{% endif %}
+## Output
 
-{% if sdm.permissions %}
-This skill asks the host agent for: {{ sdm.permissions | join(", ") }}.
-{% else %}
-This skill needs no special permissions.
+{% for f in sdm.outputs %}
+- `{{ f.name }}` ({{ f.type }}, {{ "always" if f.required else "when available" }}): {{ f.description | oneline }}
+{% endfor %}
+
+{% if lines.example_given %}
+## Example
+
+- Given: {{ lines.example_given }}
+- Expect: {{ lines.example_expect }}
+
+{% endif %}
+{% if lines.failure %}
+## If something goes wrong
+
+{% for f in lines.failure %}
+- {{ f }}
+{% endfor %}
 {% endif %}

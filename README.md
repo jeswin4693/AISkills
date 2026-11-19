@@ -73,6 +73,11 @@ python -m skillforge build --from-suggestions report.json --pick 1   # start fro
 python -m skillforge build "A skill that counts TODO and FIXME comments in a folder." --scripts
 ```
 
+The skill it writes is built to work well and cost little to use: its description says *when* to use it (built by code from
+trigger phrases), your rules and acceptance criteria are carried into `SKILL.md` word for word with a done-when list and a
+worked example, what is only for people lives in the README, and the result says what it costs in tokens (an estimate).
+Checks warn about vague wording, an input no step uses and similar weaknesses ([docs/build.md](docs/build.md)).
+
 With `--scripts` the skill can ship helper scripts. Every script case runs in the Linux sandbox, and a skill whose
 scripts never ran is marked DRAFT ([docs/scripts.md](docs/scripts.md)).
 

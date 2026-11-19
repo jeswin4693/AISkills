@@ -1,4 +1,4 @@
-import type { BuildSession, BuildStatus, JobInfo, Question, RequirementSpec, TestCase } from "./types";
+import type { BuildResultInfo, BuildSession, BuildStatus, JobInfo, Question, RequirementSpec, TestCase } from "./types";
 
 export const SLOT_ORDER = ["goal", "inputs", "outputs", "constraints", "acceptance_criteria", "failure_behavior"] as const;
 
@@ -126,3 +126,13 @@ export const EXAMPLES = [
   "A skill that turns pasted meeting notes into a short summary, the decisions made, and action items with owners.",
   "A skill that reads a pull request description and lists what is missing from it.",
 ];
+
+/**
+ * What using the skill costs, in words. These are estimates (about 4 characters per token), and the line says so:
+ * the name and description are in the agent's context on every task; SKILL.md only when the skill is picked.
+ */
+export function tokenLine(tokens: BuildResultInfo["tokens"]): string | null {
+  if (!tokens) return null;
+  const n = (v: number) => v.toLocaleString("en-US");
+  return `Costs about ${n(tokens.always)} tokens on every task (its name and description) and ${n(tokens.when_used)} more when the agent uses it. Estimates.`;
+}

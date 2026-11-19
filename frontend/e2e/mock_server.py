@@ -67,15 +67,16 @@ def design(prompt: str) -> SkillDraft:
     covers = [] if "[draft]" in prompt else ["AC1"]
     return SkillDraft(
         name="todo-counter-e2e",
-        description="Counts TODO and FIXME comments in a folder and reports the counts for each file. Use it for a quick tidy-up list.",
+        description="Counts TODO and FIXME comments in a folder and reports the counts for each file.",
+        triggers=["count TODO comments", "how many FIXMEs are left", "make a tidy-up list"],
         does=["Count TODO and FIXME comments", "Report the counts for each file"],
         does_not=["Edit any file"],
         inputs=[IOField(name="folder_path", type="string", description="The folder to read", required=True)],
         outputs=[IOField(name="counts", type="list", description="Each file with its counts", required=True)],
         workflow=[
-            Step(title="Read the folder", instruction="List the files in the folder.", on_failure="Stop and say the folder cannot be read."),
+            Step(title="Read the folder", instruction="List the files under `folder_path`.", on_failure="Stop and say the folder cannot be read."),
             Step(title="Count", instruction="Count the lines with TODO or FIXME in each file.", on_failure="Report which file could not be read."),
-            Step(title="Report", instruction="List every file with its counts.", on_failure="Say what is missing."),
+            Step(title="Report", instruction="Return `counts`: every file with its counts.", on_failure="Say what is missing."),
         ],
         permissions=["read_files"],
         error_handling=["If the folder is unreadable, stop and say so."],

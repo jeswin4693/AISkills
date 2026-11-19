@@ -220,6 +220,11 @@ def _render_build(r: BuildResult) -> str:
         )
     if r.draft_reason:
         lines.append(f"  {r.draft_reason}")
+    if r.tokens:
+        lines.append(
+            f"Cost to use (estimate): about {r.tokens.always} tokens always loaded (name and description), "
+            f"{r.tokens.when_used} more when the agent uses the skill."
+        )
     lines += [f"note: {n}" for n in r.notes]
     lines.append("Read report.md in that folder before using the skill. It lists what was not checked.")
     return "\n".join(lines)

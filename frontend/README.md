@@ -49,7 +49,7 @@ npm run e2e            # a real browser against the real API and the built UI (s
 
 `npm run e2e` starts a real API (`e2e/mock_server.py`: real database, checklist and checks, but a **scripted fake model**,
 so it needs no key and no network) and the production build, drives **Microsoft Edge** with `playwright-core` (no browser
-is downloaded; set `E2E_BROWSER_CHANNEL=chrome` to use Chrome), and checks 38 behaviours from import to install (with the risk diff and re-check), the whole
+is downloaded; set `E2E_BROWSER_CHANNEL=chrome` to use Chrome), and checks 39 behaviours from import to install (with the risk diff and re-check), the whole
 builder conversation, and "the API is gone". Run `npm run build` first, and point it at the Python that has the backend
 installed: `$env:SKILLFORGE_PYTHON = "C:\dev\venvs\aiskills\Scripts\python.exe"`. Set `E2E_SHOTS` to a folder to keep
 screenshots of each state.

@@ -46,15 +46,16 @@ def round_two() -> Extraction:  # now the answers are part of the person's words
 def draft(**overrides) -> SkillDraft:
     base = dict(
         name="duplicate-function-finder",
-        description="Finds duplicate functions in a TypeScript repository and proposes safe refactors. Use it when cleaning up copy-pasted code.",
+        description="Finds duplicate functions in a TypeScript repository and proposes safe refactors.",
+        triggers=["find duplicate functions", "clean up copy-pasted code", "suggest a shared helper"],
         does=["Find functions with the same structure", "Propose one shared version"],
         does_not=["Edit any file"],
         inputs=[IOField(name="repository_path", type="string", description="Path of the repository", required=True)],
         outputs=[IOField(name="duplicate_groups", type="list", description="Each group of duplicates with file and line", required=True)],
         workflow=[
-            Step(title="Read the repository", instruction="List the TypeScript files and read them.", on_failure="Stop and say the path cannot be read."),
+            Step(title="Read the repository", instruction="List the TypeScript files under `repository_path` and read them.", on_failure="Stop and say the path cannot be read."),
             Step(title="Compare functions", instruction="Group functions that have the same structure.", on_failure="Report that nothing could be compared."),
-            Step(title="Report", instruction="List every group with file and line.", on_failure="Say what is missing."),
+            Step(title="Report", instruction="Return `duplicate_groups`: every group with file and line.", on_failure="Say what is missing."),
         ],
         permissions=["read_files"],
         error_handling=["If the path is unreadable, stop and say so."],
@@ -103,10 +104,14 @@ def test_generated_skill_md_is_well_formed(tmp_path):
     out = run(tmp_path, [round_one(), round_two(), draft()])[0].out_dir
     text = (out / "SKILL.md").read_text(encoding="utf-8")
     assert text.startswith("---\nname: duplicate-function-finder\ndescription: ")
-    for heading in ("## Responsibilities", "## Inputs", "## Workflow", "## Outputs", "## Error handling", "## Limitations", "## Permissions"):
+    for heading in ("## Inputs", "## Steps", "## Rules", "## Done when", "## Output", "## Example", "## If something goes wrong"):
         assert heading in text
     assert "1. **Read the repository**:" in text and "`repository_path` (string, required)" in text
-    assert "read_files" in text
+    # what is for people, not for the agent, is not loaded every time the skill is used
+    for human_only in ("## Responsibilities", "## Limitations", "## Permissions", "needs no special permissions"):
+        assert human_only not in text
+    readme = (out / "README.md").read_text(encoding="utf-8")
+    assert "## Limitations" in readme and "Only exact structural copies are found." in readme and "read_files" in readme
 
 
 def test_schemas_are_valid_and_built_from_the_field_lists(tmp_path):
@@ -229,11 +234,13 @@ def test_an_existing_folder_is_never_overwritten_without_force(tmp_path):
 
 def test_hostile_text_cannot_break_the_front_matter_or_run_as_a_template(tmp_path):
     nasty = 'Finds it: "quoted" --- and\nnew lines # not a comment {{ 7*7 }} {% evil %}'
-    result, _ = run(tmp_path, [round_one(), round_two(), draft(description=nasty, does=["{{ 7*7 }}"])])
+    result, _ = run(tmp_path, [round_one(), round_two(), draft(description=nasty, does=["{{ 7*7 }}"], does_not=["{{ 7*7 }}"])])
     text = (result.out_dir / "SKILL.md").read_text(encoding="utf-8")
     meta = yaml.safe_load(text.split("---\n")[1])
-    assert meta["description"] == " ".join(nasty.split()) and meta["name"] == "duplicate-function-finder"
-    assert "- {{ 7*7 }}" in text and "49" not in text  # model text is data: it is written as is, never evaluated
+    flat = " ".join(nasty.split())
+    assert meta["description"].startswith(flat + ". Use when the request involves ") and meta["name"] == "duplicate-function-finder"
+    assert "- Do not: {{ 7*7 }}" in text and "49" not in text  # model text is data: it is written as is, never evaluated
+    assert "- {{ 7*7 }}" in (result.out_dir / "README.md").read_text(encoding="utf-8")
     assert result.status == "ok"
 
 

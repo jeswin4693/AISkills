@@ -40,11 +40,11 @@ Choices worth knowing:
 
 ## What was checked
 
-- `npm run typecheck`: clean. `npm test`: **48 unit tests** (the API client's error handling for the library and the
+- `npm run typecheck`: clean. `npm test`: **50 unit tests** (the API client's error handling for the library and the
   builder, the diff reader, formatters, the requirement-to-rows reading, the traceability of criteria to tests, the
   progress strip, the answer rules, the risk and re-check wording: no headline may say "safe").
 - `npm run build`: succeeds.
-- `npm run e2e`: **38 behaviours in a real Edge browser** against the real API (database, checklist, quote verification,
+- `npm run e2e`: **39 behaviours in a real Edge browser** against the real API (database, checklist, quote verification,
   checks and library all real; **the model is a scripted fake**, so the run is deterministic and needs no key) and the
   production build.
   - Library: the empty library; importing v1, an identical zip, a changed zip (v2), a skill with a hidden character
@@ -56,7 +56,7 @@ Choices worth knowing:
   - Builder: no model set up (explains what to put in `.env`, never asks for a key, Start disabled), then "Check again"
     and the sidebar updating without a reload; a sentence that starts a session shown as *working* and then asking
     **only the four missing items**; the answers; the requirement with **each item next to the person's own words**;
-    Approve, live progress, and the result with **the acceptance criterion next to the three tests that cover it**;
+    Approve, live progress, and the result with **what the skill costs to use (an estimate), its SKILL.md carrying your rules, a done-when list and an example**, and **the acceptance criterion next to the three tests that cover it**;
     Save to the library as v1; a model failure shown plainly with "Try again" continuing from the same place; a
     **DRAFT** flagged at the top, with "No test case covers this", and not saveable until the person ticks that they
     understand; the list of past sessions; discarding one; an unknown session; leaving and coming back.

@@ -81,8 +81,8 @@ class FakeRunner:
 
 def design_using_script(**kw):
     steps = [
-        Step(title="Count", instruction="Run `python scripts/count_lines.py <file>` and read the number.", on_failure="Stop and say the file cannot be read."),
-        Step(title="Report", instruction="Say how many lines the file has.", on_failure="Say what is missing."),
+        Step(title="Count", instruction="Run `python scripts/count_lines.py <file>` on a file under `repository_path` and read the number.", on_failure="Stop and say the file cannot be read."),
+        Step(title="Report", instruction="Return `duplicate_groups`: say how many lines the file has.", on_failure="Say what is missing."),
         Step(title="Check", instruction="Compare with the expected size.", on_failure="Say so."),
     ]
     return draft(workflow=kw.pop("workflow", steps), **kw)

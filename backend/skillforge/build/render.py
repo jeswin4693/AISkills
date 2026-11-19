@@ -11,6 +11,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from .models import IOField, RequirementSpec, SkillDefinition
+from .quality import is_none_like, requirement_lines
 from .scriptfiles import script_files, script_views
 
 TEMPLATES = Path(__file__).parent / "templates"
@@ -77,6 +78,12 @@ def render_files(sdm: SkillDefinition, spec: RequirementSpec) -> dict[str, str]:
     ctx = {
         "sdm": sdm, "spec": spec, "frontmatter": frontmatter(sdm), "title": sdm.name.replace("-", " ").title(),
         "scripts": script_views(sdm.scripts),
+        "lines": requirement_lines(sdm, spec),  # the person's approved rules, criteria and failure behaviour, word for word
+        # "none" means the step cannot fail: a line saying so would only cost tokens
+        "steps": [
+            {"title": s.title, "instruction": s.instruction, "failure": "" if is_none_like(s.on_failure) else s.on_failure}
+            for s in sdm.workflow
+        ],
     }
     files = {
         "SKILL.md": _env.get_template("SKILL.md.j2").render(**ctx),

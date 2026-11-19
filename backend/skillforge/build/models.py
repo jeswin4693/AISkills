@@ -68,15 +68,20 @@ class IOField(BaseModel):
 
 class Step(BaseModel):
     title: str
-    instruction: str = Field(description="What the agent does in this step, in plain imperative sentences.")
-    on_failure: str = Field(description="What the agent does if this step cannot be done.")
+    instruction: str = Field(
+        description="What the agent does in this step: short, imperative, at most 40 words. Name each input or output "
+        "field it uses or produces exactly, in backticks."
+    )
+    on_failure: str = Field(
+        description='What the agent does if this step cannot be done: one concrete action. Write "none" if the step cannot fail.'
+    )
 
 
 class SkillTest(BaseModel):
     name: str
     kind: TestKind
-    input_description: str = Field(description="What the agent is given in this test.")
-    expected_result: str = Field(description="What a correct run produces or does.")
+    input_description: str = Field(description="What the agent is given in this test. For a positive test: one concrete, literal example input.")
+    expected_result: str = Field(description="What a correct run produces or does. For a positive test: the literal expected output.")
     covers: list[str] = Field(description='Ids of the acceptance criteria this test checks, such as "AC1".')
 
 
@@ -84,7 +89,13 @@ class SkillDraft(BaseModel):
     """What the model designs. Code adds version, provenance and the criteria text."""
 
     name: str = Field(description="Lowercase letters, digits and hyphens only, at most 40 characters.")
-    description: str = Field(description="One or two sentences: what the skill does and when to use it.")
+    description: str = Field(
+        description="ONE sentence, third person, saying what the skill does. Do not say when to use it: that is `triggers`."
+    )
+    triggers: list[str] = Field(
+        description="2 to 5 short phrases or situations in which a person would want this skill, in the words they would "
+        'really use (for example "write a commit message", "summarise my changes"). Code adds them to the description.'
+    )
     does: list[str] = Field(description="What the skill is responsible for.")
     does_not: list[str] = Field(description="What it explicitly does not do.")
     inputs: list[IOField]
@@ -143,6 +154,8 @@ class ScriptBundle(BaseModel):
 
 
 class SkillDefinition(SkillDraft):
+    # Skills saved before `triggers` existed have none: they still load, and the quality check says so.
+    triggers: list[str] = Field(default_factory=list)
     version: str = "0.1.0"
     kind: Literal["skill"] = "skill"
     acceptance_criteria: dict[str, str]  # "AC1" -> text, copied from the approved spec

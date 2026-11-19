@@ -8,7 +8,8 @@ import pytest
 from pydantic import BaseModel
 
 from skillforge.providers import (
-    CallOptions, Capabilities, Generation, MockProvider, OpenAICompatibleProvider, ProviderError, Usage, provider_from_env,
+    CallOptions, Capabilities, Generation, MockProvider, OpenAICompatibleProvider, ProviderError, Usage, build_provider,
+    provider_from_env,
 )
 
 
@@ -25,6 +26,13 @@ def test_factory_builds_gemini_and_openai():
     assert (g.name, g.model) == ("gemini", "m1")
     o = provider_from_env({"LLM_PROVIDER": "OpenAI", "LLM_MODEL": "m2", "OPENAI_API_KEY": "k"})
     assert (o.name, o.model) == ("openai", "m2")
+
+
+def test_factory_builds_anthropic_and_build_provider_takes_a_timeout():
+    a = provider_from_env({"LLM_PROVIDER": "Anthropic", "LLM_MODEL": "m3", "ANTHROPIC_API_KEY": "k"})
+    assert (a.name, a.model, type(a).__name__) == ("anthropic", "m3", "AnthropicProvider")
+    p = build_provider("gemini", "m", {"GOOGLE_API_KEY": "k"}, timeout_s=12.0)
+    assert (p.name, p.model, p._client.timeout.read) == ("gemini", "m", 12.0)
 
 
 def test_factory_presets_use_their_own_address_and_key_variable():
@@ -51,10 +59,11 @@ def test_factory_custom_provider_needs_an_address_and_a_key():
     "env, message",
     [
         ({}, "LLM_PROVIDER is ''"),
-        ({"LLM_PROVIDER": "nonsense"}, "Supported: custom, gemini, groq, mistral, openai, openrouter"),
+        ({"LLM_PROVIDER": "nonsense"}, "Supported: anthropic, custom, gemini, groq, mistral, openai, openrouter"),
         ({"LLM_PROVIDER": "gemini"}, "LLM_MODEL is empty"),
         ({"LLM_PROVIDER": "gemini", "LLM_MODEL": "m"}, "GOOGLE_API_KEY is empty"),
         ({"LLM_PROVIDER": "openai", "LLM_MODEL": "m"}, "OPENAI_API_KEY is empty"),
+        ({"LLM_PROVIDER": "anthropic", "LLM_MODEL": "m"}, "ANTHROPIC_API_KEY is empty"),
     ],
 )
 def test_factory_explains_what_is_missing(env, message):

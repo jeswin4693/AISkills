@@ -15,9 +15,10 @@ local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions
 web UI (Builder + Library pages) in `frontend/` ([docs/ui.md](docs/ui.md)), and the AI engine (`ai/`: every model call
 goes through one service that picks a model by task, owns the retry policy, counts attempts and tokens, and redacts keys;
 [docs/ai-engine.md](docs/ai-engine.md)).
-Next: the next differentiator ([docs/differentiators.md](docs/differentiators.md): the generic skill-tool features are crowded; the risk diff +
-rescan is built; still open are code-level evidence + drift, and a behavioural canary scan), then the other UI pages and
-Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
+Next: the Component Factory ([docs/component-factory.md](docs/component-factory.md): agent, plugin and MCP-server builders on the
+same app, starting with its Phase 0 and the Agent Builder), then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
+the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
+Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Commands (run from `backend/`)
 

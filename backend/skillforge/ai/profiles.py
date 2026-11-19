@@ -40,7 +40,7 @@ class ProfileSet:
 
     def secrets(self) -> tuple[str, ...]:
         """Every key the profiles hold, so any error text can be cleaned before it is stored or shown."""
-        return tuple(dict.fromkeys(s for p in self.all() for s in p.provider.secrets))
+        return tuple(dict.fromkeys(s for p in self.all() for s in getattr(p.provider, "secrets", ())))
 
 
 def _positive(env: Mapping[str, str], name: str, cast: Callable[[str], float]) -> float | None:

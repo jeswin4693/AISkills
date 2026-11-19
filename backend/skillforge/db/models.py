@@ -56,3 +56,24 @@ class Job(Base):
     finished_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
     events: Mapped[list] = mapped_column(JSON, default=list)  # [{"at", "message"}] progress the UI can show
     error: Mapped[str] = mapped_column(Text, default="")
+
+
+class ModelCall(Base):
+    """One HTTP attempt at a model, for the session that asked for it. Counts and timings only: never a prompt or a reply."""
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("build_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[str] = mapped_column(String(32))
+    task: Mapped[str] = mapped_column(String(16))  # extract, select, design, suggest, code, act
+    tier: Mapped[str] = mapped_column(String(16))  # fast, design, code, actor, escalation
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    attempt: Mapped[int] = mapped_column(Integer)  # 1 for the first try of a call, 2 for the next, ...
+    status: Mapped[str] = mapped_column(String(8))  # ok or error
+    error_kind: Mapped[str] = mapped_column(String(16), default="")
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null: the provider did not say
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer)

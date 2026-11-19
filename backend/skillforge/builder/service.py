@@ -28,14 +28,16 @@ from ..build.pipeline import (
     understand_round,
 )
 from ..build.requirements import Question
+from ..ai import AIService
 from ..build.scripts import ScriptRunner
-from ..db import BuildSession, Database, Job, now_text
+from ..db import BuildSession, Database, Job, ModelCall, now_text
 from ..graph.store import data_dir
 from ..library import ImportReport, Library, LibraryError, import_skill
 from ..providers import LLMProvider, ProviderError
 from ..validate.static import read_dir
 from .jobs import JobRunner
 from .provider import env_provider
+from .usage import DbUsageRecorder, usage_summary
 
 MAX_ROUNDS = 3
 MAX_EVENTS = 50
@@ -120,7 +122,7 @@ class Builder:
                 "id": row.id, "status": row.status, "description": row.description, "round": row.round,
                 "max_rounds": MAX_ROUNDS, "with_scripts": row.with_scripts, "questions": row.questions,
                 "spec": row.spec, "result": row.result, "error": row.error, "retryable": row.retryable,
-                "model_calls": row.model_calls, "notes": row.notes,
+                "model_calls": row.model_calls, "notes": row.notes, "usage": usage_summary(self.db, sid),
                 "saved": {"name": row.saved_name, "version": row.saved_version} if row.saved_version else None,
                 "created_at": row.created_at, "updated_at": row.updated_at,
                 "job": None if job is None else {
@@ -258,6 +260,7 @@ class Builder:
             if row.status == "working":
                 raise WrongState("It is still running. Wait for it to finish, then discard it.")
             s.execute(delete(Job).where(Job.session_id == sid))
+            s.execute(delete(ModelCall).where(ModelCall.session_id == sid))
             s.delete(row)
         shutil.rmtree(self.builds_root / sid, ignore_errors=True)  # sid is a checked 32-hex id, so this is our own folder
 
@@ -286,7 +289,7 @@ class Builder:
             sid, kind = job.session_id, job.kind
         progress = lambda message: self._event(job_id, message)  # noqa: E731
         try:
-            (self._understand if kind == "understand" else self._build)(sid, progress)
+            (self._understand if kind == "understand" else self._build)(sid, progress, job_id)
             self._finish_job(job_id, "succeeded", "")
         except ProviderError as exc:  # a missing key or an unreachable model: running it again can help
             self._fail(sid, job_id, str(exc), True)
@@ -296,11 +299,16 @@ class Builder:
             log.exception("builder job %s failed", job_id)
             self._fail(sid, job_id, f"Unexpected error ({type(exc).__name__}): {str(exc)[:300]}", False)
 
-    def _understand(self, sid: str, progress: Callable[[str], None]) -> None:
+    def _provider(self, sid: str, job_id: int) -> LLMProvider:
+        """The model for one job. The AI service is given a recorder, so every attempt is counted for this session."""
+        provider = self.provider_factory()
+        return provider.with_recorder(DbUsageRecorder(self.db, sid, job_id)) if isinstance(provider, AIService) else provider
+
+    def _understand(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
             row = self._row(s, sid)
             words, round_no = row.words, row.round
-        provider = self.provider_factory()
+        provider = self._provider(sid, job_id)
         progress(f"Round {round_no}: reading your words and filling in the checklist")
         r = understand_round(provider, words, round_no, MAX_ROUNDS)
         with self.db.session() as s:
@@ -315,12 +323,12 @@ class Builder:
         if r.state in ("blocked", "incomplete"):
             raise BuildError(r.message)
 
-    def _build(self, sid: str, progress: Callable[[str], None]) -> None:
+    def _build(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
             row = self._row(s, sid)
             spec = RequirementSpec.model_validate(row.spec)
             with_scripts, calls, notes = row.with_scripts, row.model_calls, list(row.notes)
-        provider = self.provider_factory()
+        provider = self._provider(sid, job_id)
         out_root = self.builds_root / sid
         shutil.rmtree(out_root, ignore_errors=True)  # this folder is ours alone; a retry starts clean
         result = build_from_spec(

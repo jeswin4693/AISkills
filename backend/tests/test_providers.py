@@ -7,7 +7,9 @@ import openai
 import pytest
 from pydantic import BaseModel
 
-from skillforge.providers import MockProvider, OpenAICompatibleProvider, ProviderError, provider_from_env
+from skillforge.providers import (
+    CallOptions, Capabilities, Generation, MockProvider, OpenAICompatibleProvider, ProviderError, Usage, provider_from_env,
+)
 
 
 class Answer(BaseModel):
@@ -141,3 +143,23 @@ def test_adapter_reports_a_refusal():
     body["choices"][0]["message"]["refusal"] = "I cannot help with that."
     with pytest.raises(ProviderError, match="refused"):
         adapter(lambda request: httpx2.Response(200, json=body)).generate_structured(Answer, "q")
+
+
+# ---- the provider contract ---------------------------------------------------------------------------
+
+
+def test_provider_error_keeps_old_calls_working():
+    plain = ProviderError("x")
+    assert plain.retryable is False and plain.kind == "other" and plain.retry_after_s is None and plain.detail == ""
+    assert ProviderError("x", retryable=True).retryable is True
+
+
+def test_provider_error_carries_kind_and_wait():
+    err = ProviderError("slow down", kind="rate_limit", retry_after_s=7.5, detail="why")
+    assert (err.kind, err.retry_after_s, err.detail) == ("rate_limit", 7.5, "why")
+
+
+def test_generation_defaults():
+    g = Generation(1)
+    assert g.value == 1 and g.usage == Usage() and g.latency_s == 0.0 and g.model == ""
+    assert Usage(3, 4).input_tokens == 3 and CallOptions().timeout_s is None and Capabilities().structured_output == "json_schema"

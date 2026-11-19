@@ -11,15 +11,19 @@ Nothing here asks a model whether its own answer is good: callers check answers 
 from __future__ import annotations
 
 import logging
+import os
 import random
 import threading
 import time
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from pydantic import BaseModel, ValidationError
+
+from ..graph.store import data_dir
 from ..providers.base import CallOptions, Generation, LLMProvider, ProviderError, T, Usage
+from .cache import FileCache, ResponseCache, cache_key
 from .policy import NO_WAIT, Policy, decide
 from .profiles import Profile, ProfileSet, load_profiles, positive_number
 from .redact import redact
@@ -88,12 +92,14 @@ class AIService:
         sleep: Callable[[float], None] = time.sleep,
         rng: Callable[[], float] = random.random,
         max_calls: int | None = None,
+        cache: ResponseCache | None = None,
         _counters: _Counters | None = None,
     ) -> None:
         self.profiles = profiles
         self.policy = policy
         self.recorder = recorder
         self.max_calls = max_calls
+        self.cache = cache
         self._sleep = sleep
         self._rng = rng
         self._counters = _counters or _Counters()
@@ -122,7 +128,8 @@ class AIService:
     def with_recorder(self, recorder: UsageRecorder) -> AIService:
         """The same models and rules, a recorder for this run, and fresh counters."""
         return AIService(
-            self.profiles, policy=self.policy, recorder=recorder, sleep=self._sleep, rng=self._rng, max_calls=self.max_calls
+            self.profiles, policy=self.policy, recorder=recorder, sleep=self._sleep, rng=self._rng, max_calls=self.max_calls,
+            cache=self.cache,
         )
 
     def escalated(self) -> AIService | None:
@@ -133,7 +140,7 @@ class AIService:
             return None
         return AIService(
             ProfileSet(profile), policy=self.policy, recorder=self.recorder, sleep=self._sleep, rng=self._rng,
-            max_calls=self.max_calls, _counters=self._counters,
+            max_calls=self.max_calls, cache=self.cache, _counters=self._counters,
         )
 
     @property
@@ -153,6 +160,13 @@ class AIService:
         profile = self.profiles.escalation if escalate and self.profiles.escalation else self.profiles.profile_for(tier)
         tier_name = "escalation" if profile.tier == "escalation" else tier.value
         secrets = self.profiles.secrets()
+        key = None
+        if self.cache is not None and task is not Task.ACT:  # eval replies must be asked for again, so they are never cached
+            key = cache_key(profile.provider.name, profile.provider.model, schema, system, prompt)
+            hit = self._cached(key, schema)
+            if hit is not None:
+                self._record(task, tier_name, profile, 0, "cache", "", Usage(), 0.0)  # not a call: it never reached the model
+                return hit, 0
         current = prompt
         made = 0
         while True:
@@ -178,9 +192,27 @@ class AIService:
                 continue
             self._add_tokens(generation.usage)
             self._record(task, tier_name, profile, made, "ok", "", generation.usage, generation.latency_s)
+            if key is not None:
+                self._store(key, generation.value)
             return generation.value, made
 
     # ---- internals --------------------------------------------------------------------------------
+
+    def _cached(self, key: str, schema: type[T]) -> T | None:
+        """A stored answer that still fits the schema, or None (an old or damaged entry is simply not used)."""
+        try:
+            text = self.cache.get(key) if self.cache is not None else None
+            return schema.model_validate_json(text) if text is not None else None
+        except (ValidationError, OSError, ValueError):
+            return None
+
+    def _store(self, key: str, value: BaseModel) -> None:
+        """Only an answer that already passed schema validation is kept. A cache that cannot write never breaks a call."""
+        try:
+            if self.cache is not None:
+                self.cache.put(key, value.model_dump_json())
+        except Exception:  # noqa: BLE001
+            log.exception("could not store a model answer in the cache")
 
     def _attempt(self, profile: Profile, schema: type[T], prompt: str, system: str | None) -> Generation[T]:
         provider = profile.provider
@@ -233,4 +265,5 @@ def service_from_env(env: Mapping[str, str] | None = None) -> AIService:
     env = os.environ if env is None else env
     profiles = load_profiles(env)
     limit = positive_number(env, "LLM_MAX_CALLS", int)
-    return AIService(profiles, max_calls=int(limit) if limit else None)
+    cache = FileCache(data_dir() / "llm-cache") if env.get("SKILLFORGE_LLM_CACHE", "").strip() == "1" else None  # off unless asked
+    return AIService(profiles, max_calls=int(limit) if limit else None, cache=cache)

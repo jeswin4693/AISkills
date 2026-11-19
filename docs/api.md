@@ -44,10 +44,10 @@ run as background jobs: the request that starts one returns at once with `status
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/provider` | `{"configured", "provider", "model", "detail"}`: is a model set up. Never a key, and no call to the model. |
+| `GET /api/provider` | `{"configured", "provider", "model", "detail", "tiers", "escalation", "capabilities"}`: is a model set up, and which model serves each tier of work (`tiers`: fast, design, code, actor, each with provider and model; `escalation`: the stronger model, or null). Never a key, and no call to the model. See [ai-engine.md](ai-engine.md). |
 | `POST /api/builds` | `{"description", "with_scripts"}` starts a session (201). A sentence under 10 characters is a 400. |
 | `GET /api/builds` | Sessions, newest first, each with its status and what became of it. |
-| `GET /api/builds/{id}` | The whole session: `status`, `questions` (when it is waiting for answers), `spec` (the requirement waiting for approval), `result` (when done), `error`, `retryable`, and `job` with its progress `events`. |
+| `GET /api/builds/{id}` | The whole session: `status`, `questions` (when it is waiting for answers), `spec` (the requirement waiting for approval), `result` (when done), `error`, `retryable`, `usage` (`{calls, errors, input_tokens, output_tokens, models}`: attempts at the model with failed ones counted, and the tokens the provider reported, null when it gave none), and `job` with its progress `events`. |
 | `POST /api/builds/{id}/answers` | `{"answers": {"<slot>": "text"}}`. Only slots that were asked; at least one non-empty answer. |
 | `POST /api/builds/{id}/approve` | The person approves the requirement shown in `spec`. **Only then is anything built.** |
 | `POST /api/builds/{id}/retry` | Runs the step that failed again, when a second try can help (a missing key, an unreachable model). |

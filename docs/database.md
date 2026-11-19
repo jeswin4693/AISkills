@@ -22,6 +22,11 @@ text), the error and whether a retry can help, model calls, notes, and the libra
 `jobs`: a sequence id (a higher id is a later job), the session, kind (`understand` or `build`), status
 (`queued`, `running`, `succeeded`, `failed`), times, the progress events the UI shows, and the error.
 
+`model_calls` (migration 0002): one row per **attempt** at a model for a session: the session and job, the task
+(`extract`, `select`, `design`, `suggest`, `code`, `act`), the tier, provider and model, the attempt number, ok or
+error and the error kind, the input and output tokens as the provider reported them (null when it gave none) and the
+time taken. **Never any prompt or reply text.** Deleting a session deletes its rows. See [ai-engine.md](ai-engine.md).
+
 Generated files of a session are in `<data folder>\builds\<session id>\<skill name>\` until the session is
 discarded; **saving** copies a checked version into the library.
 
@@ -32,7 +37,9 @@ The migrations are configured in code (`Database.migrate`), and there is no `ale
 `versions/0001_build_sessions_and_jobs.py` with the next revision id and `down_revision`, written with
 `op.batch_alter_table` (SQLite cannot alter a table in place). The test
 `test_the_migration_creates_exactly_what_the_models_describe_and_is_safe_to_repeat` fails if the models and the
-migrations drift apart. Only the first migration exists so far, so adding a second has not been tried yet.
+migrations drift apart (and lists the tables it expects, so it changes when a table is added). Two migrations exist now.
+`0002_model_calls.py` only creates a table, so the in-place alteration of an existing table (`batch_alter_table`) has
+still not been tried.
 
 ## Limits
 

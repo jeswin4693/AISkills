@@ -41,7 +41,9 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
   remaining"**. Checked only with a mocked HTTP transport.
 - Anthropic branch (`claude-sonnet-5-5`, server-side refusal fallback): checked only with a mocked HTTP
   transport. There is no Anthropic API key. Sonnet 5.5 rejects forced `tool_choice`, so structured output
-  must not be built on forced tool calls.
+  must not be built on forced tool calls. The app's adapter (`providers/anthropic_native.py`, `LLM_PROVIDER=anthropic`)
+  therefore sends a JSON schema in `output_config.format` and validates the reply text itself, with no beta flags. It is
+  checked against a mocked HTTP server only; it has never made a real call.
 
 ## Docker and the sandbox
 

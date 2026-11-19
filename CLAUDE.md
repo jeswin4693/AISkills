@@ -12,7 +12,9 @@ Safety (static validators + a fail-closed Docker sandbox), Scripts (`build --scr
 sandbox), Library (`library import|list|versions|diff|rescan|rollback|export|install`, with a risk diff on every new
 version, see [docs/library.md](docs/library.md)),
 local API (`serve`, see [docs/api.md](docs/api.md)), database + builder sessions ([docs/database.md](docs/database.md)),
-web UI (Builder + Library pages) in `frontend/` ([docs/ui.md](docs/ui.md)).
+web UI (Builder + Library pages) in `frontend/` ([docs/ui.md](docs/ui.md)), and the AI engine (`ai/`: every model call
+goes through one service that picks a model by task, owns the retry policy, counts attempts and tokens, and redacts keys;
+[docs/ai-engine.md](docs/ai-engine.md)).
 Next: the next differentiator ([docs/differentiators.md](docs/differentiators.md): the generic skill-tool features are crowded; the risk diff +
 rescan is built; still open are code-level evidence + drift, and a behavioural canary scan), then the other UI pages and
 Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)); Agent Builder last.
@@ -67,5 +69,8 @@ Setup, the layout and what each part does are in [README.md](README.md). The dev
   fixture enforces it). Tests that need a Linux Docker (`test_sandbox_live.py`) skip when none exists.
 - **Keys** come only from the environment or the git-ignored `.env`. Never commit, print or document one. Do not
   hardcode model names: models get retired for new keys while still listed, so test a model with a real call.
+- **Every model call names its task** (`generate_with_retry(..., task=Task.X)`, `skillforge.ai`) and never calls a
+  provider directly, so the model, the retries, the budget, the usage rows and the redaction apply to it. Settings are read
+  only in `service_from_env`, and `ai/` never calls `load_dotenv` (the test fixture blocks the two loaders that do).
 - **No new library without clear value.** Do not add or reintroduce Ollama.
 - **After each slice:** tests pass, README, `docs/roadmap.md` and the slice's doc are updated, then commit and push.

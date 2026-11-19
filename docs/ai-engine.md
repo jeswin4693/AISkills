@@ -1,8 +1,8 @@
 # AI engine: one model service for every builder
 
-**Status: in progress (2026-11-19).** Written from the assessment of the existing Gemini integration and approved by the
-project owner. The plan is [superpowers/plans/2026-11-19-ai-engine.md](superpowers/plans/2026-11-19-ai-engine.md).
-Results and limits are added at the end when the work is done.
+**Status: built (2026-11-19), steps A0 to A3. Not built: the tier benchmark (A4).** Written from the assessment of the
+existing Gemini integration and approved by the project owner. The plan is
+[superpowers/plans/2026-11-19-ai-engine.md](superpowers/plans/2026-11-19-ai-engine.md). Results and limits are at the end.
 
 ## Why
 
@@ -71,7 +71,8 @@ Existing: `LLM_PROVIDER`, `LLM_MODEL`, the key variables. New, all optional (a t
 ```
 LLM_<TIER>_PROVIDER, LLM_<TIER>_MODEL        TIER = FAST, DESIGN, CODE, ACTOR
 LLM_ESCALATION_PROVIDER, LLM_ESCALATION_MODEL   used only after the checks failed twice (never otherwise)
-LLM_TIMEOUT_S (default 90; the code tier defaults to 180), LLM_<TIER>_TIMEOUT_S
+LLM_TIMEOUT_S (default 90; the code tier defaults to 180 only when this is not set, and an explicit value applies to
+              every tier), LLM_<TIER>_TIMEOUT_S
 LLM_<TIER>_MAX_OUTPUT_TOKENS (default: none), LLM_MAX_INPUT_TOKENS (default: none)
 LLM_MAX_CALLS         HTTP attempts allowed per run (default: none)
 SKILLFORGE_LLM_CACHE  1 turns the response cache on (default: off)
@@ -98,7 +99,9 @@ retried with the same prompt: it would fail the same way.
 
 One row per HTTP attempt in a new table `model_calls` (migration 0002): session, job, task, tier, provider, model,
 attempt, status, error kind, input and output tokens (null when the provider gives none), latency. Prompt and reply
-text are never stored. The session payload gains a `usage` summary and the result page shows it as an estimate source.
+text are never stored. The session payload gains a `usage` summary and the result page shows it ("Model use while
+building: 4 attempts at the model · 1,734 tokens in and 1,515 out · gemini-3.5-flash-lite."). Tokens are the provider's
+numbers, never an estimate. A builder session records rows only when its model is an `AIService`; a bare provider is used as it is.
 
 ### Escalation
 
@@ -124,9 +127,44 @@ answer, so a "retry" with the same prompt does not get a fresh sample**; that is
 
 Approved by the owner: a thin layer in front of the providers (not a rewrite, not a gateway library); the tier names and
 `LLM_<TIER>_…` variables above; SDK retries off in favour of one policy, and a 90 s timeout in place of 600 s; a usage
-table that stores counts and timings only; the cache; the Anthropic adapter. Calls of mine, open to change: Anthropic uses
-the general-availability `messages.parse(output_format=...)`, not the beta flags in the smoke script; the cache is a file
-cache, not a database table; the per-run call budget is per `AIService` instance (one job), not per session.
+table that stores counts and timings only; the cache; the Anthropic adapter. Calls of mine, open to change: Anthropic is
+asked with `messages.create` and a JSON schema in `output_config.format`, validated by our code, with none of the beta flags
+from the smoke script (the SDK's `messages.parse` validates inside the call, so a refusal, which has no content, would have
+looked like invalid output); the cache is a file cache, not a database table; the per-run call budget is per `AIService`
+instance (one job), not per session; a cache hit is a usage row with status `cache` and attempt 0, and is not a call.
+
+## Results (2026-11-19)
+
+- **Backend:** 755 tests run, 753 passed, 2 skipped (the ones that need a Linux Docker or symlinks, as before), up from 626;
+  about 130 are new. Every old test passes unchanged except two edits to old tests that were expected: the
+  "Supported providers" message now lists `anthropic`, and the migration test's list of tables now includes `model_calls`.
+- **Web UI:** typecheck clean, 53 unit tests (3 new). The real-browser suite (`npm run e2e`) was **not run** for this slice.
+- **Live, Gemini (`gemini-3.5-flash-lite`), through the new service:**
+  - one tiny call: 1 attempt, 10 tokens in and 25 out, 1.3 s, routed as `fast`;
+  - two real builder conversations in a scratch data folder (your library and database untouched). The first stopped
+    after 3 rounds with "requirements still incomplete (4/6)": the model gave a supporting quote for `outputs` that was not
+    word for word in the person's text, so the checklist (correctly) did not count it. The second finished: `count-todos`,
+    30 checks passed, 0 failed, 4 not run, 4 attempts, 0 errors, 1,734 tokens in and 1,515 out, 7.9 s. In both, the usage rows
+    added up exactly to the session totals. Two runs say little about how often the model leaves a slot unanswered.
+
+## Limits and what is not verified
+
+- **Never run against the real service:** the Anthropic adapter (mock only: there is no key), a tier or escalation model of a
+  second provider, the response cache against a real model, and a real 429 (the wait handling is tested with a mocked server).
+- **Behaviour changes** (all approved, all tested): the SDK's hidden retries are off, so each failure is retried by our policy
+  and every attempt is counted; the call timeout is 90 s instead of 600 s; a length cut-off is no longer retried with the same
+  prompt; connection errors and timeouts are now retried by us (the SDK did it before, invisibly).
+- **Escalation covers the skill design only.** Scripts, evaluation repairs and the other call sites do not escalate yet.
+- **Provenance still records the default model only.** The usage table has the model of every attempt, but only for builder
+  sessions; the command line does not write usage anywhere (it has no database).
+- **The call budget is per run (one job), not per session.**
+- **Not fixed here, found in the assessment:** an edit to `.env` is not noticed by a running server (the first `load_dotenv`
+  wins), "configured" in the status panel does not prove the key works, and `.env` sits in a OneDrive-synced folder (a real
+  user environment variable would avoid that; it wins over the file).
+- **The tier benchmark (A4) is not built.** Which tasks need a stronger model than Flash-Lite is still a guess: it needs sample
+  requirements for the agent and MCP builders, and it spends quota, so it waits for them.
+- **The cache stores model answers on disk** (under the per-user data folder, outside OneDrive). They come from what the
+  person typed, so the folder is as private as the account.
 
 ## Left for the builder
 

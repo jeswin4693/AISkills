@@ -187,8 +187,8 @@ C:\dev\venvs\aiskills\Scripts\python.exe backend\scripts\hello_structured.py
 The graph needs no key and costs nothing. For the AI parts you bring your own API key. Gemini offers a free
 key with rate limits (check Google's terms for how free-tier data is handled); OpenAI usage is billed by the
 provider to your own account. If you cannot get a Gemini key (Google sometimes refuses to create one for an
-account), `LLM_PROVIDER` can also be `groq`, `openrouter`, `mistral`, or `custom` for any OpenAI-compatible API;
-those four share the same adapter but have not been verified live yet. `anthropic` has its own adapter, checked against
+account), `LLM_PROVIDER` can also be `groq` (verified live on its gpt-oss models), `openrouter`, `mistral`, or `custom` for any
+OpenAI-compatible API; those three share the same adapter but have not been verified live yet. `anthropic` has its own adapter, checked against
 a mock only. This repo includes no key, no bundled model and no hosted service.
 
 ### One model service for every feature

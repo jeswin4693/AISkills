@@ -26,6 +26,10 @@ Checked 2026-11-17 on the dev machine (Windows 11 Enterprise, PowerShell).
 
 - Gemini, `gemini-3.5-flash-lite`: structured output validated against the Pydantic model, about 5.6 s
   (21 tokens in, 54 out).
+- Groq (2026-11-19, through the AI service): a structured call works on its gpt-oss models (about 0.5 to 1 s), with token counts.
+  Not every Groq model takes JSON-schema output: one answered 400 "does not support response format `json_schema`", another
+  400 "Failed to generate JSON"; both are classified `bad_request` and are not retried. A made-up key is `auth` (the key is not
+  echoed back) and a made-up model is `model_missing`. Which models a key can use changes, so ask the provider's model list.
 
 ### Gotchas found
 

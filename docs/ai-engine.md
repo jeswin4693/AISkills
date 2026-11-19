@@ -145,12 +145,16 @@ instance (one job), not per session; a cache hit is a usage row with status `cac
     after 3 rounds with "requirements still incomplete (4/6)": the model gave a supporting quote for `outputs` that was not
     word for word in the person's text, so the checklist (correctly) did not count it. The second finished: `count-todos`,
     30 checks passed, 0 failed, 4 not run, 4 attempts, 0 errors, 1,734 tokens in and 1,515 out, 7.9 s. In both, the usage rows
-    added up exactly to the session totals. Two runs say little about how often the model leaves a slot unanswered.
+    added up exactly to the session totals. Two runs say little about how often the model leaves a slot unanswered;
+  - a second real provider, Groq, through the same service: structured calls worked on its gpt-oss models (with tokens), two other
+    Groq models were refused with a `bad_request` that the adapter classified and did not retry (one does not accept JSON-schema
+    output), a made-up key came back as `auth` without the key in the message, a made-up model as `model_missing`, and with the
+    fast tier set to Groq and the rest on Gemini, one task went to each and each got its own usage row.
 
 ## Limits and what is not verified
 
-- **Never run against the real service:** the Anthropic adapter (mock only: there is no key), a tier or escalation model of a
-  second provider, the response cache against a real model, and a real 429 (the wait handling is tested with a mocked server).
+- **Never run against the real service:** the Anthropic adapter (mock only: there is no key), escalation with a real stronger
+  model, the response cache against a real model, and a real 429 (the wait handling is tested with a mocked server).
 - **Behaviour changes** (all approved, all tested): the SDK's hidden retries are off, so each failure is retried by our policy
   and every attempt is counted; the call timeout is 90 s instead of 600 s; a length cut-off is no longer retried with the same
   prompt; connection errors and timeouts are now retried by us (the SDK did it before, invisibly).

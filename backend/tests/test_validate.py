@@ -378,3 +378,71 @@ def test_a_folder_name_that_differs_from_the_agent_name_warns():
     assert status(run_agent(agent_md(), folder="other-folder"), N_AGENT_FOLDER) == WARNING
     assert status(run_agent(agent_md(), folder="demo-agent"), N_AGENT_FOLDER) == PASSED
     assert N_AGENT_FOLDER not in run_agent(agent_md(), folder=None)
+
+
+# ---- a plugin's definition: .claude-plugin/plugin.json -------------------------------------------------
+
+N_PLUGIN = "plugin.json exists and is a valid plugin manifest"
+N_MARKET = "the marketplace entry matches the manifest"
+N_NOTHING = "the plugin contains a skill or an agent"
+N_PSCRIPTS = "scripts shipped inside the plugin"
+
+
+def plugin_files(manifest: dict | str | None = None, market: dict | str | None = None, **extra: str | bytes) -> dict[str, bytes]:
+    manifest = {"name": "demo-plugin", "version": "0.1.0", "description": "Demo."} if manifest is None else manifest
+    files: dict[str, bytes] = {
+        ".claude-plugin/plugin.json": (manifest if isinstance(manifest, str) else json.dumps(manifest)).encode(),
+        "skills/demo-skill/SKILL.md": SKILL_MD.encode(),
+    }
+    if market is not None:
+        files[".claude-plugin/marketplace.json"] = (market if isinstance(market, str) else json.dumps(market)).encode()
+    for path, data in extra.items():
+        files[path.replace("__", "/")] = data.encode() if isinstance(data, str) else data
+    return files
+
+
+def run_plugin(files: dict[str, bytes], folder: str | None = "demo-plugin"):
+    return {r.name: r for r in validate_files(files, folder=folder, kind="plugin")}
+
+
+def test_a_good_plugin_passes_every_check_and_no_skill_file_stands_in_for_its_manifest():
+    market = {"name": "demo-plugin-local", "owner": {"name": "me"}, "plugins": [{"name": "demo-plugin", "source": "./"}]}
+    results = validate_files(plugin_files(market=market), folder="demo-plugin", kind="plugin")
+    assert [r.status for r in results] == [PASSED] * len(results) and {N_PLUGIN, N_MARKET, N_NOTHING, N_PSCRIPTS} <= {r.name for r in results}
+    assert status(run_plugin({"SKILL.md": SKILL_MD.encode()}), N_PLUGIN) == FAILED
+    assert N_SKILL_MD not in run_plugin(plugin_files())
+
+
+@pytest.mark.parametrize("manifest", [
+    "not json", "[]", '{"version": "1"}', '{"name": ""}', '{"name": "Bad Name"}', '{"name": "claude-helpers"}', '{"name": "anthropic-x"}',
+    '{"name": "' + "a" * 65 + '"}', '{"name": "ok-name", "version": 3}', '{"name": "ok-name", "description": ["x"]}',
+])
+def test_a_manifest_with_a_bad_name_or_shape_fails(manifest):
+    assert status(run_plugin(plugin_files(manifest)), N_PLUGIN) == FAILED
+
+
+def test_names_that_claude_code_reserves_are_named_in_the_message():
+    found = run_plugin(plugin_files({"name": "claude-helpers"}))[N_PLUGIN]
+    assert found.status == FAILED and "claude-" in found.detail
+
+
+def test_the_marketplace_entry_must_carry_the_manifests_name():
+    other = {"name": "m", "owner": {"name": "me"}, "plugins": [{"name": "another-name", "source": "./"}]}
+    assert status(run_plugin(plugin_files(market=other)), N_MARKET) == FAILED
+    assert status(run_plugin(plugin_files(market="not json")), N_MARKET) == FAILED
+    assert N_MARKET not in run_plugin(plugin_files())  # a marketplace file is optional
+
+
+def test_a_plugin_with_nothing_in_it_fails():
+    only_manifest = {".claude-plugin/plugin.json": json.dumps({"name": "demo-plugin"}).encode()}
+    assert status(run_plugin(only_manifest), N_NOTHING) == FAILED
+    agent = {**only_manifest, "agents/demo-agent.md": b"---\nname: demo-agent\n---\nx"}
+    assert status(run_plugin(agent), N_NOTHING) == PASSED
+
+
+def test_scripts_inside_a_plugin_are_listed_with_what_they_can_do():
+    plain = run_plugin(plugin_files(**{"skills/demo-skill/scripts/a.py": "print(1)\n"}))[N_PSCRIPTS]
+    assert plain.status == PASSED and "1 script" in plain.detail  # analysed, and it needs nothing risky
+    net = run_plugin(plugin_files(**{"skills/demo-skill/scripts/fetch.py": "import requests\n", "skills/demo-skill/scripts/run.sh": "echo hi\n"}))[N_PSCRIPTS]
+    assert net.status == WARNING and "network" in net.detail and "run.sh" in net.detail  # a shell script is not analysed
+    assert status(run_plugin(plugin_files()), N_PSCRIPTS) == PASSED  # no scripts at all

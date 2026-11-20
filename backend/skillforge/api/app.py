@@ -164,7 +164,8 @@ def create_app(
     def kinds() -> list[dict]:
         """What this app builds: each kind's checklist (labels and questions) and where it can be installed."""
         return [
-            {"key": k.key, "label": k.label, "install_targets": list(k.install_targets), "slots": [asdict(s) for s in k.slots]}
+            {"key": k.key, "label": k.label, "definition_file": k.definition_file, "install_targets": list(k.install_targets),
+             "slots": [asdict(s) for s in k.slots]}
             for k in all_kinds()
         ]
 

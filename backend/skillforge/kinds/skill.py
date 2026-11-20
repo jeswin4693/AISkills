@@ -30,16 +30,21 @@ SLOT_LABELS = {
 }
 
 
-def skill_name_of(files: Mapping[str, bytes]) -> str | None:
-    """The name in SKILL.md's front matter, or None when it is missing or not a safe name."""
+def name_in_front_matter(files: Mapping[str, bytes], filename: str) -> str | None:
+    """The name in `filename`'s front matter, or None when it is missing or not a safe name."""
     try:
-        text = files["SKILL.md"].decode("utf-8").replace("\r\n", "\n")
+        text = files[filename].decode("utf-8").replace("\r\n", "\n")
         match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
         meta = yaml.safe_load(match.group(1)) if match else None
     except (KeyError, UnicodeDecodeError, yaml.YAMLError):
         return None
     name = meta.get("name") if isinstance(meta, dict) else None
     return name if isinstance(name, str) and SLUG.match(name) and len(name) <= MAX_NAME else None
+
+
+def skill_name_of(files: Mapping[str, bytes]) -> str | None:
+    """The name in SKILL.md's front matter, or None when it is missing or not a safe name."""
+    return name_in_front_matter(files, "SKILL.md")
 
 
 def summarize(result: BuildResult) -> dict:
@@ -62,6 +67,7 @@ class SkillKind(Kind):
     key = "skill"
     label = "Skill"
     library_dir = "library"
+    definition_file = "SKILL.md"
     slots = tuple(Slot(key, SLOT_LABELS[key], QUESTIONS[key]) for key in SLOTS)
 
     def name_of(self, files: Mapping[str, bytes]) -> str | None:

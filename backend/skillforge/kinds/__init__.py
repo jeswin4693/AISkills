@@ -6,10 +6,11 @@ the reverse.
 
 from __future__ import annotations
 
+from .agent import AgentKind
 from .base import Kind, Slot, UnknownKind
 from .skill import SkillKind
 
-KINDS: dict[str, Kind] = {"skill": SkillKind()}
+KINDS: dict[str, Kind] = {"skill": SkillKind(), "agent": AgentKind()}
 
 
 def get_kind(key: str) -> Kind:
@@ -23,4 +24,4 @@ def all_kinds() -> list[Kind]:
     return list(KINDS.values())
 
 
-__all__ = ["KINDS", "Kind", "Slot", "SkillKind", "UnknownKind", "all_kinds", "get_kind"]
+__all__ = ["AgentKind", "KINDS", "Kind", "Slot", "SkillKind", "UnknownKind", "all_kinds", "get_kind"]

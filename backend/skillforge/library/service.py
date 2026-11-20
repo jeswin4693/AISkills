@@ -6,6 +6,7 @@ Nothing here runs a script on this machine. An import can ask the sandbox to re-
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from collections.abc import Mapping
@@ -245,6 +246,34 @@ class InstallReport:
     has_scripts: bool
 
 
+def _install_file(
+    library: Library, v: Version, data: bytes, name: str, suffix: str, folder: Path, *, force: bool, now: datetime | None,
+) -> InstallReport:
+    """One file of the version, written as `<folder>/<name><suffix>`: how a subagent is installed. An existing file is never
+    replaced unless force is given, and then it is copied to the library's backups first."""
+    target = folder / f"{name}{suffix}"
+    backup: Path | None = None
+    if target.is_symlink():
+        raise LibraryError(f"{target} is a link. It was left alone.")
+    if target.exists():
+        if not force:
+            raise Conflict(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
+        stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
+        backup = library.backups / f"{name}-{stamp}{suffix}"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target, backup)
+    folder.mkdir(parents=True, exist_ok=True)
+    handle, staging = tempfile.mkstemp(prefix=f".{name}-", suffix=".tmp", dir=folder)  # written aside, then moved into place
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+        os.replace(staging, target)
+    except BaseException:
+        Path(staging).unlink(missing_ok=True)
+        raise
+    return InstallReport(target, v, backup, False)
+
+
 def install_skill(
     library: Library, name: str, version: int | None, skills_dir: Path, *, force: bool = False, now: datetime | None = None,
 ) -> InstallReport:
@@ -256,6 +285,9 @@ def install_skill(
     if failed:
         raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not installed.")
     skills_dir = Path(skills_dir)
+    kind = get_kind(library.kind)
+    if kind.install_file:  # an agent is installed as one file, not as a folder
+        return _install_file(library, v, files[kind.install_file], name, Path(kind.install_file).suffix, skills_dir, force=force, now=now)
     target = skills_dir / name
     backup: Path | None = None
     if target.is_symlink():

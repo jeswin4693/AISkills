@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from ..kinds import all_kinds
 from ..validate.static import MAX_FILE, MAX_TOTAL, read_dir
 
 MAX_ENTRIES = 1000
@@ -110,10 +111,11 @@ def _read_zip(source: Path | io.BytesIO, label: str) -> SkillSource:
 
 def _strip_top_folder(files: dict[str, bytes], problems: list[tuple[str, str]], label: str) -> SkillSource:
     """A skill zip usually holds one folder named after the skill. Use what is inside it."""
+    definition_files = {kind.definition_file for kind in all_kinds()}  # SKILL.md, AGENT.md, ...
     tops = {PurePosixPath(n).parts[0] for n in files if PurePosixPath(n).parts}
-    if "SKILL.md" not in files and len(tops) == 1:
+    if not definition_files & files.keys() and len(tops) == 1:
         top = next(iter(tops))
-        if f"{top}/SKILL.md" in files and top not in ("", ".", ".."):
+        if top not in ("", ".", "..") and any(f"{top}/{d}" in files for d in definition_files):
             stripped = {n[len(top) + 1:]: d for n, d in files.items() if n.startswith(top + "/")}
             return SkillSource(stripped, problems, "zip", label, top)
     return SkillSource(files, problems, "zip", label, None)

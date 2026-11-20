@@ -45,7 +45,9 @@ class Kind(ABC):
     key: str
     label: str
     library_dir: str
+    definition_file: str  # the file that defines the thing (SKILL.md): checked first, and shown first by the web pages
     slots: tuple[Slot, ...]
+    install_file: str | None = None  # set when installing writes only this file, as <name><suffix> (an agent), not the folder
     install_targets: tuple[str, ...] = ("personal", "folder")
 
     @abstractmethod

@@ -34,6 +34,7 @@ class FakeKind(Kind):
     key = "note"
     label = "Note"
     library_dir = "library-note"
+    definition_file = "thing.txt"
     slots = ()
 
     def __init__(self) -> None:
@@ -100,11 +101,11 @@ def test_every_registered_kind_has_a_definition_check():
 
 
 def test_the_skill_kind_is_registered_and_an_unknown_kind_is_a_plain_error():
-    assert [k.key for k in all_kinds()] == ["skill"]
+    assert [k.key for k in all_kinds()] == ["skill", "agent"]
     with pytest.raises(UnknownKind) as err:
         get_kind("nope")
     assert "skill" in str(err.value)
-    assert str(err.value) == "'nope' is not a kind this app builds. It builds: skill."
+    assert str(err.value) == "'nope' is not a kind this app builds. It builds: skill, agent."
     assert isinstance(err.value, ValueError)
 
 
@@ -147,17 +148,17 @@ def test_the_personal_folder_is_worked_out_when_asked_so_a_test_can_move_home(tm
 
 
 def test_the_fake_kind_is_only_registered_for_the_test_that_asks(fake_kind):
-    assert [k.key for k in all_kinds()] == ["skill", "note"]
+    assert [k.key for k in all_kinds()] == ["skill", "agent", "note"]
     assert get_kind("note") is fake_kind
     assert fake_kind.name_of({"thing.txt": b"my-note\nbody"}) == "my-note"
     assert fake_kind.name_of({"thing.txt": b"Not A Slug"}) is None
     with pytest.raises(UnknownKind) as err:
         get_kind("other")
-    assert "skill, note" in str(err.value)
+    assert "skill, agent, note" in str(err.value)
 
 
 def test_the_fake_kind_is_gone_again_after_that_test():
-    assert [k.key for k in all_kinds()] == ["skill"]
+    assert [k.key for k in all_kinds()] == ["skill", "agent"]
 
 
 # ---- a library for each kind -------------------------------------------------------------------------

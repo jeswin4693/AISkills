@@ -58,7 +58,7 @@ def thing_zip() -> bytes:
 
 def test_kinds_lists_the_skill_kind_with_its_slots(client):
     kinds = client.get("/api/kinds").json()
-    assert [k["key"] for k in kinds] == ["skill"]
+    assert [k["key"] for k in kinds] == ["skill", "agent"]
     assert kinds[0]["label"] == "Skill" and kinds[0]["install_targets"] == ["personal", "folder"]
     assert kinds[0]["slots"][0] == {"key": "goal", "label": "Goal", "question": QUESTIONS["goal"]}
 

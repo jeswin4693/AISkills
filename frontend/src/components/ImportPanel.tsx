@@ -153,7 +153,7 @@ export function ImportPanel(
         {result && <ImportResultView result={result} kind={kind} onDismiss={() => setResult(null)} />}
         {result?.risk && <RiskSummary risk={result.risk} />}
         {result && (
-          <p className="text-xs text-muted">Static checks only: nothing was run unless a line says so, and passing is not proof that a skill is safe.</p>
+          <p className="text-xs text-muted">Static checks only: nothing was run unless a line says so, and passing is not proof that {withArticle(noun)} is safe.</p>
         )}
       </div>
     </Card>

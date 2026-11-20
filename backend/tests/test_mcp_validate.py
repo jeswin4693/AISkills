@@ -8,7 +8,7 @@ from skillforge.results import FAILED, PASSED, WARNING
 from skillforge.validate import DEFINITION_CHECKS, validate_files
 from skillforge.validate.mcp import (
     COMMANDS_CHECK, DEFINITION_CHECK, DESCRIBED_CHECK, ENV_CHECK, FOLDER_CHECK, IMPORTS_CHECK, NETWORK_CHECK, SECRETS_CHECK,
-    WRITES_CHECK, analyze_server, check_server_py, mcp_name_of,
+    UNDEFINED_CHECK, WRITES_CHECK, analyze_server, check_server_py, mcp_name_of,
 )
 
 GOOD = '''"""Word tools."""
@@ -191,3 +191,41 @@ def test_the_server_check_is_registered_and_runs_with_every_other_check():
 def test_a_hostile_server_fails_the_whole_folder_check():
     bad = with_body("import os\nos.system('ls')\nreturn 'x'")
     assert any(c.status == FAILED for c in validate_files(files(bad), folder="word-tools", kind="mcp"))
+
+
+# ---- a name that is used but never defined or imported (a NameError waiting for the first real call) ------------
+
+
+def test_a_name_that_is_never_defined_or_imported_is_found():
+    source = with_body('return os.environ.get("WEATHER_API_KEY", "") + urllib.parse.quote(text)')
+    assert analyze_server(source).undefined == {"os", "urllib"}
+    got = rows(source)
+    assert got[UNDEFINED_CHECK][0] == WARNING and "os" in got[UNDEFINED_CHECK][1] and "urllib" in got[UNDEFINED_CHECK][1]
+
+
+def test_imports_inside_a_tool_define_the_names_they_bring():
+    source = with_body('import os\nimport urllib.parse\nreturn os.environ.get("K", "") + urllib.parse.quote(text)')
+    assert analyze_server(source).undefined == set()
+    assert status(source, UNDEFINED_CHECK) == PASSED
+    assert analyze_server(with_body("from json import dumps as d\nreturn d(text)")).undefined == set()
+
+
+def test_everything_python_defines_for_itself_is_not_flagged():
+    body = (
+        "import re\n"
+        "total = sum(len(w) for w in text.split())\n"
+        "pairs = {k: v for k, v in zip('ab', 'cd')}\n"
+        "double = lambda x, *rest, **kw: x * 2\n"
+        "def helper(a, b=1):\n    return a + b\n"
+        "try:\n    value = int(text)\nexcept ValueError as err:\n    value = len(str(err))\n"
+        "with open(__file__) as handle:\n    first = handle.readline()\n"
+        "if (n := len(text)) > 1:\n    value += n\n"
+        "for i, ch in enumerate(text):\n    value += i\n"
+        "match value:\n    case 0:\n        pass\n    case other:\n        value = other\n"
+        "return str(helper(total, value)) + str(double(2)) + str(pairs) + re.sub('a', 'b', first)"
+    )
+    assert analyze_server(with_body(body)).undefined == set()
+
+
+def test_a_star_import_hides_what_is_defined_so_nothing_is_claimed():
+    assert analyze_server(with_body("from math import *\nreturn str(sqrt(4))")).undefined == set()

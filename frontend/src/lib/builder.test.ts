@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
-  DEFAULT_SLOTS, conversationalKinds, withArticle, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
+  DEFAULT_SLOTS, conversationalKinds, withArticle, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, kindNoun, parseTests, progressSteps, showKindPicker, slotsOf,
   specRows, statusInfo, tokenLine, traceability, usageText,
 } from "./builder";
 import type { KindInfo, RequirementSpec, TestCase } from "./types";
@@ -70,6 +70,15 @@ describe("kinds", () => {
     expect(kindLabel([skill, agent], "agent")).toBe("Agent");
     expect(kindLabel(undefined, "skill")).toBe("skill");
     expect(kindLabel([skill], "gone")).toBe("gone");
+  });
+
+  it("names a kind in running text: lower case, except an acronym such as MCP", () => {
+    const mcp: KindInfo = { ...agent, key: "mcp", label: "MCP server" };
+    expect(kindNoun([skill, agent, mcp], "agent")).toBe("agent");
+    expect(kindNoun([skill, agent, mcp], "mcp")).toBe("MCP server");
+    expect(withArticle(kindNoun([mcp], "mcp"))).toBe("an MCP server");
+    expect(kindNoun(undefined, "skill")).toBe("skill");
+    expect(kindNoun([skill], "gone")).toBe("gone");
   });
 });
 

@@ -337,3 +337,68 @@ def test_an_existing_folder_is_not_overwritten_unless_forced(tmp_path):
     with pytest.raises(BuildError, match="already exists"):
         build_mcp_from_spec(spec(), MockProvider([draft()]), out_root=tmp_path, now=NOW)
     build_mcp_from_spec(spec(), MockProvider([draft()]), out_root=tmp_path, now=NOW, force=True)
+
+
+# ---- what a real model got wrong the first time it was tried: code that uses a module it never imports ---------
+
+
+def test_a_tool_that_uses_a_module_it_never_imports_fails_in_the_builder():
+    missing = [with_tool(body=['return os.environ.get("API_TOKEN", "")'])]
+    got = failed(draft(tools=missing, env_vars=["API_TOKEN"], cases=extra_cases()))
+    assert any("defined" in n for n in got)
+    fixed = [with_tool(body=["import os", 'return os.environ.get("API_TOKEN", "")'])]
+    assert not failed(draft(tools=fixed, env_vars=["API_TOKEN"], cases=extra_cases()))
+
+
+def test_missing_imports_make_network_use_invisible_so_the_check_must_not_depend_on_them():
+    # without the import the code reader cannot see the network; the undefined name is what must stop the build
+    hidden = [with_tool(body=['return urllib.request.urlopen(text).read().decode()'])]
+    assert any("defined" in n for n in failed(draft(tools=hidden, permissions=["network"], cases=extra_cases())))
+
+
+def test_the_design_prompt_tells_the_model_to_write_its_own_imports():
+    text = MCP_DESIGN_SYSTEM.lower()
+    assert "nothing is imported for you" in text and "import os" in text and "first lines of the body" in text
+
+
+# ---- the second thing a real model got wrong: a tool that pretends --------------------------------------------
+
+
+def test_an_import_that_is_never_used_fails_because_it_means_the_tool_was_stubbed():
+    stub = [with_tool(body=["import urllib.request", "import os", 'key = os.environ.get("API_TOKEN", "")', 'return "simple"'])]
+    got = failed(draft(tools=stub, permissions=["network"], env_vars=["API_TOKEN"], cases=extra_cases()))
+    assert any("import" in n and "used" in n for n in got)
+    used = [with_tool(body=["import os", 'return os.environ.get("API_TOKEN", "")'])]
+    assert not any("import" in n and "used" in n for n in failed(draft(tools=used, env_vars=["API_TOKEN"], cases=extra_cases())))
+
+
+@pytest.mark.parametrize("word", ["simulated", "placeholder", "dummy data", "fake", "mock", "hard-coded", "stub"])
+def test_a_tool_that_returns_made_up_data_fails(word):
+    pretend = [with_tool(body=[f'return "The answer is 20 ({word})"'])]
+    assert any("made-up" in n for n in failed(draft(tools=pretend, cases=extra_cases())))
+
+
+def test_honest_wording_is_not_mistaken_for_made_up_data():
+    fine = [with_tool(body=["# count the words and return the number", 'return str(len(text.split())) + " words"'])]
+    assert not any("made-up" in n for n in failed(draft(tools=fine, cases=extra_cases())))
+
+
+def test_the_design_prompt_forbids_inventing_data():
+    text = MCP_DESIGN_SYSTEM.lower()
+    assert "never invent" in text and "simulate" in text and "raise" in text and "not run" in text
+
+
+# ---- annotations are decided per tool ----------------------------------------------------------------------
+
+
+def decorator_of(source: str, tool: str) -> str:
+    return source[: source.index(f"def {tool}(")].splitlines()[-1]
+
+
+def test_a_tool_is_marked_open_world_only_when_its_own_code_reaches_the_network():
+    net = with_tool(name="fetch", body=["import urllib.request", "return urllib.request.urlopen(text).read().decode()"])
+    d = draft(tools=[draft().tools[0], net], permissions=["network"], cases=[draft().cases[0], draft().cases[1].model_copy(update={"tool": "count_words"})])
+    _, files = defn_and_files(d)
+    assert "open_world_hint=False" in decorator_of(files["server.py"], "count_words")
+    assert "open_world_hint=True" in decorator_of(files["server.py"], "fetch")
+    assert "read_only_hint=True" in decorator_of(files["server.py"], "fetch")  # it reads from the network, it does not write

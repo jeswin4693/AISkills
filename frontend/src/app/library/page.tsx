@@ -8,7 +8,7 @@ import { ImportPanel } from "@/components/ImportPanel";
 import { RescanPanel } from "@/components/RescanPanel";
 import { Badge, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { kindLabel, withArticle } from "@/lib/builder";
+import { kindNoun, withArticle } from "@/lib/builder";
 import { formatWhen, plural, relativeTime, sourceText } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
 import { useAsync } from "@/lib/useAsync";
@@ -18,7 +18,7 @@ const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function LibraryContent({ kind }: { kind: string }) {
   const kinds = useKinds();
-  const noun = kindLabel(kinds.data, kind).toLowerCase();
+  const noun = kindNoun(kinds.data, kind);
   const skills = useAsync(() => api.listSkills(kind), `skills/${kind}`);
   return (
     <>

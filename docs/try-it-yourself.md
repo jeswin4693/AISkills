@@ -87,6 +87,12 @@ interesting part is empty; the full plan is in Part 3.
 & $py -m skillforge models            # which models and keys are set up (no calls are made)
 ```
 
+### 6b. Build the sandbox image for MCP servers (once)
+```powershell
+& $py -m skillforge sandbox-build-mcp      # needs Docker and a network, once; prints "skillforge-mcp:2.3.0 is ready."
+```
+Without it an MCP server is still built, but it can never be marked "ok": its test cases need this image to run.
+
 ### 7. The automatic tests
 ```powershell
 & $py -m pytest -q                                                       # backend, offline (about 958; a few skip without Docker)
@@ -111,7 +117,7 @@ cd frontend; npm run dev                                                       #
 **Sanity check:** open http://127.0.0.1:3000/library. It must be empty. If you see your real skills you are looking at the normal
 app: stop everything and start again with the practice setting.
 
-The pages: **Builder**, **Library** (tabs: Skills, Agents, Plugins) and **Plugins**.
+The pages: **Builder**, **Library** (tabs: Skills, Agents, Plugins, MCP servers) and **Plugins**.
 
 ### A. Import, refuse, and the risk diff
 1. Library, Skills tab: drop `C:\dev\skillforge-try\samples\zips\try-skill-v1.zip`. You should see it kept as v1 with its checks.
@@ -141,6 +147,9 @@ Scenario: "Bundle my word counter and my reviewer into one thing I can share."
    Adding it to Claude Code (`claude plugin marketplace add` then `claude plugin install`, both written in the plugin's README) changes
    your Claude settings, so it is your call; this guide did not run those two commands.
 
+### D. An MCP server (needs the model key, see Part 3)
+Not clicked through in a browser yet, so this is the first time anyone does. 1. Builder, pick **MCP server**, describe two tiny tools (for example: *word_count returns how many words a text has; reverse_words returns its words in reverse order; an empty text is refused*). 2. Answer only what it asks, approve. 3. On the result card look at the checks: with the sandbox image built, each test case shows as **passed** and the card says **ok**; without it the server shows **DRAFT: Not run ...**. 4. Open `server.py` in the file viewer and read it: two `@mcp.tool()` functions you could have written. 5. Keep it, then open it in the Library under **MCP servers**, and use **Install** into a folder. 6. The README in that folder has the `claude mcp add ...` command; this guide does not run it, because it changes your Claude settings.
+
 ## Part 3. Needs a model key (a handful of model calls)
 
 Your `.env` already has Gemini (main) and Groq (backup). Each of these is a few calls. Check first:
@@ -149,6 +158,7 @@ Your `.env` already has Gemini (main) and Groq (backup). Each of these is a few 
 | What | How | You should see |
 |---|---|---|
 | **Skill builder, web** | Builder, pick **Skill**: "A skill that counts TODO and FIXME comments in a folder." | Questions only for what is missing; a requirement list where each line sits beside your own words; a build; checks, token cost estimate and test cases; save to the library. |
+| **MCP server builder, web** | Builder, pick **MCP server**: "Two tools: word_count returns how many words a text has, reverse_words returns its words in reverse order. An empty text is refused." | A `server.py` written by code around the tools, a README with the `claude mcp add` command, and each test case run in the sandbox (needs `sandbox-build-mcp` first). Try a request with a key in an environment variable: only the variable's *name* may appear, and a tool that needs the network makes the build a DRAFT. |
 | **Agent builder, web** | Builder, pick **Agent**: "Review a pull request diff for hard-coded passwords and report the file and line. Never change files." | An `AGENT.md` with `tools: Read, Grep, Glob` only, and "Use proactively when the request involves ..." in the description. Then ask for "also run the project's tests": `Bash` should appear and be flagged for you to read. |
 | **Skill builder, terminal** | `& $py -m skillforge build "A skill that counts TODO and FIXME comments in a folder."` | The same conversation in the terminal, a folder and a report at the end. |
 | **Does the skill help?** | `& $py -m skillforge build "..." --eval`, or `& $py -m skillforge eval <the folder it printed>` | Test replies graded by code with and without the skill: helped, adds nothing, or worse. Text-only skills only. |
@@ -159,7 +169,7 @@ The web **Builder** history keeps past builds with a kind badge. A built skill o
 library, so you can send it through Part 2 as well.
 
 ## Not testable yet (say so, do not hunt for it)
-- The MCP-server builder (Phase 3) and plugins that carry hooks or MCP servers (Phase 4).
+- Plugins that carry hooks or MCP servers (Phase 4), and the TypeScript half of the MCP builder.
 - The web pages for the graph, suggestions and Settings. Use the terminal commands in Part 1.
 - `eval` for agents, and a live-model run of the agent builder's own test cases.
 - The hosted version needs a Docker deploy: see [hosting.md](hosting.md). Local use is unchanged.

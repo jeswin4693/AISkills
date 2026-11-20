@@ -11,14 +11,16 @@ import { ResultCard } from "@/components/builder/ResultCard";
 import { WorkingCard } from "@/components/builder/WorkingCard";
 import { Alert, Badge, Button, Card, ErrorBox, Loading, Modal, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { statusInfo } from "@/lib/builder";
+import { kindNoun, statusInfo, withArticle } from "@/lib/builder";
 import { formatWhen } from "@/lib/format";
 import { useBuildSession } from "@/lib/useBuildSession";
+import { useKinds } from "@/lib/useKinds";
 
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { session, error, refresh, adopt } = useBuildSession(id);
+  const kinds = useKinds();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export default function SessionPage() {
     );
   }
   if (!session) return <Loading what="the session" />;
+  const noun = kindNoun(kinds.data, session.kind);
 
   // A draft is built, but it is not "Built" in the green sense: say so at the top, where the eye goes first.
   const info = session.status === "done" && session.result?.status === "draft" ? { label: "Built as a DRAFT", tone: "warn" as const } : statusInfo(session.status);
@@ -59,9 +62,9 @@ export default function SessionPage() {
         <Link href="/builder" className="text-accent underline">
           Builder
         </Link>{" "}
-        / {session.result?.name ?? "a new skill"}
+        / {session.result?.name ?? `a new ${noun}`}
       </p>
-      <PageHeader title={session.result?.name ?? "Building a skill"} actions={<Badge tone={info.tone}>{info.label}</Badge>} />
+      <PageHeader title={session.result?.name ?? `Building ${withArticle(noun)}`} actions={<Badge tone={info.tone}>{info.label}</Badge>} />
       <ProgressStrip session={session} />
 
       <div className="space-y-5">

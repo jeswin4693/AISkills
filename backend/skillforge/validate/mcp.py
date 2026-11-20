@@ -10,6 +10,7 @@ read by a computed name) warns, the way a skill's scripts are treated. The repor
 from __future__ import annotations
 
 import ast
+import builtins
 import re
 import sys
 from collections.abc import Mapping
@@ -22,6 +23,7 @@ DEFINITION_FILE = "server.py"
 DEFINITION_CHECK = "server.py is a Python MCP server that can be started"
 FOLDER_CHECK = "folder name matches the server name"
 DESCRIBED_CHECK = "every tool has a description"
+UNDEFINED_CHECK = "every name the code uses is defined or imported"
 COMMANDS_CHECK = "no commands, code built from text or native code"
 SECRETS_CHECK = "no key or token written into the code"
 NETWORK_CHECK = "no use of the network (found by syntax)"
@@ -30,6 +32,7 @@ IMPORTS_CHECK = "only the standard library and mcp are imported"
 ENV_CHECK = "environment variables are read by a plain name only"
 
 SDK_MODULE = "mcp"
+_BUILTIN_NAMES = frozenset(dir(builtins)) | {"__name__", "__file__", "__doc__", "__spec__", "__package__", "__loader__", "__builtins__", "__path__"}
 _READ_ATTRS = {"read_text", "read_bytes", "iterdir", "glob", "rglob", "listdir", "scandir", "walk", "open"}
 
 # What a key looks like. The label is what a report says; the value is never repeated.
@@ -50,6 +53,7 @@ class ToolFact:
     name: str
     described: bool  # has a docstring, which is the description Claude reads
     line: int
+    capabilities: set[str] = field(default_factory=set)  # what this one tool's own code can do: read_files, write_files, network, run_commands
 
 
 @dataclass
@@ -64,6 +68,8 @@ class ServerFacts:
     env_names: set[str] = field(default_factory=set)
     env_dynamic: bool = False  # an environment variable read by a computed name, or all of them
     secrets: list[tuple[int, str]] = field(default_factory=list)  # (line, label); never the value
+    undefined: set[str] = field(default_factory=set)  # names that are used but never defined or imported anywhere in the file
+    unused_imports: set[str] = field(default_factory=set)  # names an import binds that nothing in the file ever reads
 
 
 def _dotted(node: ast.AST) -> str:
@@ -115,6 +121,60 @@ def _environment(tree: ast.AST, facts: ServerFacts) -> None:
                 seen(None)
 
 
+def _reads_files(call: ast.Call) -> bool:
+    """A call that can read a file or list a folder: open() without a writing mode, or one of the usual reading methods."""
+    if _dotted(call.func) == "open":
+        mode = _literal(call.args[1]) if len(call.args) > 1 else next((_literal(k.value) for k in call.keywords if k.arg == "mode"), None)
+        return not (mode and any(c in mode for c in "wax+"))
+    return isinstance(call.func, ast.Attribute) and call.func.attr in _READ_ATTRS
+
+
+def _undefined_names(tree: ast.AST) -> set[str]:
+    """Names that are read but never assigned, imported, defined or built in anywhere in the file: a NameError for certain, the
+    first time a call reaches them. Scopes are merged on purpose (a name defined anywhere counts), so this finds only the sure ones."""
+    defined: set[str] = set(_BUILTIN_NAMES)
+    loaded: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            (loaded if isinstance(node.ctx, ast.Load) else defined).add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, ast.Import):
+            defined.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if any(alias.name == "*" for alias in node.names):
+                return set()  # a star import hides what is defined, so nothing can be claimed
+            defined.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            defined.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            defined.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            defined.add(node.rest)
+    return loaded - defined
+
+
+def _unused_imports(tree: ast.AST) -> set[str]:
+    """Names an import statement binds that nothing reads. In a generated tool this is the mark of a stub: the code imports what the
+    job needs and then does not do the job."""
+    bound: set[str] = set()
+    loaded: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            bound.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            if any(alias.name == "*" for alias in node.names):
+                return set()
+            bound.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            loaded.add(node.id)
+    return bound - loaded
+
+
 def analyze_server(source: str) -> ServerFacts:
     """What the code says about itself, by syntax only. Raises SyntaxError when it does not parse."""
     tree = ast.parse(source)
@@ -128,7 +188,10 @@ def analyze_server(source: str) -> ServerFacts:
             facts.server_name = _literal(call.args[0]) if call.args else next((_literal(k.value) for k in call.keywords if k.arg == "name"), None)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(_is_tool_decorator(d, server_var) for d in node.decorator_list):
-            facts.tools.append(ToolFact(node.name, bool(ast.get_docstring(node)), node.lineno))
+            own = python_capabilities(ast.unparse(node))[0]
+            if any(isinstance(inner, ast.Call) and _reads_files(inner) for inner in ast.walk(node)):
+                own.add("read_files")
+            facts.tools.append(ToolFact(node.name, bool(ast.get_docstring(node)), node.lineno, own))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "run" and isinstance(node.func.value, ast.Name) and node.func.value.id == server_var:
             facts.calls_run = True
         elif isinstance(node, ast.Import):
@@ -140,18 +203,14 @@ def analyze_server(source: str) -> ServerFacts:
                 if pattern.search(node.value):
                     facts.secrets.append((node.lineno, label))
                     break
-        if isinstance(node, ast.Call):
-            fn = _dotted(node.func)
-            if fn == "open":
-                mode = _literal(node.args[1]) if len(node.args) > 1 else next((_literal(k.value) for k in node.keywords if k.arg == "mode"), None)
-                if not (mode and any(c in mode for c in "wax+")):
-                    facts.capabilities.add("read_files")
-            elif isinstance(node.func, ast.Attribute) and node.func.attr in _READ_ATTRS:
-                facts.capabilities.add("read_files")
+        if isinstance(node, ast.Call) and _reads_files(node):
+            facts.capabilities.add("read_files")
     caps, dynamic = python_capabilities(source)
     facts.capabilities |= caps
     facts.dynamic |= dynamic
     _environment(tree, facts)
+    facts.undefined = _undefined_names(tree)
+    facts.unused_imports = _unused_imports(tree)
     return facts
 
 
@@ -210,6 +269,8 @@ def check_server_py(files: Mapping[str, bytes], folder: str | None) -> list[Chec
     row(FOLDER_CHECK, [] if folder is None or folder == facts.server_name else [f"the folder is '{folder}' but the server calls itself '{facts.server_name}'"])
     bare = [t.name for t in facts.tools if not t.described]
     row(DESCRIBED_CHECK, [f"no description (docstring) on: {', '.join(bare)}. Claude decides when to use a tool from it"] if bare else [], status=WARNING)
+    missing = sorted(facts.undefined)
+    row(UNDEFINED_CHECK, [f"it uses {', '.join(missing)} but never defines or imports it, so the first call that reaches it fails with a NameError"] if missing else [], "none found", status=WARNING)
     dangerous = sorted(facts.dynamic | ({"starts other programs"} if "run_commands" in facts.capabilities else set()))
     row(COMMANDS_CHECK, [f"it uses {', '.join(dangerous)}"] if dangerous else [], "none found by syntax")
     found = sorted({f"line {line}: {label}" for line, label in facts.secrets})

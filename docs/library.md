@@ -104,6 +104,7 @@ A zip's single top folder is unwrapped when it holds any registered kind's defin
 agent imports back identical. A skill is installed as a folder; an agent as one file, `<name>.md`, which is never replaced without
 `force` and is copied to `backups-agent` first.
 A **plugin** lives in `library-plugin`, is made by the plugin composer ([plugin-builder.md](plugin-builder.md)), and installs from a folder only.
+An **MCP server** lives in `library-mcp` ([mcp-builder.md](mcp-builder.md)), installs as a folder copy only, and its risk diff reads `server.py`: a new capability (network, file writes, commands) or environment variable is riskier, a new tool is something to look at.
 
 ## What keeps this safe
 

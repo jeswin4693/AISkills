@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder and the Plugin Builder are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the MCP-server builder, and the web pages for the graph, suggestions and settings.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the TypeScript half of the MCP builder, plugins that carry hooks and MCP servers, and the web pages for the graph, suggestions and settings.
 See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
 your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
@@ -22,7 +22,7 @@ what is in your library) and an **MCP-server** builder. The approved plan, the p
 **Phase 0, the foundation, is built.** Nothing changes for skills; the app is ready for a second kind:
 
 - **A kind registry** (`skillforge/kinds/`): what the app can build, the checklist a requirement of that kind must fill, and
-  where it installs. Today it holds three kinds: the skill, the agent and the plugin.
+  where it installs. Today it holds four kinds: the skill, the agent, the plugin and the MCP server.
 - **One library per kind.** The skill library stays exactly where it was; every other kind gets its own folder, so names
   never collide. A kind is only ever a key looked up in the registry, never part of a file path.
 - **The static checks take a kind.** Every check runs for every kind; only the check of the definition file (for a skill,
@@ -46,12 +46,17 @@ exported, and installed as one file in `~/.claude/agents`. The Library has an Ag
 in one step. It is **composed, not described**: no conversation and no model. On the **Plugins** page you pick skills and agents from your library, and the app writes the plugin
 folder (manifest, a local marketplace file, `skills/`, `agents/`, a README) and works out, by code, what it can do on your machine before you keep it. A damaged or failing
 component is refused, reserved names are refused, and the version moves only when the content does. A plugin built this way passes Claude Code's own
-`claude plugin validate --strict`. Not yet: hooks and MCP servers (Phase 4), and the MCP-server builder (Phase 3).
+`claude plugin validate --strict`. Not yet: hooks and MCP servers inside a plugin (Phase 4).
+
+**Phase 3, the MCP Builder (Python), is built too** ([docs/mcp-builder.md](docs/mcp-builder.md)): pick **MCP server** in the Builder and describe a few tools in plain words. The model drafts the tools; **code**
+writes `server.py` around them (the imports, the signatures, the tool annotations, `mcp.run()`), pins the official `mcp` SDK, writes a README with the exact `claude mcp add` command, and checks it by reading it:
+anything that starts programs, builds code from text, loads native code or carries a key **fails**, and a key is only ever the *name* of an environment variable. Then the server is **started in the sandbox and
+called over the real MCP protocol**, and the build says "ok" only if it really ran and every test case matched; a server that never ran, or whose tool needs the network, is an honest DRAFT. Two real builds with the
+configured model found and fixed two defects (missing imports, and a tool that returned simulated data). Not yet: TypeScript, HTTP, a run against a live Claude Code, and the MCP flow in a real browser.
 
 **What is next, in this order:**
 
-1. **Phase 3, the MCP-server builder** (Python first, then TypeScript): describe a tool server in plain words and get a checked
-   MCP server, run only in the sandbox. It needs its own short plan first, and a check of the SDK's current names with a real install.
+1. **Phase 3b, the MCP builder in TypeScript** (and the Streamable HTTP transport): the names of the TypeScript SDK still have to be settled with a real install, as the Python ones were.
 2. **Phase 4, plugins that carry more:** hooks, MCP servers and settings inside a plugin, and a risk diff that sees every kind.
 3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
    and a behavioural canary scan (the risk diff and rescan are already built).
@@ -162,6 +167,12 @@ anything beyond reading is flagged for you to read), the front matter, and that 
 the file word for word. What is not done: its test cases are not run against a model, and no live-model run of this builder has
 been made yet.
 
+## Build an MCP server
+
+Pick **MCP server** in the web Builder (or `"kind": "mcp"` in the API) and describe a few tools. You get a folder with `server.py`, `requirements.txt`, `README.md` (with the command that adds it to Claude Code),
+`tests/cases.json` and a report. The test cases are run **inside the sandbox**, so build its image once: `python -m skillforge sandbox-build-mcp` (needs Docker and a network, once). Without it the server is built but marked
+DRAFT, never "ok" ([docs/mcp-builder.md](docs/mcp-builder.md)). The app never adds the server to Claude Code for you: that command changes your settings, so you run it.
+
 ## Compose a plugin
 
 Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills and agents to include and press **Preview the plugin**. You see its files,
@@ -229,7 +240,7 @@ python -m skillforge serve        # http://127.0.0.1:8000/api/docs, this machine
 
 The same library, validate, sandbox and language features over HTTP, locked to localhost, plus the skill builder as a
 conversation you can poll: questions, answers, approval, then a background build ([docs/api.md](docs/api.md)).
-`GET /api/kinds` lists what the app builds (the skill, the agent and the plugin) with each kind's checklist, and the library
+`GET /api/kinds` lists what the app builds (the skill, the agent, the plugin and the MCP server) with each kind's checklist, and the library
 routes take `?kind=`. A plugin is composed rather than described, so it has its own two routes: `POST /api/plugins/preview` and
 `POST /api/plugins`.
 Sessions are kept in a SQLite file ([docs/database.md](docs/database.md)); the plan for the web UI on top is in
@@ -242,7 +253,7 @@ cd backend;  python -m skillforge serve     # terminal 1: the API
 cd frontend; npm run dev                    # terminal 2: the UI, at http://127.0.0.1:3000
 ```
 
-The **Builder** is the front door: describe a skill or an agent in a sentence (a picker at the top chooses which), answer only
+The **Builder** is the front door: describe a skill, an agent or an MCP server in a sentence (a picker at the top chooses which), answer only
 what is missing, approve the requirement (each line shown beside the words of yours that back it), watch it build, see which
 tests cover each way you said you would know it works, and save it. The **Plugins** page combines skills and agents you
 already have into one plugin, with no model. The **Library** manages what you keep, with a tab for skills, agents and

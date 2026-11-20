@@ -10,7 +10,6 @@ tool that needs the network is reported as "not run", never as passed.
 
 from __future__ import annotations
 
-import ast
 import json
 import subprocess
 import tempfile
@@ -21,7 +20,7 @@ from pathlib import Path
 from ..results import FAILED, NOT_RUN, PASSED, CheckResult
 from ..sandbox import DockerRunner, ImageNotPulled, Limits, RunResult, SandboxStatus, SandboxUnavailable, probe_sandbox
 from ..sandbox.images import MCP_IMAGE
-from ..validate.static import python_capabilities
+from ..validate.mcp import analyze_server
 from .mcp import McpCase, McpDefinition
 
 HARNESS_FILE = "_skillforge_harness.py"
@@ -122,19 +121,10 @@ def _clip(text: str, limit: int = SNIPPET) -> str:
 def tools_needing_network(source: str) -> set[str]:
     """The tools whose own code can reach the network, by syntax. Their cases cannot run in a box with no network."""
     try:
-        tree = ast.parse(source)
+        facts = analyze_server(source)
     except (SyntaxError, ValueError, RecursionError):
         return set()
-    def is_tool(decorator: ast.expr) -> bool:
-        target = decorator.func if isinstance(decorator, ast.Call) else decorator
-        return isinstance(target, ast.Attribute) and target.attr == "tool"
-
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(is_tool(d) for d in node.decorator_list):
-            if "network" in python_capabilities(ast.unparse(node))[0]:
-                found.add(node.name)
-    return found
+    return {tool.name for tool in facts.tools if "network" in tool.capabilities}
 
 
 def grade_case(case: McpCase, row: Mapping) -> CheckResult:

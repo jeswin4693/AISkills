@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { EXAMPLES, conversationalKinds, kindLabel, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
+import { EXAMPLES, conversationalKinds, kindLabel, kindNoun, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
 import { relativeTime } from "@/lib/format";
 import { notifyStatusChanged, useAsync } from "@/lib/useAsync";
 import { useKinds } from "@/lib/useKinds";
@@ -46,7 +46,7 @@ export default function BuilderPage() {
   const kinds = useKinds();
   const [kind, setKind] = useState("skill");
   const picker = showKindPicker(kinds.data); // with one kind there is nothing to choose, and the page is as it always was
-  const noun = kindLabel(kinds.data, kind).toLowerCase();
+  const noun = kindNoun(kinds.data, kind);
   const isSkill = kind === "skill";
   const [description, setDescription] = useState("");
   const [withScripts, setWithScripts] = useState(false);

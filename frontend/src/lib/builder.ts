@@ -41,9 +41,16 @@ export function kindLabel(kinds: KindInfo[] | undefined, key: string): string {
   return kinds?.find((k) => k.key === key)?.label ?? key;
 }
 
+/** A kind's name inside a sentence: "skill", "agent", "MCP server" (lower case, except an acronym that is already capitals). */
+export function kindNoun(kinds: KindInfo[] | undefined, key: string): string {
+  const label = kindLabel(kinds, key);
+  return /^[A-Z]{2,}/.test(label) ? label : label.toLowerCase();
+}
+
 /** "a skill", "an agent": the noun with the right article. */
 export function withArticle(noun: string): string {
-  return `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+  const vowelSound = /^[A-Z]{2,}/.test(noun) ? /^[AEFHILMNORSX]/.test(noun) : /^[aeiou]/i.test(noun); // "an MCP": an acronym is read letter by letter
+  return `${vowelSound ? "an" : "a"} ${noun}`;
 }
 
 /** The requirement as rows, each next to the words of the person that support it. */

@@ -7,9 +7,11 @@ import { DiffView } from "@/components/DiffView";
 import { RiskSummary } from "@/components/RiskSummary";
 import { Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
+import { kindNoun } from "@/lib/builder";
 import { plural } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
 import { useAsync } from "@/lib/useAsync";
+import { useKinds } from "@/lib/useKinds";
 
 function num(value: string | null): number | undefined {
   const n = Number(value);
@@ -23,6 +25,7 @@ function Diff() {
   const from = num(params.get("from"));
   const to = num(params.get("to"));
   const kind = params.get("kind") ?? "skill";
+  const noun = kindNoun(useKinds().data, kind);
   const versions = useAsync(() => api.versions(name, kind), `versions/${kind}/${name}`);
   const diff = useAsync(() => api.diff(name, from, to, kind), `diff/${kind}/${name}/${from}/${to}`);
 
@@ -43,7 +46,7 @@ function Diff() {
         </Link>{" "}
         / changes
       </p>
-      <PageHeader title="Compare versions" subtitle="What differs between two versions of this skill. Lines starting with + were added and lines starting with − were removed." />
+      <PageHeader title="Compare versions" subtitle={`What differs between two versions of this ${noun}. Lines starting with + were added and lines starting with − were removed.`} />
       {tags.length > 1 && (
         <Card className="mb-5 flex flex-wrap items-center gap-3 p-3 text-sm">
           <label className="flex items-center gap-2">

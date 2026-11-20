@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { kindNoun, withArticle } from "@/lib/builder";
 import { findingText, rescanHeadline, SCAN_LABEL, SCAN_TONE } from "@/lib/risk";
 import type { RescanResult } from "@/lib/types";
 import { withKindParam } from "@/lib/kind";
+import { useKinds } from "@/lib/useKinds";
 import { Alert, Badge, Button, Card } from "./ui";
 
 /**
@@ -13,6 +15,7 @@ import { Alert, Badge, Button, Card } from "./ui";
  * improve: this says which stored versions would not pass today. It changes nothing and runs nothing.
  */
 export function RescanPanel({ name, kind }: { name?: string; kind?: string }) {
+  const noun = kindNoun(useKinds().data, kind ?? "skill");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RescanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +38,9 @@ export function RescanPanel({ name, kind }: { name?: string; kind?: string }) {
     <Card className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="font-semibold">{name ? "Re-check this skill" : "Re-check everything"}</h2>
+          <h2 className="font-semibold">{name ? `Re-check this ${noun}` : "Re-check everything"}</h2>
           <p className="mt-0.5 max-w-prose text-sm text-muted">
-            Skills are checked once, when they come in, and the checks get better over time. This runs today&apos;s checks on {name ? "every version of this skill" : "every stored version"} and
+            Each {noun} is checked once, when it comes in, and the checks get better over time. This runs today&apos;s checks on {name ? `every version of this ${noun}` : "every stored version"} and
             says which ones are now worse. Nothing is changed and nothing is run.
           </p>
         </div>
@@ -82,7 +85,7 @@ export function RescanPanel({ name, kind }: { name?: string; kind?: string }) {
                 ))}
               </ul>
             )}
-            <p className="mt-2 text-xs text-muted">Static checks only: passing is not proof that a skill is safe.</p>
+            <p className="mt-2 text-xs text-muted">Static checks only: passing is not proof that {withArticle(noun)} is safe.</p>
           </Alert>
         )}
       </div>

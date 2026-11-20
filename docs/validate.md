@@ -46,6 +46,13 @@ security guide quoting one, so it asks a person to read the line instead of reje
 detection is by syntax only: it cannot see calls made through other modules, dynamic code (`eval`, `exec`),
 or anything that happens at run time.
 
+### An MCP server's own check (`validate/mcp.py`)
+
+For an MCP server the definition check is on `server.py` ([mcp-builder.md](mcp-builder.md)), read with `ast` and never run. It **fails** a file that does not parse, never creates an `MCPServer`,
+defines no tool or never calls `mcp.run()`; a folder whose name differs from the server's; code that starts other programs, builds code from text or loads native code; and a key or token written in the
+code (the report names the kind of key and the line, never the value). It **warns** about network use, file writes, a package outside the standard library and `mcp`, an environment variable read by a
+computed name, a tool without a description, and a name that is used but never defined or imported. It runs for every server kept or imported, so a hostile `server.py` in a downloaded zip is refused.
+
 ## The sandbox: run untrusted scripts in a locked-down container, or not at all
 
 `skillforge.sandbox` builds a hardened `docker run` command and runs it. **It fails closed**: every run starts

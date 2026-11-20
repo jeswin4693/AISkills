@@ -4,9 +4,10 @@ import Link from "next/link";
 import { withKindParam } from "@/lib/kind";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { parseTests, tokenLine, traceability, usageText } from "@/lib/builder";
+import { kindNoun, parseTests, tokenLine, traceability, usageText } from "@/lib/builder";
 import type { BuildSession, ImportResult } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
+import { useKinds } from "@/lib/useKinds";
 import { CheckBadges, CheckList } from "../CheckList";
 import { FileViewer } from "../FileViewer";
 import { Alert, Badge, Button, Card } from "../ui";
@@ -14,12 +15,22 @@ import { Alert, Badge, Button, Card } from "../ui";
 function Traceability({ session }: { session: BuildSession }) {
   const tests = useAsync(async () => parseTests((await api.buildFile(session.id, "tests/cases.json")).text), `tests/${session.id}`);
   const trace = session.spec ? traceability(session.spec.acceptance_criteria, tests.data ?? []) : [];
+  const ran = session.kind === "mcp"; // a server's cases are run over the MCP protocol in the sandbox, when there is one
   return (
     <section>
       <h3 className="font-semibold">What you asked for, and what covers it</h3>
       <p className="mt-0.5 text-sm text-muted">
-        Each way you said you would know it works, next to the test cases written for it. These test cases are <strong>data</strong>: nothing has run them against a
-        real agent yet, so they describe what to check, not proof that it passes.
+        Each way you said you would know it works, next to the test cases written for it.{" "}
+        {ran ? (
+          <>
+            The server&apos;s test cases are run over the MCP protocol <strong>inside the sandbox</strong>, and each one shows in the checks below as passed, failed or
+            not run. A case that did not run proves nothing.
+          </>
+        ) : (
+          <>
+            These test cases are <strong>data</strong>: nothing has run them against a real agent yet, so they describe what to check, not proof that it passes.
+          </>
+        )}
       </p>
       {tests.error ? (
         <p className="mt-2 text-sm text-muted">The test cases could not be read: {tests.error.message}</p>
@@ -55,6 +66,7 @@ function Traceability({ session }: { session: BuildSession }) {
 
 function SavePanel({ session, onSession }: { session: BuildSession; onSession: (s: BuildSession) => void }) {
   const r = session.result!;
+  const noun = kindNoun(useKinds().data, session.kind);
   const draft = r.status === "draft";
   const [note, setNote] = useState("");
   const [acceptDraft, setAcceptDraft] = useState(false);
@@ -92,11 +104,11 @@ function SavePanel({ session, onSession }: { session: BuildSession; onSession: (
     <Card className="p-4">
       <h3 className="font-semibold">Keep it</h3>
       <p className="mt-0.5 text-sm text-muted">
-        Saving puts it in your library through the same checked import as any other skill: if a check fails it is refused. Until you save, it exists only here.
+        Saving puts it in your library through the same checked import as any other {noun}: if a check fails it is refused. Until you save, it exists only here.
       </p>
       {draft && (
         <div className="mt-3">
-          <Alert tone="warn" title="This skill is a DRAFT">
+          <Alert tone="warn" title={`This ${noun} is a DRAFT`}>
             <p>{r.draft_reason || `${r.counts.failed} check(s) failed.`} Do not rely on it before you have read the checks and the report.</p>
             <label className="mt-2 flex items-start gap-2">
               <input type="checkbox" checked={acceptDraft} onChange={(e) => setAcceptDraft(e.target.checked)} className="mt-1" />

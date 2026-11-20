@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/useAuth";
 import { RescanPanel } from "@/components/RescanPanel";
 import { Alert, Badge, Button, ButtonLink, Card, ErrorBox, Loading, Modal, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
+import { kindNoun, withArticle } from "@/lib/builder";
 import { formatWhen, plural, relativeTime, shortHash, sourceText } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
 import type { KindInfo, VersionInfo } from "@/lib/types";
@@ -131,7 +132,7 @@ function VersionDetails({
         <section>
           <h3 className="mb-2 font-semibold">Checks when it was imported</h3>
           <CheckList checks={v.checks} />
-          <p className="mt-2 text-xs text-muted">Static checks only. Passing is not proof that a skill is safe.</p>
+          <p className="mt-2 text-xs text-muted">Static checks only. Passing is not proof that {withArticle(kindNoun(kindInfo ? [kindInfo] : undefined, kind))} is safe.</p>
         </section>
       </div>
 

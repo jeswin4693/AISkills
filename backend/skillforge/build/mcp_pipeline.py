@@ -32,6 +32,8 @@ from .quality import VAGUE, norm
 from .render import MAX_NAME, write_files
 
 MAX_TOOLS = 8
+# Words that mean a tool returns something other than the real answer. A tool does the real job or raises an error.
+MADE_UP = re.compile(r"\b(simulat\w*|placeholder|dummy|fake\w*|mock\w*|hard-?coded|stub\w*)\b", re.I)
 MAX_CASES = 30
 MAX_BODY_LINES = 60
 IDENT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -110,6 +112,9 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
     if facts is not None:
         returns = _returns_text(server)
         row("every tool returns text", [f"{n} never returns a value" for n in names if not returns.get(n)])
+        unused = sorted(facts.unused_imports)
+        row("every import in a tool is used", [f"{', '.join(unused)} is imported but never used: a tool that imports what its job needs and does not use it has been stubbed"] if unused else [])
+        row("every name a tool uses is defined (write the imports inside the tool)", [f"{', '.join(sorted(facts.undefined))} is used but never imported or defined"] if facts.undefined else [])
         observed = facts.capabilities
         declared = set(defn.permissions)
         not_offered = sorted(declared - set(OFFERED_PERMISSIONS))
@@ -128,6 +133,8 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
         row("environment variables are plain names, listed, and read by name", env_problems, ", ".join(defn.env_vars) or "none")
         never_read = sorted(set(defn.env_vars) - facts.env_names)
         row("every environment variable listed is read", [f"{', '.join(never_read)} is listed but never read"] if never_read else [], status=WARNING)
+        pretend = sorted({f"{t.name} ({m.group(0).lower()})" for t in defn.tools for m in MADE_UP.finditer("\n".join(map(str, t.body)))})
+        row("no tool returns simulated or made-up data", [f"{', '.join(pretend)}: a tool must do the real job or raise an error, never pretend"] if pretend else [])
         big = [t.name for t in defn.tools if len([ln for item in t.body for ln in str(item).splitlines() if ln.strip()]) > MAX_BODY_LINES]
         row("tool bodies are short", [f"{', '.join(big)} is over {MAX_BODY_LINES} lines"] if big else [], status=WARNING)
 

@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
 **Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
-([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder) and Phase 2 (the Plugin Builder), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md); what each did and did not do is under "Phase 0/1/2: what was built" below, in [agent-builder.md](agent-builder.md) and in [plugin-builder.md](plugin-builder.md)). Nothing else here is built.** Next slice: Phase 3, the MCP Builder.
+([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder), Phase 2 (the Plugin Builder) and Phase 3 (the MCP Builder, Python), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md), [phase 3](superpowers/plans/2026-11-20-mcp-builder-phase-3.md); what each did and did not do is under "Phase 0/1/2/3: what was built" below, in [agent-builder.md](agent-builder.md), [plugin-builder.md](plugin-builder.md) and [mcp-builder.md](mcp-builder.md)). Nothing else here is built.** Next slice: Phase 4 (plugin v2), or the TypeScript half of Phase 3.
 
 ## What
 
@@ -44,7 +44,7 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> render -> CHECKS ->
 | 0 | Foundation: kind registry, `SkillKind` adapter, migration 0003, `Library(kind)`, validator `kind`, API and UI picker; small skill improvements (`permissions` to `allowed-tools`, warn on unknown front-matter keys, run `eval` from the web pages) | M |
 | 1 | **Agent Builder** | M |
 | 2 | Plugin Builder v1 (skills and agents) | M |
-| 3 | MCP Builder: Python first, then TypeScript | XL, then M |
+| 3 | MCP Builder: Python first (**built**), then TypeScript (not built) | XL, then M |
 | 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind | L |
 
 Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, XL more), including tests, docs and a live check.
@@ -108,6 +108,20 @@ skills folder, the agents folder and the whole folder. **Not done, on purpose:**
 nested under `skills/` (Phase 4), a real `claude plugin marketplace add` and `install` (they change the person's Claude settings, so the person runs them), a
 LICENSE or icon, `--kind` on the command line.
 
+## Phase 3: what was built (2026-11-20)
+
+The MCP Builder (Python), in [mcp-builder.md](mcp-builder.md). `McpKind` (`library-mcp`, definition file `server.py`, installs into a folder only, conversational): the model drafts
+the tools, code assembles `server.py` around them (imports, signatures, docstrings, per-tool annotations, `mcp.run()`), pins `mcp==2.3.0`, writes the README with the exact
+`claude mcp add` command and carries the person's own words in; `validate/mcp.py` checks the file by reading it (what runs commands, builds code from text, loads native code or
+carries a key fails; network, writes, other packages, a computed environment name and a name that is never defined warn), `build/mcp_pipeline.py` adds the builder's stricter rules and
+one repair kept only if not worse, and `build/mcp_protocol.py` starts the server **in the sandbox** with a fixed harness and calls every test case over the real MCP protocol, graded by code.
+`python -m skillforge sandbox-build-mcp` builds the one image (`skillforge-mcp:2.3.0`) once. The risk diff reads a server's code, its tools and its environment variables. Changes beyond the
+kind: the save message names what was built ("This MCP server is a DRAFT"), and the web pages say "MCP server" where they said "skill".
+
+**Checked against the real tools (2026-11-20):** the SDK names by a real install; a generated server started and called in a real container; two real builds with the configured model, which
+found and fixed two defects a mock model could not (missing imports, and a tool that returned simulated data). **Not done, on purpose:** TypeScript, HTTP transport, resources and prompts, OAuth,
+packages beyond the standard library, file writes and commands, `claude mcp add` run for you, a live Claude Code run, `eval` for servers, `--kind` on the command line, an MCP flow in the real browser.
+
 ## Decisions (approved)
 
 Order as above. "Agent Builder" here means **definition files**, not a runtime agent loop (the Task Conductor's native loop in
@@ -142,11 +156,11 @@ Read from the official docs by a research agent on 2026-11-19, **not tested agai
   the manifest.
 - **Hooks:** 33 events are listed, five hook types (`command`, `http`, `mcp_tool`, `prompt`, `agent`); exit code 2 blocks on some events
   and not others.
-- **MCP:** `.mcp.json` has `mcpServers`; server names are letters, digits, hyphens and underscores. **The sources disagree about the SDKs:**
-  the connector-building skill names `@modelcontextprotocol/sdk` and FastMCP 3.x, while the current MCP tutorial pages, as read by the
-  research agent, show `MCPServer` (Python) and `@modelcontextprotocol/server` (TypeScript, labelled beta). Settle this with a real install
-  before the MCP builder is written. MCP tool annotation names and defaults, the MCPB manifest version ("0.3" or "0.4") and the Streamable
-  HTTP parameters were not confirmed.
+- **MCP:** `.mcp.json` has `mcpServers`; server names are letters, digits, hyphens and underscores. **The Python SDK is settled by a real install
+  (2026-11-20):** the official `mcp` package is 2.3.0, `FastMCP` is gone in 2.x and the class is `MCPServer` (`from mcp.server.mcpserver import MCPServer`),
+  tool annotations are `read_only_hint`, `destructive_hint`, `idempotent_hint`, `open_world_hint` and `title` (all default `None`), and a server started
+  through `stdio_client` does not inherit the caller's environment (details in [mcp-builder.md](mcp-builder.md)). **Still unconfirmed:** the TypeScript SDK's names
+  (`@modelcontextprotocol/sdk` or `@modelcontextprotocol/server`), the MCPB manifest version ("0.3" or "0.4") and the Streamable HTTP parameters.
 
 ## Risks
 

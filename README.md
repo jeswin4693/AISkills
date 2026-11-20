@@ -21,7 +21,7 @@ what is in your library) and an **MCP-server** builder. The approved plan, the p
 **Phase 0, the foundation, is built.** Nothing changes for skills; the app is ready for a second kind:
 
 - **A kind registry** (`skillforge/kinds/`): what the app can build, the checklist a requirement of that kind must fill, and
-  where it installs. Today it holds one kind, the skill.
+  where it installs. Today it holds three kinds: the skill, the agent and the plugin.
 - **One library per kind.** The skill library stays exactly where it was; every other kind gets its own folder, so names
   never collide. A kind is only ever a key looked up in the registry, never part of a file path.
 - **The static checks take a kind.** Every check runs for every kind; only the check of the definition file (for a skill,
@@ -30,8 +30,8 @@ what is in your library) and an **MCP-server** builder. The approved plan, the p
   building steps.
 - **The API:** `GET /api/kinds`, `?kind=` on every library route, rescan and validate, and a `kind` when starting a build.
   An unknown kind is a plain 400 that names the kinds there are.
-- **The web Builder** shows a kind picker as soon as there is more than one kind, and a kind badge on past builds. With one
-  kind the page is exactly as it was.
+- **The web Builder** shows a kind picker as soon as there is more than one kind that is built by describing it, and a kind
+  badge on past builds. Skills looked exactly the same when there was only one kind.
 - **Two small skill improvements:** a skill's permissions are written into `SKILL.md` as `allowed-tools` by code, and the
   checks warn about front-matter keys that Claude Code does not know (both described below).
 
@@ -46,6 +46,17 @@ in one step. It is **composed, not described**: no conversation and no model. On
 folder (manifest, a local marketplace file, `skills/`, `agents/`, a README) and works out, by code, what it can do on your machine before you keep it. A damaged or failing
 component is refused, reserved names are refused, and the version moves only when the content does. A plugin built this way passes Claude Code's own
 `claude plugin validate --strict`. Not yet: hooks and MCP servers (Phase 4), and the MCP-server builder (Phase 3).
+
+**What is next, in this order:**
+
+1. **Phase 3, the MCP-server builder** (Python first, then TypeScript): describe a tool server in plain words and get a checked
+   MCP server, run only in the sandbox. It needs its own short plan first, and a check of the SDK's current names with a real install.
+2. **Phase 4, plugins that carry more:** hooks, MCP servers and settings inside a plugin, and a risk diff that sees every kind.
+3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
+   and a behavioural canary scan (the risk diff and rescan are already built).
+4. **The remaining web pages:** the repository graph, suggestions and Settings.
+
+The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
 ## Layout
 
@@ -208,7 +219,7 @@ python -m skillforge library export my-skill --out my-skill.zip
 python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>
 ```
 
-## Run the local API (for the web UI that is coming)
+## Run the local API (the web UI talks to it)
 
 ```powershell
 cd backend
@@ -217,8 +228,9 @@ python -m skillforge serve        # http://127.0.0.1:8000/api/docs, this machine
 
 The same library, validate, sandbox and language features over HTTP, locked to localhost, plus the skill builder as a
 conversation you can poll: questions, answers, approval, then a background build ([docs/api.md](docs/api.md)).
-`GET /api/kinds` lists what the app builds (today only the skill) with each kind's checklist, and the library routes take
-`?kind=`.
+`GET /api/kinds` lists what the app builds (the skill, the agent and the plugin) with each kind's checklist, and the library
+routes take `?kind=`. A plugin is composed rather than described, so it has its own two routes: `POST /api/plugins/preview` and
+`POST /api/plugins`.
 Sessions are kept in a SQLite file ([docs/database.md](docs/database.md)); the plan for the web UI on top is in
 [docs/ui-and-database-plan.md](docs/ui-and-database-plan.md).
 
@@ -229,11 +241,12 @@ cd backend;  python -m skillforge serve     # terminal 1: the API
 cd frontend; npm run dev                    # terminal 2: the UI, at http://127.0.0.1:3000
 ```
 
-The **Builder** is the front door: describe a skill in a sentence, answer only what is missing, approve the requirement
-(each line shown beside the words of yours that back it), watch it build, see which tests cover each way you said you
-would know it works, and save it. The **Library** manages what you keep: versions, files, compare, export, install,
-restore, all with the safety checks shown in plain words. When the app builds more than one kind of thing, a picker at the
-top of the Builder chooses which; with one kind the page is unchanged. The Builder needs a model set up in `.env`. First-time setup and
+The **Builder** is the front door: describe a skill or an agent in a sentence (a picker at the top chooses which), answer only
+what is missing, approve the requirement (each line shown beside the words of yours that back it), watch it build, see which
+tests cover each way you said you would know it works, and save it. The **Plugins** page combines skills and agents you
+already have into one plugin, with no model. The **Library** manages what you keep, with a tab for skills, agents and
+plugins: versions, files, compare, export, install, restore, all with the safety checks shown in plain words. The Builder
+needs a model set up in `.env`. First-time setup and
 what was checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md). Where this project can be
 genuinely different from other skill tools: [docs/differentiators.md](docs/differentiators.md).
 

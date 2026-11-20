@@ -6,12 +6,17 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import pytest
 import yaml
 
-from skillforge.build.agent import AgentDefinition, AgentDraft, AgentTest, assemble_agent, render_agent_files
+from skillforge.build.agent import (
+    AGENT_DESIGN_SYSTEM, AgentDefinition, AgentDraft, AgentTest, assemble_agent, render_agent_files,
+)
+from skillforge.build.agent_pipeline import build_agent_from_spec, check_agent
 from skillforge.build.models import SLOTS, Extraction, RequirementSpec, Slot
-from skillforge.build.pipeline import understand_round
+from skillforge.build.pipeline import BuildError, understand_round
 from skillforge.providers import MockProvider
+from skillforge.results import FAILED, NOT_RUN, PASSED, WARNING
 
 WORDS = (
     "An agent that reviews a pull request diff for security problems. It receives the diff as text. "
@@ -154,3 +159,96 @@ def test_the_build_writes_these_files_and_the_same_definition_gives_the_same_byt
     assert [c["kind"] for c in cases] == ["positive", "negative", "edge"] and set(cases[0]) == {"name", "kind", "input_description", "expected_result", "covers"}
     assert AgentDefinition.model_validate_json(files["agent.sdm.json"]) == defn
     assert "Read, Grep, Glob" in files["README.md"] and "read files" in files["README.md"]  # what it can do, said by code
+
+
+# ---- the checks and the whole build ------------------------------------------------------------------
+
+
+def build(tmp_path, responses, **kw):
+    mock = MockProvider(responses)
+    return build_agent_from_spec(SPEC, mock, out_root=tmp_path / "out", now=NOW, **kw), mock
+
+
+def one(checks, fragment: str):
+    found = [c for c in checks if fragment in c.name]
+    assert len(found) == 1, f"expected one check containing '{fragment}', got {[c.name for c in checks]}"
+    return found[0]
+
+
+def uncovered_tests() -> list[AgentTest]:
+    return [agent_test("finds a flaw", "positive", []), agent_test("empty diff", "negative", []), agent_test("long diff", "edge", [])]
+
+
+def test_a_clean_design_builds_every_file_and_is_ok(tmp_path):
+    result, mock = build(tmp_path, [agent_draft()])
+    assert result.status == "ok" and result.model_calls == 1 and result.draft_reason == ""
+    assert result.files == ["AGENT.md", "README.md", "agent.sdm.json", "report.md", "spec.json", "tests/cases.json"]
+    assert (tmp_path / "out" / "pr-security-reviewer" / "AGENT.md").read_text(encoding="utf-8").startswith("---\nname: pr-security-reviewer\n")
+    assert not [c for c in result.checks if c.status == FAILED]
+    assert one(result.checks, "AGENT.md exists and its front matter is valid").status == PASSED  # the shared static checks ran
+    assert one(result.checks, "test cases were run").status == NOT_RUN  # what did not run is said, never counted as passed
+    prompt = mock.calls[0]["prompt"]
+    assert "<requirement>" in prompt and "Review a pull request diff" in prompt and mock.calls[0]["system"] == AGENT_DESIGN_SYSTEM
+    report = (tmp_path / "out" / "pr-security-reviewer" / "report.md").read_text(encoding="utf-8")
+    assert report.startswith("# Build report: Pr Security Reviewer") and "not run" in report.lower()
+
+
+def test_an_uncovered_acceptance_criterion_is_a_failed_check_and_gets_one_repair(tmp_path):
+    result, mock = build(tmp_path, [agent_draft(tests=uncovered_tests()), agent_draft()])
+    assert result.status == "ok" and result.model_calls == 2
+    assert "did not pass these automatic checks" in mock.calls[1]["prompt"] and "AC1" in mock.calls[1]["prompt"]
+    assert any("fix them once" in n for n in result.notes)
+
+
+def test_a_repair_that_is_worse_is_discarded(tmp_path):
+    result, _ = build(tmp_path, [agent_draft(tests=uncovered_tests()), agent_draft(tests=[])])
+    assert result.status == "draft" and result.model_calls == 2
+    assert one(result.checks, "acceptance criterion is covered").status == FAILED
+    assert any("worse" in n and "first was kept" in n for n in result.notes)
+    assert len(result.definition.tests) == 3  # the first design, not the empty one
+
+
+def test_a_check_fails_when_the_persons_own_lines_are_not_in_the_file():
+    defn = assembled()
+    files = render_agent_files(defn, SPEC)
+    files["AGENT.md"] = files["AGENT.md"].replace("every finding names a file and a line", "something else")
+    found = one(check_agent(defn, SPEC, files), "word for word")
+    assert found.status == FAILED and "every finding names a file and a line" in found.detail
+    assert one(check_agent(defn, SPEC, render_agent_files(defn, SPEC)), "word for word").status == PASSED
+
+
+def test_what_an_agent_can_do_beyond_reading_is_flagged_for_a_person_to_read():
+    checks = check_agent(assembled(permissions=["run_commands", "network"]), SPEC, render_agent_files(assembled(permissions=["run_commands", "network"]), SPEC))
+    found = one(checks, "what the agent can do beyond reading files")
+    assert found.status == WARNING and "Bash" in found.detail and "WebFetch" in found.detail
+    assert one(check_agent(assembled(), SPEC, render_agent_files(assembled(), SPEC)), "what the agent can do beyond reading files").status == PASSED
+
+
+def test_vague_wording_and_too_many_or_too_long_steps_only_warn():
+    vague = assembled(process=["Read the diff as needed.", "b", "c"])
+    assert one(check_agent(vague, SPEC, render_agent_files(vague, SPEC)), "vague wording").status == WARNING
+    many = assembled(process=[f"Step {i}." for i in range(8)])
+    assert one(check_agent(many, SPEC, render_agent_files(many, SPEC)), "steps are few and short").status == WARNING
+    long = assembled(process=["word " * 61, "b", "c"])
+    assert one(check_agent(long, SPEC, render_agent_files(long, SPEC)), "steps are few and short").status == WARNING
+    fine = assembled()
+    assert one(check_agent(fine, SPEC, render_agent_files(fine, SPEC)), "vague wording").status == PASSED
+
+
+def test_a_design_without_a_positive_or_a_negative_test_fails():
+    defn = assembled(tests=[agent_test("only edge", "edge")])
+    found = one(check_agent(defn, SPEC, render_agent_files(defn, SPEC)), "positive and a negative test")
+    assert found.status == FAILED
+
+
+def test_an_existing_folder_is_never_overwritten_without_force(tmp_path):
+    build(tmp_path, [agent_draft()])
+    with pytest.raises(BuildError, match="already exists"):
+        build(tmp_path, [agent_draft()])
+    assert build(tmp_path, [agent_draft()], force=True)[0].status == "ok"
+
+
+def test_progress_is_reported_in_plain_words(tmp_path):
+    said: list[str] = []
+    build(tmp_path, [agent_draft()], progress=said.append)
+    assert said[0].startswith("Designing the agent") and said[-1] == "Writing the files and running every check"

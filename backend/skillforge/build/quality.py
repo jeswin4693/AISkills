@@ -48,6 +48,9 @@ _VAGUE = re.compile(
 )
 
 
+VAGUE = _VAGUE  # the same wording check, for the other kinds' builders
+
+
 def norm(text: str) -> str:
     """Whitespace collapsed and case folded: how requirement text is compared with SKILL.md."""
     return " ".join(str(text).split()).casefold()

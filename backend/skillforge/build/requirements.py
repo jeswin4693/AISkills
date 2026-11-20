@@ -6,6 +6,7 @@ answered only if the person's own words (verified as a quote) support it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..providers.base import LLMProvider
@@ -94,11 +95,13 @@ def verify_extraction(ext: Extraction, user_words: str, rounds: int) -> tuple[Re
     return spec, notes
 
 
-def extract_spec(provider: LLMProvider, user_words: str, rounds: int = 1) -> tuple[RequirementSpec, list[str], int]:
-    """Returns (spec, notes about rejected quotes, model calls used)."""
+def extract_spec(
+    provider: LLMProvider, user_words: str, rounds: int = 1, system: str = EXTRACT_SYSTEM,
+) -> tuple[RequirementSpec, list[str], int]:
+    """Returns (spec, notes about rejected quotes, model calls used). `system` is the kind's own extraction prompt."""
     safe = user_words.replace("</user_words>", "").replace("<user_words>", "")
     prompt = f"<user_words>\n{safe}\n</user_words>"
-    ext, calls = generate_with_retry(provider, Extraction, prompt, EXTRACT_SYSTEM, task=Task.EXTRACT)
+    ext, calls = generate_with_retry(provider, Extraction, prompt, system, task=Task.EXTRACT)
     spec, notes = verify_extraction(ext, user_words, rounds)
     return spec, notes, calls
 
@@ -107,7 +110,9 @@ def _none_only(values: list[str]) -> bool:
     return all(v.strip().lower() in ("none", "n/a", "nothing") for v in values)
 
 
-def check_completeness(spec: RequirementSpec) -> Completeness:
+def check_completeness(spec: RequirementSpec, *, skill_only: bool = True) -> Completeness:
+    """`skill_only` is the skill builder's refusal of anything that is not a skill. Another kind's builder turns it off:
+    the person already chose what to build, so the extraction's guess of the kind must not block it."""
     missing: list[str] = []
     if len(spec.goal.strip()) < 10:
         missing.append("goal")
@@ -123,7 +128,7 @@ def check_completeness(spec: RequirementSpec) -> Completeness:
         missing.append("failure_behavior")
 
     blockers: list[str] = []
-    if spec.kind != "skill":
+    if skill_only and spec.kind != "skill":
         blockers.append(
             f"This looks like a {spec.kind}, not a skill. Only skills can be built so far: a skill is reusable "
             "instructions an AI agent follows, with defined inputs and outputs. Rephrase it as a skill."
@@ -131,5 +136,6 @@ def check_completeness(spec: RequirementSpec) -> Completeness:
     return Completeness(missing, blockers)
 
 
-def questions_for(missing: list[str]) -> list[Question]:
-    return [Question(slot, QUESTIONS[slot]) for slot in SLOTS if slot in missing]
+def questions_for(missing: list[str], questions: Mapping[str, str] | None = None) -> list[Question]:
+    wording = questions or QUESTIONS
+    return [Question(slot, wording[slot]) for slot in SLOTS if slot in missing]

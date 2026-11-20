@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +16,7 @@ from .quality import TokenCost, clean_triggers, compose_description, quality_che
 from ..sandbox import probe_sandbox
 from ..validate import validate_files
 from .render import MAX_NAME, render_files, render_report, slugify, write_files
-from .requirements import Question, check_completeness, extract_spec, questions_for
+from .requirements import EXTRACT_SYSTEM, Question, check_completeness, extract_spec, questions_for
 from .scripts import ScriptReport, ScriptRunner, build_scripts, check_scripts, run_script_tests
 
 
@@ -182,11 +182,17 @@ class Round:
     message: str = ""  # why it is blocked or incomplete
 
 
-def understand_round(provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
-    """One extraction plus the checklist. Completeness is decided here, by code; the model only extracts."""
-    spec, extract_notes, used = extract_spec(provider, words, round_no)
+def understand_round(
+    provider: LLMProvider, words: str, round_no: int, max_rounds: int, *,
+    questions: Mapping[str, str] | None = None, extract_system: str | None = None, skill_only: bool = True,
+) -> Round:
+    """One extraction plus the checklist. Completeness is decided here, by code; the model only extracts.
+
+    The keyword arguments are how another kind of builder gives its own question wording and extraction prompt and turns
+    off the skill-only refusal. With none of them this is exactly the skill builder."""
+    spec, extract_notes, used = extract_spec(provider, words, round_no, extract_system or EXTRACT_SYSTEM)
     notes = [f"round {round_no}: {n}" for n in extract_notes]
-    comp = check_completeness(spec)
+    comp = check_completeness(spec, skill_only=skill_only)
     if comp.blockers:
         return Round("blocked", spec, notes, used, message=" ".join(comp.blockers))
     if comp.complete:
@@ -197,7 +203,7 @@ def understand_round(provider: LLMProvider, words: str, round_no: int, max_round
             f"Still missing: {', '.join(comp.missing)}."
         )
         return Round("incomplete", spec, notes, used, message=message)
-    return Round("questions", spec, notes, used, questions=questions_for(comp.missing))
+    return Round("questions", spec, notes, used, questions=questions_for(comp.missing, questions))
 
 
 def apply_answers(words: str, questions: list[Question], answers: dict[str, str]) -> str:

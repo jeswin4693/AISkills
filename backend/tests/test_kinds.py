@@ -7,19 +7,22 @@ here are what later kinds, the library, the builder and the API consult, so none
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
 from test_library import write_skill
 
 import skillforge.library as library
-from skillforge.build.models import SLOTS
+from skillforge.build.models import SLOTS, RequirementSpec
+from skillforge.build.pipeline import Round
 from skillforge.build.requirements import QUESTIONS
+from skillforge.build.scripts import ScriptRunner
 from skillforge.graph.store import data_dir
 from skillforge.kinds import KINDS, UnknownKind, all_kinds, get_kind
-from skillforge.kinds.base import Kind
+from skillforge.kinds.base import BuildOutcome, Kind
 from skillforge.library import Library, import_skill, install_skill, package_skill, rescan, rollback
+from skillforge.providers.base import LLMProvider
 from skillforge.results import FAILED, PASSED, CheckResult
 from skillforge.validate import DEFINITION_CHECKS
 from skillforge.validate.static import SLUG
@@ -33,6 +36,9 @@ class FakeKind(Kind):
     library_dir = "library-note"
     slots = ()
 
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []  # what the builder asked of this kind, in order
+
     def name_of(self, files: Mapping[str, bytes]) -> str | None:
         try:
             first = files["thing.txt"].decode("utf-8").split("\n", 1)[0].strip()
@@ -42,6 +48,28 @@ class FakeKind(Kind):
 
     def personal_dir(self) -> Path:
         return Path(tempfile.gettempdir()) / "skillforge-fake-note-kind"
+
+    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
+        """Always complete in one round, and never asks the model."""
+        self.calls.append(("understand", words, round_no))
+        return Round("complete", RequirementSpec(goal=words, user_words=words), [], 0)
+
+    def build(
+        self, spec: dict, provider: LLMProvider, *, out_root: Path, with_scripts: bool, script_runner: ScriptRunner | None,
+        sandbox_note: str, calls: int, notes: list[str], progress: Callable[[str], None],
+    ) -> BuildOutcome:
+        """Writes `thing.txt` into out_root/thing and reports it in the shape the builder stores and reads back."""
+        self.calls.append(("build", spec["goal"]))
+        progress("Writing the thing")
+        folder = out_root / "thing"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "thing.txt").write_text("my-thing\nhello\n", encoding="utf-8", newline="\n")
+        summary = {
+            "status": "ok", "draft_reason": "", "name": "my-thing", "description": "A thing.", "folder": "thing",
+            "files": ["thing.txt"], "scripts": 0, "report_md": "", "checks": [], "tokens": None,
+            "counts": {"passed": 1, "warning": 0, "failed": 0, "not_run": 0},
+        }
+        return BuildOutcome(summary, calls, notes)
 
 
 def check_thing(files: Mapping[str, bytes], folder: str | None) -> list[CheckResult]:

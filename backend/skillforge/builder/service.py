@@ -22,16 +22,13 @@ from pathlib import Path
 
 from sqlalchemy import delete, select, update
 
-from ..build.models import RequirementSpec
-from ..build.pipeline import (
-    BuildError, BuildResult, apply_answers, build_from_spec, check_description, sandbox_note as default_sandbox_note,
-    understand_round,
-)
+from ..build.pipeline import BuildError, apply_answers, check_description, sandbox_note as default_sandbox_note
 from ..build.requirements import Question
 from ..ai import AIService
 from ..build.scripts import ScriptRunner
 from ..db import BuildSession, Database, Job, ModelCall, now_text
 from ..graph.store import data_dir
+from ..kinds import UnknownKind, get_kind
 from ..library import ImportReport, Library, LibraryError, import_skill
 from ..providers import LLMProvider, ProviderError
 from ..validate.static import read_dir
@@ -41,7 +38,6 @@ from .usage import DbUsageRecorder, usage_summary
 
 MAX_ROUNDS = 3
 MAX_EVENTS = 50
-MAX_REPORT = 200_000
 _ID = re.compile(r"^[0-9a-f]{32}$")
 log = logging.getLogger(__name__)
 
@@ -60,21 +56,6 @@ class WrongState(BuilderError):
 
 class BadRequest(BuilderError):
     pass
-
-
-def _summary(result: BuildResult) -> dict:
-    ran = [c for c in result.checks if c.status != "not run"]
-    failed = sum(c.status == "failed" for c in ran)
-    warned = sum(c.status == "warning" for c in ran)
-    report = (result.out_dir / "report.md").read_text(encoding="utf-8")[:MAX_REPORT]
-    return {
-        "status": result.status, "draft_reason": result.draft_reason, "name": result.sdm.name,
-        "description": result.sdm.description, "folder": result.out_dir.name, "files": result.files,
-        "scripts": len(result.sdm.scripts), "report_md": report,
-        "counts": {"passed": len(ran) - failed - warned, "warning": warned, "failed": failed, "not_run": len(result.checks) - len(ran)},
-        "checks": [asdict(c) for c in result.checks],
-        "tokens": asdict(result.tokens) if result.tokens else None,  # an estimate: build/quality.py
-    }
 
 
 class Builder:
@@ -119,7 +100,7 @@ class Builder:
             row = self._row(s, sid)
             job = self._latest_job(s, sid)
             return {
-                "id": row.id, "status": row.status, "description": row.description, "round": row.round,
+                "id": row.id, "kind": row.kind, "status": row.status, "description": row.description, "round": row.round,
                 "max_rounds": MAX_ROUNDS, "with_scripts": row.with_scripts, "questions": row.questions,
                 "spec": row.spec, "result": row.result, "error": row.error, "retryable": row.retryable,
                 "model_calls": row.model_calls, "notes": row.notes, "usage": usage_summary(self.db, sid),
@@ -136,7 +117,7 @@ class Builder:
             rows = s.execute(select(BuildSession).order_by(BuildSession.created_at.desc()).limit(limit)).scalars().all()
             return [
                 {
-                    "id": r.id, "status": r.status, "description": r.description[:140], "created_at": r.created_at,
+                    "id": r.id, "kind": r.kind, "status": r.status, "description": r.description[:140], "created_at": r.created_at,
                     "updated_at": r.updated_at, "skill": (r.result or {}).get("name", ""),
                     "draft": bool(r.result and r.result.get("status") == "draft"),
                     "saved": {"name": r.saved_name, "version": r.saved_version} if r.saved_version else None,
@@ -174,17 +155,18 @@ class Builder:
         s.flush()
         return job.id
 
-    def start(self, description: str, with_scripts: bool = False) -> dict:
+    def start(self, description: str, with_scripts: bool = False, kind: str = "skill") -> dict:
         try:
+            get_kind(kind)
             words = check_description(description)
-        except BuildError as exc:
+        except (UnknownKind, BuildError) as exc:
             raise BadRequest(str(exc)) from exc
         sid, stamp = uuid.uuid4().hex, now_text()
         with self.db.session() as s:
             s.add(BuildSession(
                 id=sid, created_at=stamp, updated_at=stamp, status="working", description=words, words=words,
                 round=1, with_scripts=with_scripts, questions=[], error="", retryable=False, model_calls=0,
-                notes=[], saved_name="", saved_version="",
+                notes=[], saved_name="", saved_version="", kind=kind,
             ))
             job_id = self._new_job(s, sid, "understand")
         self.runner.submit(self._execute, job_id)
@@ -238,16 +220,20 @@ class Builder:
         """Put the built skill into the library through the same checked import as any other skill."""
         with self.db.session() as s:
             row = self._row(s, sid)
-            result = row.result
+            result, kind = row.result, row.kind
             if row.status != "done" or not result:
                 raise WrongState("There is no finished skill in this session yet.")
         if result["status"] == "draft" and not accept_draft:
             why = result["draft_reason"] or f"{result['counts']['failed']} check(s) failed"
             raise WrongState(f"This skill is a DRAFT ({why}). Say accept_draft to keep it anyway.")
+        try:
+            library = self.library.for_kind(kind)
+        except UnknownKind as exc:
+            raise BuilderError(str(exc)) from exc
         folder = self.builds_root / sid / result["folder"]
         if not folder.is_dir():
             raise BuilderError("The generated files are no longer on disk. Build it again.")
-        report = import_skill(folder, self.library, note=(note.strip() or f"built in the web builder ({sid[:8]})")[:200])
+        report = import_skill(folder, library, note=(note.strip() or f"built in the web builder ({sid[:8]})")[:200])
         if not report.refused:
             with self.db.session() as s:
                 row = self._row(s, sid)
@@ -293,7 +279,7 @@ class Builder:
             self._finish_job(job_id, "succeeded", "")
         except ProviderError as exc:  # a missing key or an unreachable model: running it again can help
             self._fail(sid, job_id, str(exc), True)
-        except (BuildError, LibraryError) as exc:
+        except (BuildError, LibraryError, UnknownKind) as exc:
             self._fail(sid, job_id, str(exc), False)
         except Exception as exc:  # noqa: BLE001 - recorded for the person, and logged for whoever runs the server
             log.exception("builder job %s failed", job_id)
@@ -307,10 +293,11 @@ class Builder:
     def _understand(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
             row = self._row(s, sid)
-            words, round_no = row.words, row.round
+            words, round_no, kind_key = row.words, row.round, row.kind
+        kind = get_kind(kind_key)  # before the model is set up: a kind that is gone is not a missing key
         provider = self._provider(sid, job_id)
         progress(f"Round {round_no}: reading your words and filling in the checklist")
-        r = understand_round(provider, words, round_no, MAX_ROUNDS)
+        r = kind.understand(provider, words, round_no, MAX_ROUNDS)
         with self.db.session() as s:
             row = self._row(s, sid)
             row.model_calls += r.calls
@@ -326,16 +313,17 @@ class Builder:
     def _build(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
             row = self._row(s, sid)
-            spec = RequirementSpec.model_validate(row.spec)
+            spec, kind_key = row.spec, row.kind
             with_scripts, calls, notes = row.with_scripts, row.model_calls, list(row.notes)
+        kind = get_kind(kind_key)
         provider = self._provider(sid, job_id)
         out_root = self.builds_root / sid
         shutil.rmtree(out_root, ignore_errors=True)  # this folder is ours alone; a retry starts clean
-        result = build_from_spec(
-            spec, provider, out_root=out_root, force=True, sandbox_note=self.sandbox_note(),
-            with_scripts=with_scripts, script_runner=self.script_runner, calls=calls, notes=notes, progress=progress,
+        outcome = kind.build(
+            spec, provider, out_root=out_root, with_scripts=with_scripts, script_runner=self.script_runner,
+            sandbox_note=self.sandbox_note(), calls=calls, notes=notes, progress=progress,
         )
         with self.db.session() as s:
             row = self._row(s, sid)
-            row.result, row.model_calls, row.notes = _summary(result), result.model_calls, result.notes
+            row.result, row.model_calls, row.notes = outcome.summary, outcome.model_calls, outcome.notes
             row.status, row.updated_at = "done", now_text()

@@ -9,12 +9,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select, text
+from test_kinds import fake_kind  # noqa: F401  (a pytest fixture: it registers a second kind for one test)
 from test_scripts import FakeRunner, bundle, design_using_script
 from test_skill_build import ANSWERS, FIRST, draft, round_one, round_two
 
 from skillforge.api import create_app
 from skillforge.build.models import Extraction, SkillTest
-from skillforge.builder import Builder, JobRunner
+from skillforge.builder import BadRequest, Builder, BuilderError, JobRunner
 from skillforge.db import Base, BuildSession, Database, Job, default_url
 from skillforge.graph.store import data_dir
 from skillforge.library import Library
@@ -421,3 +422,59 @@ def test_the_same_conversation_works_on_real_threads_with_the_browser_polling(ma
     done = wait_for(env, sid, "done")
     assert done["result"]["status"] == "ok" and done["job"]["status"] == "succeeded"
     assert any("Designing" in e["message"] for e in done["job"]["events"])
+
+
+# ---- kinds -------------------------------------------------------------------------------------------
+
+
+def test_a_session_without_a_kind_is_a_skill(make):
+    env = make([round_two(), draft()])
+    sid = finished(env)
+    assert env.get(sid)["kind"] == "skill"
+    assert [row["kind"] for row in env.builder.list()] == ["skill"]
+
+
+def test_a_session_records_its_kind_and_a_new_kind_runs_its_own_understand_and_build_and_saves_to_its_own_library(make, fake_kind):
+    env = make([])  # a model with nothing to say: the fake kind never asks it
+    sid = env.builder.start("Make me a little thing that says hello", kind="note")["id"]
+    session = env.builder.get(sid)
+    assert session["kind"] == "note" and session["status"] == "awaiting_approval"
+    env.builder.approve(sid)
+    session = env.builder.get(sid)
+    assert session["status"] == "done" and session["result"]["folder"] == "thing"
+    assert env.builder.read_file(sid, "thing.txt")["text"] == "my-thing\nhello\n"
+    report = env.builder.save(sid)
+    assert not report.refused and report.name == "my-thing"
+    assert env.library.names() == []  # not in the skill library
+    assert env.library.for_kind("note").names() == ["my-thing"]
+    assert [call[0] for call in fake_kind.calls] == ["understand", "build"]
+    assert env.builder.list()[0]["kind"] == "note"
+    assert env.mock.calls == []
+
+
+def test_starting_with_an_unknown_kind_is_a_bad_request_and_stores_nothing(make):
+    env = make([])
+    with pytest.raises(BadRequest, match="skill"):
+        env.builder.start(FIRST, kind="nope")
+    with env.db.session() as s:
+        assert s.execute(select(BuildSession)).scalars().all() == []
+
+
+def test_a_session_whose_kind_is_no_longer_registered_can_be_read_listed_and_discarded_but_not_continued(make):
+    env = make([])
+    waiting, finished_one = "c" * 32, "d" * 32
+    shared = dict(created_at="t", updated_at="t", description="d", words="d", round=1, with_scripts=False, questions=[],
+                  error="", retryable=False, model_calls=0, notes=[], saved_name="", saved_version="", kind="gone")
+    with env.db.session() as s:
+        s.add(BuildSession(id=waiting, status="awaiting_approval", spec={}, **shared))
+        s.add(BuildSession(id=finished_one, status="done", result={"status": "ok", "draft_reason": "", "folder": "x",
+                                                                    "counts": {"failed": 0}}, **shared))
+    assert env.builder.get(waiting)["kind"] == "gone"
+    assert {row["kind"] for row in env.builder.list()} == {"gone"}
+    after = env.builder.approve(waiting)  # the job runs at once in this test
+    assert after["status"] == "failed" and after["retryable"] is False and "'gone'" in after["error"]
+    with pytest.raises(BuilderError, match="'gone'"):
+        env.builder.save(finished_one)
+    env.builder.discard(waiting)
+    env.builder.discard(finished_one)
+    assert env.builder.list() == []

@@ -94,6 +94,11 @@ def write_thing(root: Path, name: str = "my-thing", body: str = "hello") -> Path
     return root
 
 
+def test_every_registered_kind_has_a_definition_check():
+    # the two registries are separate (validate cannot import kinds): a kind in one but not the other would fail late
+    assert set(KINDS) <= set(DEFINITION_CHECKS)
+
+
 def test_the_skill_kind_is_registered_and_an_unknown_kind_is_a_plain_error():
     assert [k.key for k in all_kinds()] == ["skill"]
     with pytest.raises(UnknownKind) as err:

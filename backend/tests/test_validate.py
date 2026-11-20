@@ -316,3 +316,57 @@ def test_an_unknown_front_matter_key_warns_and_names_it():
 def test_front_matter_that_is_not_a_mapping_adds_no_second_result():
     results = run(good(SKILL_dot_md=b"---\n- a\n- b\n---\n\nbody\n"))
     assert N_KEYS not in results and status(results, N_SKILL_MD) == FAILED
+
+
+# ---- an agent's definition file ----------------------------------------------------------------------
+
+N_AGENT_MD = "AGENT.md exists and its front matter is valid"
+N_AGENT_FOLDER = "folder name matches the agent name"
+N_TOOLS = "tools are listed explicitly (an agent without a tools line can use every tool)"
+N_RUNS_CODE = "no setting that skips approval or runs code (permissionMode bypassPermissions, hooks, mcpServers)"
+AGENT_MD = 'name: demo-agent\ndescription: Reviews a diff. Use when the request involves "review a diff".\ntools: Read, Grep, Glob\n'
+
+
+def agent_md(head: str = AGENT_MD, body: str = "You are a reviewer.\n") -> dict[str, bytes]:
+    return {"AGENT.md": f"---\n{head}---\n\n{body}".encode()}
+
+
+def run_agent(files: dict[str, bytes], folder: str | None = "demo-agent"):
+    return {r.name: r for r in validate_files(files, folder=folder, kind="agent")}
+
+
+def test_a_good_agent_passes_every_check_and_a_skill_file_does_not_stand_in_for_it():
+    results = validate_files(agent_md(), folder="demo-agent", kind="agent")
+    assert [r.status for r in results] == [PASSED] * len(results) and {N_AGENT_MD, N_TOOLS, N_RUNS_CODE} <= {r.name for r in results}
+    assert status(run_agent({"SKILL.md": SKILL_MD.encode()}), N_AGENT_MD) == FAILED  # a skill is not an agent
+    assert N_SKILL_MD not in run_agent(agent_md())
+
+
+def test_an_agent_without_an_explicit_tools_line_fails_because_it_would_get_every_tool():
+    no_tools = "name: demo-agent\ndescription: Reviews a diff.\n"
+    assert status(run_agent(agent_md(no_tools)), N_TOOLS) == FAILED
+    assert status(run_agent(agent_md(no_tools + "tools:\n")), N_TOOLS) == FAILED
+    assert status(run_agent(agent_md(no_tools + "tools: ' , '\n")), N_TOOLS) == FAILED
+    assert status(run_agent(agent_md(no_tools + "tools: [Read, Grep]\n")), N_TOOLS) == PASSED  # a YAML list is fine too
+
+
+def test_the_definition_file_must_be_well_formed():
+    assert status(run_agent(agent_md("name: Not A Slug\ndescription: x\ntools: Read\n")), N_AGENT_MD) == FAILED
+    assert status(run_agent(agent_md("name: demo-agent\ndescription: ''\ntools: Read\n")), N_AGENT_MD) == FAILED
+    assert status(run_agent(agent_md(body="\n  \n")), N_AGENT_MD) == FAILED  # no instructions at all
+    assert status(run_agent({"AGENT.md": b"no front matter here\n"}), N_AGENT_MD) == FAILED
+    assert status(run_agent({"AGENT.md": b"---\nname: [unclosed\n---\n\nbody\n"}), N_AGENT_MD) == FAILED
+    assert status(run_agent({"AGENT.md": b"\xff\xfe"}), N_AGENT_MD) == FAILED
+
+
+def test_settings_that_skip_approval_or_run_code_warn_but_do_not_block():
+    for extra in ("permissionMode: bypassPermissions\n", "hooks:\n  PreToolUse: []\n", "mcpServers:\n  x: {}\n"):
+        found = run_agent(agent_md(AGENT_MD + extra))[N_RUNS_CODE]
+        assert found.status == WARNING and extra.split(":")[0] in found.detail
+    assert status(run_agent(agent_md(AGENT_MD + "permissionMode: acceptEdits\n")), N_RUNS_CODE) == PASSED  # only the dangerous one
+
+
+def test_a_folder_name_that_differs_from_the_agent_name_warns():
+    assert status(run_agent(agent_md(), folder="other-folder"), N_AGENT_FOLDER) == WARNING
+    assert status(run_agent(agent_md(), folder="demo-agent"), N_AGENT_FOLDER) == PASSED
+    assert N_AGENT_FOLDER not in run_agent(agent_md(), folder=None)

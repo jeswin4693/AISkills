@@ -1,5 +1,8 @@
-"""Static validation of skill folders. Reads files, never runs them."""
+"""Static validation of skill and agent folders. Reads files, never runs them."""
 
+from .agent import check_agent_md
 from .static import DEFINITION_CHECKS, DefinitionCheck, read_dir, validate_files, validate_skill_dir
+
+DEFINITION_CHECKS["agent"] = check_agent_md  # the one check that is an agent's own; every other check runs for every kind
 
 __all__ = ["DEFINITION_CHECKS", "DefinitionCheck", "read_dir", "validate_files", "validate_skill_dir"]

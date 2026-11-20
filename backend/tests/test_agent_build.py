@@ -217,11 +217,13 @@ def test_a_check_fails_when_the_persons_own_lines_are_not_in_the_file():
     assert one(check_agent(defn, SPEC, render_agent_files(defn, SPEC)), "word for word").status == PASSED
 
 
-def test_what_an_agent_can_do_beyond_reading_is_flagged_for_a_person_to_read():
-    checks = check_agent(assembled(permissions=["run_commands", "network"]), SPEC, render_agent_files(assembled(permissions=["run_commands", "network"]), SPEC))
-    found = one(checks, "what the agent can do beyond reading files")
+def test_what_an_agent_can_do_beyond_reading_is_flagged_for_a_person_to_read(tmp_path):
+    result, _ = build(tmp_path / "a", [agent_draft(permissions=["run_commands", "network"])])
+    found = one(result.checks, "no tools beyond reading and searching files")  # the same row an imported agent gets
     assert found.status == WARNING and "Bash" in found.detail and "WebFetch" in found.detail
-    assert one(check_agent(assembled(), SPEC, render_agent_files(assembled(), SPEC)), "what the agent can do beyond reading files").status == PASSED
+    assert result.status == "ok"  # a heads-up for a person, not a failed check
+    quiet, _ = build(tmp_path / "b", [agent_draft()])
+    assert one(quiet.checks, "no tools beyond reading and searching files").status == PASSED
 
 
 def test_vague_wording_and_too_many_or_too_long_steps_only_warn():

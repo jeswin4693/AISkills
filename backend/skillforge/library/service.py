@@ -99,7 +99,7 @@ def compare_with_risk(library: Library, name: str, frm: int | None = None, to: i
         older = before[-1]
     _, old_files = library.read(name, older.version)
     _, new_files = library.read(name, newer.version)
-    return Comparison(older, newer, diff_files(old_files, new_files), risk_diff(old_files, new_files, older.tag, newer.tag))
+    return Comparison(older, newer, diff_files(old_files, new_files), risk_diff(old_files, new_files, older.tag, newer.tag, library.kind))
 
 
 def compare(library: Library, name: str, frm: int | None = None, to: int | None = None) -> tuple[Version, Version, list[FileChange]]:
@@ -163,7 +163,7 @@ def import_source(
     if created and previous is not None:
         _, old_files = library.read(name, previous.version)
         changes = diff_files(old_files, src.files)
-        risk = risk_diff(old_files, src.files, previous.tag, version.tag)
+        risk = risk_diff(old_files, src.files, previous.tag, version.tag, library.kind)
     return ImportReport(checks, name, version, created, previous, changes, risk)
 
 

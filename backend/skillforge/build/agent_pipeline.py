@@ -15,7 +15,7 @@ from pathlib import Path
 from ..providers.base import LLMProvider
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult
 from ..validate import validate_files
-from .agent import TOOL_MEANING, AgentDefinition, assemble_agent, design_agent, person_lines, render_agent_files
+from .agent import AgentDefinition, assemble_agent, design_agent, person_lines, render_agent_files
 from .models import RequirementSpec
 from .pipeline import BuildError
 from .quality import LONG_STEP_WORDS, VAGUE, has_when_clause, norm
@@ -24,7 +24,6 @@ from .render import MAX_NAME, write_files
 from .tools import tools_for
 
 MAX_STEPS = 7
-INFO_CHECK = "what the agent can do beyond reading files"  # for a person to read: never a problem the model can repair
 NOT_RUN_CHECK = "the agent's test cases were run against a model"
 Progress = Callable[[str], None]
 
@@ -75,21 +74,16 @@ def check_agent(defn: AgentDefinition, spec: RequirementSpec, files: dict[str, s
     row("steps are few and short",
         ([f"{len(defn.process)} steps (at most {MAX_STEPS})"] if len(defn.process) > MAX_STEPS else [])
         + ([f"step {', '.join(map(str, long_steps))} is over {LONG_STEP_WORDS} words"] if long_steps else []), status=WARNING)
-    extra = [t for t in defn.tools if t not in ("Read", "Grep", "Glob")]
-    out.append(
-        CheckResult(INFO_CHECK, WARNING, "; ".join(f"{t}: {TOOL_MEANING.get(t, 'a tool')}" for t in extra) + ". Make sure the requirement asked for this.")
-        if extra else CheckResult(INFO_CHECK, PASSED, "it can only read and search files")
-    )
     return out
 
 
 def _problems(checks: Sequence[CheckResult]) -> list[str]:
-    return [f"{c.name}: {c.detail}" for c in checks if c.status in (FAILED, WARNING) and c.name != INFO_CHECK]
+    return [f"{c.name}: {c.detail}" for c in checks if c.status in (FAILED, WARNING)]
 
 
 def _score(defn: AgentDefinition, spec: RequirementSpec) -> tuple[int, int]:
     """(failed checks, warnings): smaller is better, and a failure outweighs any number of warnings."""
-    checks = [c for c in check_agent(defn, spec, render_agent_files(defn, spec)) if c.name != INFO_CHECK]
+    checks = check_agent(defn, spec, render_agent_files(defn, spec))
     return (sum(c.status == FAILED for c in checks), sum(c.status == WARNING for c in checks))
 
 

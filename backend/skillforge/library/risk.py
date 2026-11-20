@@ -29,6 +29,7 @@ from pathlib import PurePosixPath
 
 import yaml
 
+from ..kinds import get_kind
 from ..validate import validate_files
 from ..validate.static import JS_LANGS, PY_SUFFIXES, TEXT_SUFFIXES, markup_findings, script_capabilities, wording_findings
 
@@ -85,9 +86,9 @@ def _text(data: bytes | None) -> str:
     return (data or b"").decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
-def _front_matter(files: Mapping[str, bytes]) -> tuple[dict, str]:
-    """(the front matter of SKILL.md as a dict, the text after it). Empty when there is none or it is not valid."""
-    text = _text(files.get("SKILL.md"))
+def _front_matter(files: Mapping[str, bytes], definition: str = "SKILL.md") -> tuple[dict, str]:
+    """(the front matter of the definition file, SKILL.md or AGENT.md, as a dict, the text after it). Empty when there is none or it is not valid."""
+    text = _text(files.get(definition))
     match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
     if not match:
         return {}, text
@@ -191,17 +192,20 @@ def _script_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
             out.append(RiskChange(LOOK, "script_changed", f"{rel} changed ({_lines(added, removed)}); its capabilities are the same.{note}", rel))
 
 
-def _permission_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
+def _permission_changes(
+    old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], definition: str = "SKILL.md", tools_field: str = "allowed-tools",
+) -> None:
     gained, lost = _declared_permissions(new) - _declared_permissions(old), _declared_permissions(old) - _declared_permissions(new)
     if gained:
         out.append(RiskChange(RISKIER, "permission", f"The skill now asks for: {', '.join(sorted(gained))}.", "skill.sdm.json"))
     if lost:
         out.append(RiskChange(SAFER, "permission", f"The skill no longer asks for: {', '.join(sorted(lost))}.", "skill.sdm.json"))
-    old_tools, new_tools = _words(_front_matter(old)[0].get("allowed-tools")), _words(_front_matter(new)[0].get("allowed-tools"))
+    old_tools = _words(_front_matter(old, definition)[0].get(tools_field))
+    new_tools = _words(_front_matter(new, definition)[0].get(tools_field))
     if new_tools - old_tools:
-        out.append(RiskChange(RISKIER, "tool", f"allowed-tools now also lists: {', '.join(sorted(new_tools - old_tools))}.", "SKILL.md"))
+        out.append(RiskChange(RISKIER, "tool", f"{tools_field} now also lists: {', '.join(sorted(new_tools - old_tools))}.", definition))
     if old_tools - new_tools:
-        out.append(RiskChange(SAFER, "tool", f"allowed-tools no longer lists: {', '.join(sorted(old_tools - new_tools))}.", "SKILL.md"))
+        out.append(RiskChange(SAFER, "tool", f"{tools_field} no longer lists: {', '.join(sorted(old_tools - new_tools))}.", definition))
 
 
 def _wording_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
@@ -233,34 +237,36 @@ def _address_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: li
         out.append(RiskChange(SAFER, "address", f"No longer mentions: {_listed(gone)}."))
 
 
-def _text_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
-    old_meta, old_body = _front_matter(old)
-    new_meta, new_body = _front_matter(new)
+def _text_changes(
+    old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], definition: str = "SKILL.md", noun: str = "skill",
+) -> None:
+    old_meta, old_body = _front_matter(old, definition)
+    new_meta, new_body = _front_matter(new, definition)
     old_desc, new_desc = " ".join(str(old_meta.get("description", "")).split()), " ".join(str(new_meta.get("description", "")).split())
     if old_desc != new_desc:
         out.append(RiskChange(
             LOOK, "description",
-            f"The description changed. An agent reads it to decide when to use the skill. Was: \"{_cut(old_desc)}\" Now: \"{_cut(new_desc)}\"", "SKILL.md",
+            f"The description changed. An agent reads it to decide when to use the {noun}. Was: \"{_cut(old_desc)}\" Now: \"{_cut(new_desc)}\"", definition,
         ))
-    if "SKILL.md" in old or "SKILL.md" in new:
+    if definition in old or definition in new:
         added, removed = _line_changes(old_body, new_body)
         if added or removed:
-            out.append(RiskChange(LOOK, "instructions", f"The instructions in SKILL.md changed ({_lines(added, removed)}). An agent follows them.", "SKILL.md"))
+            out.append(RiskChange(LOOK, "instructions", f"The instructions in {definition} changed ({_lines(added, removed)}). An agent follows them.", definition))
     for rel in sorted(old.keys() | new.keys()):  # other Markdown an agent may be sent to read
-        if rel == "SKILL.md" or PurePosixPath(rel).suffix.lower() != ".md" or old.get(rel) == new.get(rel):
+        if rel == definition or PurePosixPath(rel).suffix.lower() != ".md" or old.get(rel) == new.get(rel):
             continue
         if rel not in old:
-            out.append(RiskChange(LOOK, "reference", f"A new Markdown file, {rel}. If SKILL.md points to it, an agent will read it.", rel))
+            out.append(RiskChange(LOOK, "reference", f"A new Markdown file, {rel}. If {definition} points to it, an agent will read it.", rel))
         elif rel not in new:
             out.append(RiskChange(SAFER, "reference", f"The Markdown file {rel} was removed.", rel))
         else:
             added, removed = _line_changes(_text(old[rel]), _text(new[rel]))
-            out.append(RiskChange(LOOK, "reference", f"{rel} changed ({_lines(added, removed)}). If SKILL.md points to it, an agent will read it.", rel))
+            out.append(RiskChange(LOOK, "reference", f"{rel} changed ({_lines(added, removed)}). If {definition} points to it, an agent will read it.", rel))
 
 
-def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
-    before = {c.name: c for c in validate_files(old)}
-    for c in validate_files(new):
+def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], kind: str = "skill") -> None:
+    before = {c.name: c for c in validate_files(old, kind=kind)}
+    for c in validate_files(new, kind=kind):
         if c.name in _COVERED_ELSEWHERE:
             continue
         was = before.get(c.name)
@@ -271,14 +277,17 @@ def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list
             out.append(RiskChange(SAFER, "check", f"A check got better ({c.status}): {c.name}."))
 
 
-def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "", newer: str = "") -> RiskDiff:
-    """What got riskier (and what got safer) from `old` to `new`, two skills held in memory."""
+def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "", newer: str = "", kind: str = "skill") -> RiskDiff:
+    """What got riskier (and what got safer) from `old` to `new`, two versions of one kind held in memory.
+
+    `kind` says which definition file and which tools key to read (SKILL.md and allowed-tools, AGENT.md and tools)."""
+    spec = get_kind(kind)
     changes: list[RiskChange] = []
     _script_changes(old, new, changes)
-    _permission_changes(old, new, changes)
+    _permission_changes(old, new, changes, spec.definition_file, spec.tools_field)
     _wording_changes(old, new, changes)
     _address_changes(old, new, changes)
-    _text_changes(old, new, changes)
-    _check_changes(old, new, changes)
+    _text_changes(old, new, changes, spec.definition_file, spec.label.lower())
+    _check_changes(old, new, changes, kind)
     changes.sort(key=lambda c: _ORDER[c.direction])  # stable: within a group the order above is kept
     return RiskDiff(older, newer, changes)

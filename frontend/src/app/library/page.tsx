@@ -16,8 +16,7 @@ import { useKinds } from "@/lib/useKinds";
 
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-function LibraryContent() {
-  const kind = useSearchParams().get("kind") ?? "skill";
+function LibraryContent({ kind }: { kind: string }) {
   const kinds = useKinds();
   const noun = kindLabel(kinds.data, kind).toLowerCase();
   const skills = useAsync(() => api.listSkills(kind), `skills/${kind}`);
@@ -85,11 +84,17 @@ function LibraryContent() {
   );
 }
 
+/** Keyed by the kind, so switching tabs starts a fresh page: no rows, import result or re-check from the other kind stay behind. */
+function LibraryByKind() {
+  const kind = useSearchParams().get("kind") ?? "skill";
+  return <LibraryContent key={kind} kind={kind} />;
+}
+
 /** The kind is read from the address, which a statically built page may only do inside a Suspense boundary. */
 export default function LibraryPage() {
   return (
     <Suspense fallback={<Loading what="the library" />}>
-      <LibraryContent />
+      <LibraryByKind />
     </Suspense>
   );
 }

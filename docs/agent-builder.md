@@ -45,8 +45,8 @@ when** (your acceptance criteria word for word) and **If something goes wrong** 
 ## Importing and installing an agent
 
 The definition check for an imported `AGENT.md` fails on a missing or empty `tools` line (Claude Code would give it every tool),
-invalid front matter, a bad name or no instructions, and **warns** on `permissionMode: bypassPermissions`, `hooks` and
-`mcpServers`. Every other static check (hidden characters, attack wording, size) runs as for a skill.
+invalid front matter, a bad name or no instructions, and **warns** on `permissionMode: bypassPermissions`, `hooks`,
+`mcpServers` and any tool beyond `Read, Grep, Glob` (so an imported agent that can edit files or run commands is never silent). Every other static check (hidden characters, attack wording, size) runs as for a skill.
 
 **Install writes one file**, `<name>.md`, into `~/.claude/agents` (or a folder you give). It never replaces an existing file
 unless you say so, and then the old one is copied to `backups-agent` first.
@@ -59,5 +59,6 @@ unless you say so, and then the old one is copied to `backups-agent` first.
   and whether Claude Code reads `tools` as a comma-separated string exactly this way (the form is from the documentation,
   not tried against a live Claude Code).
 - The token-cost estimate and the `eval` harness are for skills only.
-- The risk diff between versions is skill-shaped; it still works on the files but is not agent-aware (Phase 4).
+- The risk diff between versions reads `AGENT.md` and its `tools` line, so a version that adds a tool such as `Bash` is flagged as
+  riskier, and its messages name `AGENT.md`. It does not know anything else that is specific to agents (Phase 4 widens it).
 - The web flow for agents was not run in a real browser; the 39 existing browser behaviours (skills) still pass.

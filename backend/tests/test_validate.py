@@ -322,6 +322,7 @@ def test_front_matter_that_is_not_a_mapping_adds_no_second_result():
 
 N_AGENT_MD = "AGENT.md exists and its front matter is valid"
 N_AGENT_FOLDER = "folder name matches the agent name"
+N_BEYOND = "no tools beyond reading and searching files"
 N_TOOLS = "tools are listed explicitly (an agent without a tools line can use every tool)"
 N_RUNS_CODE = "no setting that skips approval or runs code (permissionMode bypassPermissions, hooks, mcpServers)"
 AGENT_MD = 'name: demo-agent\ndescription: Reviews a diff. Use when the request involves "review a diff".\ntools: Read, Grep, Glob\n'
@@ -364,6 +365,13 @@ def test_settings_that_skip_approval_or_run_code_warn_but_do_not_block():
         found = run_agent(agent_md(AGENT_MD + extra))[N_RUNS_CODE]
         assert found.status == WARNING and extra.split(":")[0] in found.detail
     assert status(run_agent(agent_md(AGENT_MD + "permissionMode: acceptEdits\n")), N_RUNS_CODE) == PASSED  # only the dangerous one
+
+
+def test_an_imported_agent_with_tools_beyond_reading_warns_and_lists_them():
+    found = run_agent(agent_md(AGENT_MD.replace("Read, Grep, Glob", "Read, Bash, Write")))[N_BEYOND]
+    assert found.status == WARNING and "Bash" in found.detail and "Write" in found.detail and "Grep" not in found.detail
+    assert status(run_agent(agent_md()), N_BEYOND) == PASSED
+    assert status(run_agent(agent_md(AGENT_MD.replace("tools: Read, Grep, Glob", "tools: [Read, WebFetch]"))), N_BEYOND) == WARNING
 
 
 def test_a_folder_name_that_differs_from_the_agent_name_warns():

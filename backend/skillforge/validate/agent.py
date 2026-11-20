@@ -20,6 +20,8 @@ DEFINITION_CHECK = "AGENT.md exists and its front matter is valid"
 TOOLS_CHECK = "tools are listed explicitly (an agent without a tools line can use every tool)"
 RUNS_CODE_CHECK = "no setting that skips approval or runs code (permissionMode bypassPermissions, hooks, mcpServers)"
 FOLDER_CHECK = "folder name matches the agent name"
+BEYOND_READING_CHECK = "no tools beyond reading and searching files"
+READING_TOOLS = ("Read", "Grep", "Glob")
 
 
 def _tools(value: object) -> list[str]:
@@ -65,6 +67,14 @@ def check_agent_md(files: Mapping[str, bytes], folder: str | None) -> list[Check
     out.append(
         CheckResult(TOOLS_CHECK, PASSED, ", ".join(_tools(meta.get("tools")))) if _tools(meta.get("tools"))
         else CheckResult(TOOLS_CHECK, FAILED, "there is no `tools` line, or it is empty, so Claude Code would give this agent every tool")
+    )
+    extra = [t for t in _tools(meta.get("tools")) if t not in READING_TOOLS]
+    out.append(
+        CheckResult(
+            BEYOND_READING_CHECK, WARNING,
+            ", ".join(extra) + ": Edit and Write change files, Bash runs any shell command, WebFetch and WebSearch reach the network. "
+            "Make sure you meant to give the agent these.",
+        ) if extra else CheckResult(BEYOND_READING_CHECK, PASSED, "it can only read and search files")
     )
     risky = [key for key in ("hooks", "mcpServers") if key in meta]
     if meta.get("permissionMode") == "bypassPermissions":

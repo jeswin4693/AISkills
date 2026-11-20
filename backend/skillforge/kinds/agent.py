@@ -48,6 +48,7 @@ class AgentKind(Kind):
     definition_file = "AGENT.md"
     install_file = "AGENT.md"
     personal_label = "~/.claude/agents"
+    tools_field = "tools"
     slots = tuple(Slot(key, AGENT_SLOT_LABELS[key], AGENT_QUESTIONS[key]) for key in SLOTS)
 
     def name_of(self, files: Mapping[str, bytes]) -> str | None:

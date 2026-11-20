@@ -89,7 +89,7 @@ wording and a `skill_only` switch (defaults keep the skill builder identical); `
 and `installs_as_file`; a test that every registered kind has a definition check (a Phase 0 deferred minor); "Build an agent".
 
 **Not done, on purpose:** a run against a live model, an agent flow in the real browser, `eval` for agents (their test cases are data and
-are reported as not run), unknown front-matter keys for agents (the list is not verified), an agent-aware risk diff (Phase 4), a `model`
+are reported as not run), unknown front-matter keys for agents (the list is not verified), risk-diff rules beyond `AGENT.md` and its `tools` line (Phase 4), a `model`
 choice for the agent, `--kind` on the command line, and Phase 0's `eval` from the web pages.
 
 ## Decisions (approved)

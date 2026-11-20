@@ -4,7 +4,8 @@ An open-source platform that **understands repositories**, **suggests ideas** gr
 reusable AI skills** from plain-English requirements.
 
 Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder and the Plugin Builder are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the MCP-server builder, and the web pages for the graph, suggestions and settings.
-See [docs/roadmap.md](docs/roadmap.md).
+See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
+your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
 ```
  Repo --> UNDERSTAND --graph facts--> SUGGEST --ideas with evidence--> BUILD --> skill packages

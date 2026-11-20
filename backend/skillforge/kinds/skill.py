@@ -68,6 +68,7 @@ class SkillKind(Kind):
     label = "Skill"
     library_dir = "library"
     definition_file = "SKILL.md"
+    personal_label = "~/.claude/skills"
     slots = tuple(Slot(key, SLOT_LABELS[key], QUESTIONS[key]) for key in SLOTS)
 
     def name_of(self, files: Mapping[str, bytes]) -> str | None:

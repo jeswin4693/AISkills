@@ -165,6 +165,7 @@ def create_app(
         """What this app builds: each kind's checklist (labels and questions) and where it can be installed."""
         return [
             {"key": k.key, "label": k.label, "definition_file": k.definition_file, "install_targets": list(k.install_targets),
+             "personal_label": k.personal_label, "installs_as_file": bool(k.install_file),
              "slots": [asdict(s) for s in k.slots]}
             for k in all_kinds()
         ]

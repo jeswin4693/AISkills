@@ -98,6 +98,9 @@ def test_the_kinds_endpoint_lists_both_kinds_with_their_definition_files(make):
     assert list(kinds) == ["skill", "agent"]
     assert kinds["skill"]["definition_file"] == "SKILL.md" and kinds["agent"]["definition_file"] == "AGENT.md"
     assert [s["key"] for s in kinds["agent"]["slots"]][:2] == ["goal", "inputs"] and kinds["agent"]["slots"][0]["label"] == "What it is for"
+    # what the install dialog says, so the page does not hard-code folder names
+    assert (kinds["skill"]["personal_label"], kinds["skill"]["installs_as_file"]) == ("~/.claude/skills", False)
+    assert (kinds["agent"]["personal_label"], kinds["agent"]["installs_as_file"]) == ("~/.claude/agents", True)
 
 
 def test_the_agent_kind_in_the_registry(tmp_path, monkeypatch):

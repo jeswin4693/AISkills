@@ -19,7 +19,7 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 | `POST /api/provider/check` | One tiny call to each distinct model that is set up, so each key and model is shown to really work: `{"configured", "detail", "checks": [{provider, model, roles, ok, kind, detail, latency_ms, input_tokens, output_tokens}]}`. It uses a little quota, so it runs only when asked. Never a key. |
 | `GET /api/sandbox` | Is a Linux sandbox available here, and why or why not. |
 | `GET /api/languages` | Every language with its level, grammar status and extensions. Never downloads a grammar. |
-| `GET /api/kinds` | What the app builds: each kind's `key`, `label`, `install_targets` and checklist `slots` (`key`, `label`, `question`). Today only `skill`. |
+| `GET /api/kinds` | What the app builds: each kind's `key`, `label`, `install_targets` and checklist `slots` (`key`, `label`, `question`). `skill` and `agent`; also `definition_file` (`SKILL.md`, `AGENT.md`), `personal_label` (such as `~/.claude/agents`) and `installs_as_file`. |
 | `POST /api/validate` | Body: a `.zip`. Runs every static check. Stores nothing, runs nothing. |
 | `GET /api/library` | The skills, each with its version count and latest version. |
 | `POST /api/library/import` | Body: a `.zip` (`?filename=`, `?note=`, `?test_scripts=true`). **200** when kept (or identical to the latest, `created: false`); **422** when a check failed, with the checks, and nothing is stored. `test_scripts` runs the skill's cases in the sandbox and the request waits for them. The answer has a `risk` object (as in `diff`) when it added a version after another, and `null` otherwise. |

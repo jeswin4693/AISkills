@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the Agent, Plugin and MCP-server builders, and the web pages for the graph, suggestions and settings.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry) and the Agent Builder are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the Plugin and MCP-server builders, and the web pages for the graph, suggestions and settings.
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -35,8 +35,12 @@ what is in your library) and an **MCP-server** builder. The approved plan, the p
 - **Two small skill improvements:** a skill's permissions are written into `SKILL.md` as `allowed-tools` by code, and the
   checks warn about front-matter keys that Claude Code does not know (both described below).
 
-Not yet: the second kind itself (Phase 1, the Agent Builder, is next), running `eval` from the web pages, and library tabs
-per kind.
+**Phase 1, the Agent Builder, is built on top of it** ([docs/agent-builder.md](docs/agent-builder.md)): pick **Agent** in the Builder
+(or `"kind": "agent"` in the API) and describe a Claude Code subagent. You get an `AGENT.md` whose `tools` line is written by code
+(never empty, never every tool), with your rules and acceptance criteria carried in word for word, checked, kept in its own library,
+exported, and installed as one file in `~/.claude/agents`. The Library has an Agents tab. Not yet: a run against a live model,
+`eval` for agents, an agent flow in the real browser, `--kind` on the command line, and the Plugin and MCP-server builders
+(Phase 2 and 3 of the plan).
 
 ## Layout
 
@@ -49,7 +53,7 @@ AISkills/
 │   ├── skillforge/evaluate/  # the test harness: a skill's test cases run against a model, graded by code
 │   ├── skillforge/validate/  # static checks on any skill folder (run nothing)
 │   ├── skillforge/sandbox/   # the Linux Docker sandbox that generated scripts run in (fails closed)
-│   ├── skillforge/kinds/     # the kind registry: what the app builds (today the skill) and its checklist
+│   ├── skillforge/kinds/     # the kind registry: what the app builds (skill and agent) and each one's checklist
 │   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
 │   ├── skillforge/ai/        # the one model service: model by task, retries, usage, redaction, backup models
 │   ├── skillforge/providers/ # the model adapters (Gemini, OpenAI-compatible, Anthropic) and a mock for tests
@@ -128,6 +132,18 @@ skills that are only text; a skill that reads files or runs commands cannot be t
 
 With `--scripts` the skill can ship helper scripts. Every script case runs in the Linux sandbox, and a skill whose
 scripts never ran is marked DRAFT ([docs/scripts.md](docs/scripts.md)).
+
+## Build an agent
+
+The same conversation builds a Claude Code **subagent**: in the web Builder choose **Agent**, describe the job you want to hand
+it, answer only what is missing (the questions are worded for an agent: what it is given, what it reports back, what it may
+touch), approve the requirement, and save it. The agent file is `AGENT.md`; installing it writes one file,
+`~/.claude/agents/<name>.md`, and never replaces one without asking ([docs/agent-builder.md](docs/agent-builder.md)).
+
+What code decides, not the model: the `tools` line (at least `Read, Grep, Glob`, more only if the design asked for it, and
+anything beyond reading is flagged for you to read), the front matter, and that your own rules and acceptance criteria appear in
+the file word for word. What is not done: its test cases are not run against a model, and no live-model run of this builder has
+been made yet.
 
 ## Check any skill folder
 

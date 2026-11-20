@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
 **Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
-([ai-engine.md](ai-engine.md)) and Phase 0, the foundation (2026-11-20; plan: [superpowers/plans/2026-11-20-component-factory-phase-0.md](superpowers/plans/2026-11-20-component-factory-phase-0.md); what it did and did not do is under "Phase 0: what was built" below). Nothing else here is built.** Next slice: Phase 1, the Agent Builder.
+([ai-engine.md](ai-engine.md)), Phase 0, the foundation, and Phase 1, the Agent Builder (both 2026-11-20; plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md); what they did and did not do is under "Phase 0: what was built" and "Phase 1: what was built" below, and in [agent-builder.md](agent-builder.md)). Nothing else here is built.** Next slice: Phase 2, the Plugin Builder.
 
 ## What
 
@@ -74,6 +74,23 @@ to look at); a `--kind` flag on the command line.
 (`library/package.py`), so a zip of another kind keeps its files at the top of the zip until that kind chooses a layout;
 `retest_scripts` and the risk diff read skill files (Phase 4 widens the risk diff); `Round`, which a kind's `understand` returns,
 still carries a skill-shaped `RequirementSpec`.
+
+## Phase 1: what was built (2026-11-20)
+
+The Agent Builder, in [agent-builder.md](agent-builder.md): `AgentKind` (`AGENT.md`, `library-agent`, installs as one file `<name>.md`
+into `~/.claude/agents`), the same six-item checklist in agent wording, a design the model drafts and code turns into `AGENT.md`
+(front matter by YAML: `name`, `description`, `tools` only; the person's lines word for word), checks decided by code with one repair
+kept only if not worse, a definition check for imported agents, a library tab and `?kind=` through every web page.
+
+Changes that reach beyond the agent: `understand_round`, `extract_spec`, `check_completeness` and `questions_for` take the kind's own
+wording and a `skill_only` switch (defaults keep the skill builder identical); `Kind` has `definition_file`, `install_file` and
+`personal_label`; a zip's single top folder is unwrapped for any kind's definition file (this settles the Phase 0 zip limit);
+`install_skill` writes one file for a kind that has an `install_file`; `GET /api/kinds` lists `definition_file`, `personal_label`
+and `installs_as_file`; a test that every registered kind has a definition check (a Phase 0 deferred minor); "Build an agent".
+
+**Not done, on purpose:** a run against a live model, an agent flow in the real browser, `eval` for agents (their test cases are data and
+are reported as not run), unknown front-matter keys for agents (the list is not verified), an agent-aware risk diff (Phase 4), a `model`
+choice for the agent, `--kind` on the command line, and Phase 0's `eval` from the web pages.
 
 ## Decisions (approved)
 

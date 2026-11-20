@@ -255,3 +255,45 @@ def test_the_api_refuses_a_name_with_a_newline_and_a_text_that_cannot_be_encoded
             sent = client.post(route, content=json.dumps(body), headers={"content-type": "application/json"})  # the lone character goes out as an escape
             assert sent.status_code in (400, 422), (body, route, sent.status_code)
     assert lib.for_kind("plugin").names() == []
+
+
+# ---- 6. the risk diff between two versions of a plugin looks inside its components ---------------------------------------
+
+
+def plugin_files_for(tmp_path, name: str, **kw) -> dict[str, bytes]:
+    return dict(compose(library_with(tmp_path / name, **kw), [r for r, f in ((SKILL_REF, kw.get("skill")), (AGENT_REF, kw.get("agent"))) if f is not None]).files)
+
+
+def test_a_plugin_version_whose_skill_gained_bash_and_hooks_is_riskier(tmp_path):
+    from skillforge.library import risk_diff
+
+    v1 = plugin_files_for(tmp_path, "one", skill=skill_files(tools="Read"))
+    v2 = plugin_files_for(tmp_path, "two", skill=skill_files(tools="Read Bash Write", front="hooks:\n  PreToolUse:\n    - command: whoami\n"))
+    report = risk_diff(v1, v2, "v1", "v2", kind="plugin")
+    tools = [c for c in report.changes if c.kind == "tool"]
+    assert tools and tools[0].direction == "riskier" and SKILL in tools[0].detail and "Bash" in tools[0].detail
+    assert tools[0].path == f"skills/{SKILL}/SKILL.md"
+    assert report.level == "more_risk"
+
+
+def test_a_plugin_version_that_only_bumps_its_number_is_not_flagged(tmp_path):
+    from skillforge.library import risk_diff
+
+    lib = library_with(tmp_path, skill=skill_files(), agent=agent_files())
+    a = compose(lib, version="0.1.0").files
+    b = compose(lib, version="0.1.1").files
+    report = risk_diff(a, b, "v1", "v2", kind="plugin")
+    assert report.level == "no_new_risk" and not any("agent follows" in c.detail for c in report.changes)
+
+
+def test_a_component_added_to_a_plugin_is_reported_and_a_removed_one_is_safer(tmp_path):
+    from skillforge.library import risk_diff
+
+    only_skill = plugin_files_for(tmp_path, "one", skill=skill_files(tools="Read"))
+    both = plugin_files_for(tmp_path, "two", skill=skill_files(tools="Read"), agent=agent_files(tools="Read, Bash"))
+    added = [c for c in risk_diff(only_skill, both, "v1", "v2", kind="plugin").changes if c.kind == "component_added"]
+    assert len(added) == 1 and added[0].direction == "riskier" and AGENT in added[0].detail and "Bash" in added[0].detail
+    removed = [c for c in risk_diff(both, only_skill, "v2", "v3", kind="plugin").changes if c.kind == "component_removed"]
+    assert len(removed) == 1 and removed[0].direction == "safer"
+    harmless = plugin_files_for(tmp_path, "three", skill=skill_files(tools="Read"), agent=agent_files())
+    assert [c.direction for c in risk_diff(only_skill, harmless, "v1", "v2", kind="plugin").changes if c.kind == "component_added"] == ["look"]

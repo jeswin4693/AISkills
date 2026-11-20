@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CheckList } from "@/components/CheckList";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
-import { canPreview, isPicked, nameHint, pluginRequest, togglePick, type ComponentPick, type PluginForm } from "@/lib/plugin";
+import { canPreview, isPicked, keepRequest, nameHint, pluginRequest, togglePick, type ComponentPick, type PluginForm } from "@/lib/plugin";
 import type { PluginPreview, PluginSaveResult, SkillSummary } from "@/lib/types";
 import { useAsync, type AsyncState } from "@/lib/useAsync";
 
@@ -61,7 +61,10 @@ export default function ComposerPage() {
   const [busy, setBusy] = useState<"preview" | "keep" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const latest = useRef(0); // each request gets a number; an answer to an older one is ignored
   const stale = () => {
+    latest.current += 1; // an answer still on its way was asked about a form that has changed
+    setBusy(null);
     setPreview(null); // what was shown no longer matches the form
     setSaved(null);
   };
@@ -75,14 +78,16 @@ export default function ComposerPage() {
   };
 
   async function run<T>(what: "preview" | "keep", call: () => Promise<T>, done: (r: T) => void) {
+    const mine = ++latest.current;
     setBusy(what);
     setError(null);
     try {
-      done(await call());
+      const result = await call();
+      if (mine === latest.current) done(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (mine === latest.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(null);
+      if (mine === latest.current) setBusy(null);
     }
   }
 
@@ -190,7 +195,7 @@ export default function ComposerPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="primary" busy={busy === "keep"} disabled={preview.failed}
-                onClick={() => void run("keep", () => api.savePlugin(request), setSaved)}
+                onClick={() => void run("keep", () => api.savePlugin(keepRequest(request, preview.components)), setSaved)}
               >
                 Keep this plugin
               </Button>

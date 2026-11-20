@@ -311,19 +311,67 @@ def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list
             out.append(RiskChange(SAFER, "check", f"A check got better ({c.status}): {c.name}."))
 
 
+def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
+    """Inside a plugin: each skill and agent that is in both versions is compared with the rules of its own kind, and a component
+    that came or went is said. The plugin's manifest and README are not instructions an agent follows, so they are not diffed."""
+    from ..validate.plugin import components, shipped_code  # here: `validate.plugin` needs nothing from the library
+
+    def keyed(files: Mapping[str, bytes]) -> dict[tuple[str, str], dict[str, bytes]]:
+        return {(kind, name): sub for kind, name, sub in components(files)}
+
+    def where(kind: str, name: str, path: str = "") -> str:
+        return f"skills/{name}/{path or 'SKILL.md'}" if kind == "skill" else f"agents/{name}.md"
+
+    def power(kind: str, sub: Mapping[str, bytes]) -> list[str]:
+        definition, field_name = ("SKILL.md", "allowed-tools") if kind == "skill" else ("AGENT.md", "tools")
+        meta = _front_matter(sub, definition)[0]
+        reasons: list[str] = []
+        tools = sorted({entry.split("(")[0] for entry in split_tools(meta.get(field_name))} - {"Read", "Grep", "Glob"})
+        if tools:
+            reasons.append("the tools " + ", ".join(tools))
+        code = shipped_code(sub)
+        if code:
+            reasons.append(f"{len(code)} code file{'s' if len(code) != 1 else ''}")
+        if meta.get("hooks"):
+            reasons.append("hooks")
+        if meta.get("mcpServers") or meta.get("mcp_servers"):
+            reasons.append("MCP servers")
+        return reasons
+
+    before, after = keyed(old), keyed(new)
+    for kind, name in sorted(after.keys() - before.keys()):
+        reasons = power(kind, after[(kind, name)])
+        detail = f"The {kind} '{name}' is now in the plugin" + (f" and asks for {', '.join(reasons)}." if reasons else "; it asks for nothing beyond reading.")
+        out.append(RiskChange(RISKIER if reasons else LOOK, "component_added", detail, where(kind, name)))
+    for kind, name in sorted(before.keys() - after.keys()):
+        out.append(RiskChange(SAFER, "component_removed", f"The {kind} '{name}' is no longer in the plugin.", where(kind, name)))
+    for kind, name in sorted(before.keys() & after.keys()):
+        old_c, new_c = before[(kind, name)], after[(kind, name)]
+        if old_c == new_c:
+            continue
+        for change in risk_diff(old_c, new_c, kind=kind).changes:
+            out.append(RiskChange(change.direction, change.kind, f"{kind} '{name}': {change.detail}", where(kind, name, change.path)))
+        gained = [word for word in power(kind, new_c) if word in ("hooks", "MCP servers") and word not in power(kind, old_c)]
+        if gained:
+            out.append(RiskChange(RISKIER, "capability", f"The {kind} '{name}' now declares {' and '.join(gained)}: they run on your machine.", where(kind, name)))
+
+
 def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "", newer: str = "", kind: str = "skill") -> RiskDiff:
     """What got riskier (and what got safer) from `old` to `new`, two versions of one kind held in memory.
 
     `kind` says which definition file and which tools key to read (SKILL.md and allowed-tools, AGENT.md and tools)."""
     spec = get_kind(kind)
     changes: list[RiskChange] = []
-    _script_changes(old, new, changes, spec.definition_file)
-    if spec.definition_file.endswith(".py"):
-        _server_changes(old, new, changes, spec.definition_file)
-    _permission_changes(old, new, changes, spec.definition_file, spec.tools_field)
-    _wording_changes(old, new, changes)
-    _address_changes(old, new, changes)
-    _text_changes(old, new, changes, spec.definition_file, spec.label.lower())
+    if kind == "plugin":  # everything inside it is a skill or an agent: compare those, each by its own kind's rules
+        _plugin_changes(old, new, changes)
+    else:
+        _script_changes(old, new, changes, spec.definition_file)
+        if spec.definition_file.endswith(".py"):
+            _server_changes(old, new, changes, spec.definition_file)
+        _permission_changes(old, new, changes, spec.definition_file, spec.tools_field)
+        _wording_changes(old, new, changes)
+        _address_changes(old, new, changes)
+        _text_changes(old, new, changes, spec.definition_file, spec.label.lower())
     _check_changes(old, new, changes, kind)
     changes.sort(key=lambda c: _ORDER[c.direction])  # stable: within a group the order above is kept
     return RiskDiff(older, newer, changes)

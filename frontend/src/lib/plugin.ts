@@ -40,6 +40,21 @@ export function pluginRequest(form: PluginForm, picks: ComponentPick[]): PluginR
   };
 }
 
+/**
+ * The request to keep what was previewed: every component pinned to the version the preview used. Without this a newer version of a
+ * skill, imported between the preview and the keep, would be kept without the person ever having seen what it can do.
+ */
+export function keepRequest(request: PluginRequest, used: { kind: string; name: string; version: string }[]): PluginRequest {
+  return {
+    ...request,
+    components: request.components.map((c) => {
+      const found = used.find((u) => u.kind === c.kind && u.name === c.name);
+      const n = found ? Number(found.version.replace(/^v/, "")) : NaN;
+      return Number.isInteger(n) && n >= 1 ? { ...c, version: n } : c;
+    }),
+  };
+}
+
 export function canPreview(form: PluginForm, picks: ComponentPick[]): boolean {
   const name = form.name.trim();
   return name !== "" && nameHint(name) === "" && form.description.trim() !== "" && picks.length > 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canPreview, isPicked, nameHint, pluginRequest, togglePick, type ComponentPick } from "./plugin";
+import { canPreview, isPicked, keepRequest, nameHint, pluginRequest, togglePick, type ComponentPick } from "./plugin";
 
 const skill: ComponentPick = { kind: "skill", name: "demo-skill" };
 const agent: ComponentPick = { kind: "agent", name: "demo-agent" };
@@ -52,5 +52,29 @@ describe("the name hint", () => {
     expect(nameHint("anthropic-x")).toMatch(/reserved/);
     for (const bad of ["Bad", "has space", "-x", "x-", "a--b", "a_b"]) expect(nameHint(bad)).toMatch(/lowercase/);
     expect(nameHint("a".repeat(65))).toMatch(/64/);
+  });
+});
+
+describe("keeping exactly what was previewed", () => {
+  const form = { name: "my-plugin", description: "Two helpers.", author: "" };
+
+  it("pins each component to the version the preview used, so a newer version cannot slip in between", () => {
+    const request = pluginRequest(form, [skill, agent]);
+    const kept = keepRequest(request, [
+      { kind: "skill", name: "demo-skill", version: "v2" },
+      { kind: "agent", name: "demo-agent", version: "v1" },
+    ]);
+    expect(kept.components).toEqual([
+      { kind: "skill", name: "demo-skill", version: 2 },
+      { kind: "agent", name: "demo-agent", version: 1 },
+    ]);
+    expect(kept.name).toBe("my-plugin");
+    expect(request.components).toEqual([{ kind: "skill", name: "demo-skill" }, { kind: "agent", name: "demo-agent" }]); // the request itself is not changed
+  });
+
+  it("leaves a component unpinned when the preview did not name it or gave a version that cannot be read", () => {
+    const request = pluginRequest(form, [skill, agent]);
+    const kept = keepRequest(request, [{ kind: "skill", name: "demo-skill", version: "latest" }]);
+    expect(kept.components).toEqual([{ kind: "skill", name: "demo-skill" }, { kind: "agent", name: "demo-agent" }]);
   });
 });

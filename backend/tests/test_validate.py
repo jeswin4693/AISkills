@@ -7,8 +7,8 @@ import pytest
 
 from conftest import write_files
 from skillforge import cli
-from skillforge.results import FAILED, PASSED, WARNING
-from skillforge.validate import validate_files, validate_skill_dir
+from skillforge.results import FAILED, PASSED, WARNING, CheckResult
+from skillforge.validate import DEFINITION_CHECKS, validate_files, validate_skill_dir
 from skillforge.validate.static import python_capabilities, script_capabilities
 
 SKILL_MD = "---\nname: demo-skill\ndescription: Does a demo job. Use it when testing.\n---\n\n# Demo Skill\n\nRead the file and report.\n"
@@ -268,3 +268,24 @@ def test_cli_validate_exit_codes_and_json(capsys, tmp_path):
 
     assert cli.main(["validate", str(tmp_path / "nope")]) == 2
     assert "Not a directory" in capsys.readouterr().err
+
+
+# ---- kinds: only the definition check varies ---------------------------------------------------------------
+
+
+def test_validating_with_no_kind_is_the_same_as_the_skill_kind():
+    for files in (good(), good(SKILL_dot_md=None, scripts__x_dot_py="def broken(:\n")):
+        assert validate_files(files, folder="demo-skill") == validate_files(files, folder="demo-skill", kind="skill")
+
+
+def test_another_kind_swaps_only_the_definition_check(monkeypatch):
+    monkeypatch.setitem(DEFINITION_CHECKS, "note", lambda files, folder: [CheckResult("thing.txt exists", PASSED)])
+    names = [r.name for r in validate_files(good(), kind="note")]
+    assert "thing.txt exists" in names
+    assert N_SKILL_MD not in names
+    assert N_HIDDEN in names
+
+
+def test_an_unregistered_kind_is_refused():
+    with pytest.raises(ValueError, match="'nope'"):
+        validate_files(good(), kind="nope")

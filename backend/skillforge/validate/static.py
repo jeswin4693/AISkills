@@ -9,7 +9,7 @@ from __future__ import annotations
 import ast
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -386,14 +386,22 @@ def _check_binaries(files: Mapping[str, bytes]) -> CheckResult:
 
 # ---- entry points ------------------------------------------------------------------------------------
 
+# The one check that differs by kind: does the definition file exist and is it well formed. Every other check
+# runs for every kind. A kind that is not listed here has no checks, so it is refused rather than let through.
+DefinitionCheck = Callable[[Mapping[str, bytes], str | None], list[CheckResult]]
+DEFINITION_CHECKS: dict[str, DefinitionCheck] = {"skill": _check_skill_md}
+
 
 def validate_files(
-    files: Mapping[str, bytes], *, folder: str | None = None, problems: list[tuple[str, str]] | None = None
+    files: Mapping[str, bytes], *, folder: str | None = None, problems: list[tuple[str, str]] | None = None, kind: str = "skill"
 ) -> list[CheckResult]:
-    """Every static check, on a folder held in memory."""
+    """Every static check, on a folder held in memory. `kind` picks only the definition check."""
+    definition_check = DEFINITION_CHECKS.get(kind)
+    if definition_check is None:
+        raise ValueError(f"No checks are registered for kind '{kind}'.")
     problems = problems or []
     results: list[CheckResult] = []
-    results += _check_skill_md(files, folder)
+    results += definition_check(files, folder)
     results += _check_paths_and_size(files, problems)
     results.append(_check_hidden_characters(files))
     results += _check_markup_and_wording(files)

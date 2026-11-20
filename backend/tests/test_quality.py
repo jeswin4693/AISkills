@@ -362,3 +362,15 @@ def test_rebuilding_an_old_definition_without_triggers_still_works_and_gives_the
 def test_an_empty_trigger_list_or_blank_phrases_never_produce_a_broken_description(bad):
     assert compose_description("Does x", [bad]) == "Does x."
     assert IOField  # the model module is still the one the tests import from
+
+
+def test_another_kind_can_lead_with_its_own_words_and_the_default_stays_the_same():
+    lead = "Use proactively when the request involves"
+    assert compose_description("Reviews diffs.", ["review a diff", "check a pr"], lead=lead) == (
+        'Reviews diffs. Use proactively when the request involves "review a diff" or "check a pr".'
+    )
+    own = "Reviews diffs. Use proactively when asked about security."
+    assert compose_description(own, ["x"], lead=lead) == own  # one that already says when is left alone
+    assert compose_description("Does x.", ["a"]) == 'Does x. Use when the request involves "a".'  # skills: unchanged
+    cut = compose_description("Does x.", [f"phrase number {i} is quite long" for i in range(5)], limit=90, lead=lead)
+    assert len(cut) <= 90 and cut.startswith("Does x. Use proactively when the request involves")

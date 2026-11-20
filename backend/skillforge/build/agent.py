@@ -20,7 +20,7 @@ from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
 from .architect import criteria_ids
 from .models import Permission, Provenance, RequirementSpec, TestKind
-from .quality import clean_triggers, compose_description, is_none_like
+from .quality import USE_PROACTIVELY, clean_triggers, compose_description, is_none_like
 from .render import oneline, slugify
 from .tools import tools_for
 
@@ -130,7 +130,7 @@ def assemble_agent(draft: AgentDraft, spec: RequirementSpec, provider: LLMProvid
     triggers = clean_triggers(draft.triggers)
     data = {
         **draft.model_dump(), "name": name, "permissions": permissions, "triggers": triggers,
-        "description": compose_description(draft.description, triggers),
+        "description": compose_description(draft.description, triggers, lead=USE_PROACTIVELY),
     }
     return AgentDefinition(
         **data, acceptance_criteria=criteria_ids(spec), tools=tools_for(permissions),

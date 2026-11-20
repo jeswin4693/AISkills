@@ -22,7 +22,7 @@ report.md         every check, what failed, what warns, what did not run
 ```
 
 `AGENT.md` has exactly three front-matter keys, written by a YAML library: `name`, `description` (the model's sentence plus
-"Use when the request involves ..." made by code from the trigger phrases) and `tools`. The body is: who the agent is, the steps
+"Use proactively when the request involves ..." made by code from the trigger phrases, so Claude is more willing to hand the agent work) and `tools`. The body is: who the agent is, the steps
 for when it is called, what it reports back, **Rules** (your constraints word for word, then any the design added), **Done
 when** (your acceptance criteria word for word) and **If something goes wrong** (your failure behaviour word for word).
 
@@ -52,6 +52,11 @@ invalid front matter, a bad name or no instructions, and **warns** on `permissio
 unless you say so, and then the old one is copied to `backups-agent` first.
 
 ## Limits
+
+- **Claude decides whether to hand work to an agent.** The description ("Use proactively when the request involves ...") makes that
+  more likely; it never forces it, and for a small job Claude often does it itself because a helper costs extra tokens. To be sure,
+  name the agent in your message, or add a standing line to your `CLAUDE.md` such as "For a security review of a diff, always use
+  the sec-pr-reviewer agent". (Seen on 2026-11-20: a built agent was not picked automatically until it was named.)
 
 - Nothing has run an agent builder against a **live model** yet; the tests use a mock model. Its prompts and the quality of what
   a real model drafts are unverified.

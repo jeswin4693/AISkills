@@ -118,7 +118,7 @@ def test_the_agent_file_has_exactly_a_name_a_description_and_tools_in_its_front_
     meta = front_matter(text)
     assert list(meta) == ["name", "description", "tools"]  # never permissionMode, model, hooks or mcpServers
     assert meta["name"] == "pr-security-reviewer" and meta["tools"] == "Read, Grep, Glob, Bash"
-    assert meta["description"].endswith('Use when the request involves "review this pull request", "check a diff for security problems", or "audit changed code".')
+    assert meta["description"].endswith('Use proactively when the request involves "review this pull request", "check a diff for security problems", or "audit changed code".')
 
 
 def test_the_name_is_made_safe_and_the_change_is_recorded():

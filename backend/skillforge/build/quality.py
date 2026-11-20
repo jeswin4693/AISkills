@@ -97,9 +97,14 @@ def _quoted_list(phrases: Sequence[str]) -> str:
     return ", ".join(quoted[:-1]) + ", or " + quoted[-1]
 
 
-def compose_description(what: str, triggers: Sequence[str], limit: int = MAX_DESCRIPTION) -> str:
+USE_WHEN = "Use when the request involves"
+USE_PROACTIVELY = "Use proactively when the request involves"  # how an agent is told it may be picked without being named
+
+
+def compose_description(what: str, triggers: Sequence[str], limit: int = MAX_DESCRIPTION, lead: str = USE_WHEN) -> str:
     """'<what it does>. Use when the request involves "<phrase>", "<phrase>", or "<phrase>".' Built by code, so the
     "when" is never forgotten. No colon, so the front matter is plain text that any parser reads the same way.
+    `lead` is the wording before the phrases: an agent says "Use proactively when ..." so Claude is more willing to hand it work.
 
     A description that already says when (an older skill, or a model that ignored the instruction) is left alone."""
     what = " ".join(what.split())
@@ -109,10 +114,10 @@ def compose_description(what: str, triggers: Sequence[str], limit: int = MAX_DES
         return what[:limit].rstrip()
     chosen: list[str] = []
     for t in clean_triggers(triggers):
-        if len(f"{what} Use when the request involves {_quoted_list([*chosen, t])}.") > limit:
+        if len(f"{what} {lead} {_quoted_list([*chosen, t])}.") > limit:
             break
         chosen.append(t)
-    return f"{what} Use when the request involves {_quoted_list(chosen)}." if chosen else what
+    return f"{what} {lead} {_quoted_list(chosen)}." if chosen else what
 
 
 # ---- what the agent is told, from the approved requirement -------------------------------------------

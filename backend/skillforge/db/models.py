@@ -40,6 +40,8 @@ class BuildSession(Base):
     notes: Mapped[list] = mapped_column(JSON, default=list)
     saved_name: Mapped[str] = mapped_column(String(64), default="")  # set once the skill is in the library
     saved_version: Mapped[str] = mapped_column(String(16), default="")
+    kind: Mapped[str] = mapped_column(String(16), default="skill", server_default="skill")  # a key of skillforge.kinds
+    parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # a plugin's child build; no foreign key: SQLite cannot add one
 
 
 class Job(Base):

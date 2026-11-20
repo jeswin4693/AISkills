@@ -83,6 +83,22 @@ def test_the_migration_creates_exactly_what_the_models_describe_and_is_safe_to_r
     db.close()
 
 
+def test_a_database_from_before_kinds_upgrades_and_old_sessions_become_skills(tmp_path):
+    db = Database(f"sqlite:///{(tmp_path / 'k.db').as_posix()}")
+    db.migrate("0002")  # the schema as it was before sessions had a kind
+    with db.session() as s:
+        s.execute(text(
+            "INSERT INTO build_sessions (id, created_at, updated_at, status, description, words, round, with_scripts, "
+            "questions, error, retryable, model_calls, notes, saved_name, saved_version) "
+            f"VALUES ('{'b' * 32}', 't', 't', 'done', 'd', 'd', 1, 0, '[]', '', 0, 0, '[]', '', '')"
+        ))
+    db.migrate()
+    with db.session() as s:
+        row = s.get(BuildSession, "b" * 32)
+        assert row.kind == "skill" and row.parent_id is None
+    db.close()
+
+
 def test_deleting_a_session_removes_its_jobs_because_foreign_keys_are_on(tmp_path):
     db = Database(f"sqlite:///{(tmp_path / 'f.db').as_posix()}")
     db.migrate()

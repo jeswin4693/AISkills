@@ -58,13 +58,13 @@ class Database:
         finally:
             s.close()
 
-    def migrate(self) -> None:
-        """Bring the schema to the latest version. Safe to run on every start."""
+    def migrate(self, revision: str = "head") -> None:
+        """Bring the schema to the latest version (or to `revision`). Safe to run on every start."""
         config = Config()
         config.set_main_option("script_location", str(MIGRATIONS))
         with self.engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.upgrade(config, "head")
+            command.upgrade(config, revision)
 
     def recover_interrupted(self) -> int:
         """After a restart nothing is really running: mark the work that was, so the person can retry it."""

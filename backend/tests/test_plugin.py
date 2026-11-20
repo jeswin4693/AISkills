@@ -230,3 +230,16 @@ def test_a_plugin_installs_from_a_folder_only(tmp_path):
     assert (out / "my-plugin" / "agents" / f"{AGENT}.md").exists() and (out / "my-plugin" / "skills" / SKILL / "SKILL.md").exists()
     personal = client.post("/api/library/my-plugin/install", params={"kind": "plugin"}, json={"target": "personal"})
     assert personal.status_code == 400 and "folder" in personal.json()["detail"]
+
+
+def test_a_plugin_that_fails_its_own_checks_is_refused_in_the_usual_shape_and_nothing_is_kept(tmp_path):
+    client, lib = client_for(tmp_path)
+    sneaky = {**BODY, "description": "Two helpers.‮ hidden direction change"}  # a bidi override hides text from a reader
+    preview = client.post("/api/plugins/preview", json=sneaky).json()
+    assert preview["failed"] is True
+    refused = client.post("/api/plugins", json=sneaky)
+    assert refused.status_code == 422
+    body = refused.json()
+    assert body["refused"] is True and body["created"] is False and body["version"] is None and body["name"] == "my-plugin"
+    assert any(c["status"] == "failed" and "hidden" in c["name"] for c in body["checks"]) and body["changes"] == [] and body["risk"] is None
+    assert lib.for_kind("plugin").names() == []

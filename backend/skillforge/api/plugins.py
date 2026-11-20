@@ -60,7 +60,14 @@ def plugins_router() -> APIRouter:
         """Keep it as the next version in the plugin library (422 when a check fails; nothing is kept then)."""
         plan = _plan(request, body)
         if plan.failed:
-            return JSONResponse({**_view(plan), "refused": True, "created": False}, status_code=422)
+            return JSONResponse(  # the same shape as any other refusal, so one page reads them all
+                {
+                    "refused": True, "created": False, "name": plan.name, "version": None, "previous": None,
+                    "checks": checks_view(plan.checks), "changes": [], "risk": None,
+                    "capabilities": asdict(plan.capabilities), "components": plan.components,
+                },
+                status_code=422,
+            )
         library = request.app.state.library.for_kind("plugin")
         source = SkillSource(plan.files, [], "composed", plan.name, plan.name)
         report = import_source(source, library, note=f"composed from {len(plan.components)} component(s)")

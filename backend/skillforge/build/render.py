@@ -13,6 +13,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from .models import IOField, RequirementSpec, SkillDefinition
 from .quality import is_none_like, requirement_lines
 from .scriptfiles import script_files, script_views
+from .tools import tools_for
 
 TEMPLATES = Path(__file__).parent / "templates"
 MAX_NAME = 40
@@ -62,10 +63,11 @@ def schema_for(title: str, fields: list[IOField]) -> dict[str, Any]:
 
 
 def frontmatter(sdm: SkillDefinition) -> str:
-    body = yaml.safe_dump(
-        {"name": sdm.name, "description": oneline(sdm.description)},
-        sort_keys=False, allow_unicode=True, default_flow_style=False, width=100_000,
-    )
+    meta = {"name": sdm.name, "description": oneline(sdm.description)}
+    tools = tools_for(sdm.permissions)
+    if tools:  # a text-only skill is granted nothing: no line at all
+        meta["allowed-tools"] = " ".join(tools)  # a space separated string, the form library/risk.py reads
+    body = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, default_flow_style=False, width=100_000)
     return f"---\n{body}---\n"
 
 

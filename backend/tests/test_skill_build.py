@@ -7,10 +7,13 @@ import pytest
 import yaml
 
 from skillforge import cli
-from skillforge.build.models import Extraction, IOField, SkillDraft, Slot, Step, SkillTest
+from skillforge.build.models import Assertion, Extraction, IOField, SkillDraft, Slot, Step, SkillTest
 from skillforge.build.pipeline import BuildError, NeedAnswers, build_skill, rebuild
 from skillforge.build.render import schema_for
+from skillforge.build.tools import tools_for
+from skillforge.library.risk import RISKIER, risk_diff
 from skillforge.providers import MockProvider
+from skillforge.validate.static import read_dir
 
 NOW = datetime(2026, 11, 17, 12, 0, 0, tzinfo=timezone.utc)
 FIRST = "A skill that finds duplicate functions in a TypeScript repository and suggests safe refactors."
@@ -368,3 +371,46 @@ def test_a_generated_skill_validates_cleanly_from_disk(tmp_path):
 
     result, _ = run(tmp_path, [round_one(), round_two(), draft()])
     assert all(c.status == "passed" for c in validate_skill_dir(result.out_dir))
+
+
+# ---- allowed-tools: a skill's permissions, written by code -------------------------------------------------
+
+
+def runnable_tests() -> list[SkillTest]:
+    """Test cases a model can run, so a text-only skill raises no quality warning and needs no repair call."""
+    def case(name: str, kind: str) -> SkillTest:
+        return SkillTest(
+            name=name, kind=kind, input_description="d", expected_result="e", covers=["AC1"], run_input="Find duplicates in: a, a",
+            assertions=[Assertion(kind="contains", value="a", why="AC1")],
+        )
+    return [case("finds a pair", "positive"), case("unreadable path", "negative"), case("empty repo", "edge")]
+
+
+def front_matter_of(result) -> dict:
+    return yaml.safe_load((result.out_dir / "SKILL.md").read_text(encoding="utf-8").split("---\n")[1])
+
+
+def test_permissions_become_an_explicit_ordered_tool_list():
+    assert tools_for(["network", "read_files", "read_files"]) == ["Read", "Grep", "Glob", "WebFetch", "WebSearch"]
+    assert tools_for(["run_commands", "write_files"]) == ["Edit", "Write", "Bash"]  # the same list whatever the input order
+    assert tools_for([]) == []
+    with pytest.raises(ValueError, match="root"):
+        tools_for(["root"])
+
+
+def test_a_text_only_skill_has_no_allowed_tools_line(tmp_path):
+    result, _ = run(tmp_path, [round_one(), round_two(), draft(permissions=[], tests=runnable_tests())])
+    assert list(front_matter_of(result)) == ["name", "description"]  # no grant at all
+
+
+def test_a_skill_with_permissions_declares_exactly_the_matching_tools(tmp_path):
+    result, _ = run(tmp_path, [round_one(), round_two(), draft(permissions=["run_commands", "read_files"])])
+    assert front_matter_of(result)["allowed-tools"] == "Read Grep Glob Bash"
+
+
+def test_the_risk_diff_sees_a_skill_gaining_allowed_tools(tmp_path):
+    text_only, _ = run(tmp_path / "a", [round_one(), round_two(), draft(permissions=[], tests=runnable_tests())])
+    networked, _ = run(tmp_path / "b", [round_one(), round_two(), draft(permissions=["network"])])
+    diff = risk_diff(read_dir(text_only.out_dir)[0], read_dir(networked.out_dir)[0], "v1", "v2")
+    tool = [c for c in diff.changes if c.kind == "tool"]
+    assert len(tool) == 1 and tool[0].direction == RISKIER and "WebFetch" in tool[0].detail

@@ -73,8 +73,14 @@ What the builder does about it (`build/quality.py`, no model involved):
   acceptance criteria become a **Done when** checklist the agent is told to check before answering, your failure
   behaviour becomes **If something goes wrong**. A check fails the build if any of those lines is missing.
 - **A worked example** comes from the first positive test case, and its text is chosen by the model.
-- **What is for people stays out of SKILL.md**: the "this skill does" list, limitations and permissions are in
+- **What is for people stays out of SKILL.md**: the "this skill does" list and limitations are in
   `README.md`. A step that cannot fail says `none` and no failure line is written.
+- **Permissions become `allowed-tools`, by code** (`build/tools.py`): `read_files` is `Read Grep Glob`, `write_files` is
+  `Edit Write`, `run_commands` is `Bash`, `network` is `WebFetch WebSearch`, written in that fixed order as one
+  space-separated string in the front matter. **This is a grant**: in Claude Code, `allowed-tools` lets the agent use those
+  tools while the skill is active without asking, and `Bash` is not narrowed to the skill's own scripts. A text-only skill
+  gets no `allowed-tools` line at all. The risk diff already reports a version that gains tools. The exact format was not
+  tried against a live Claude Code; re-check it against the current skill documentation.
 - **Repeats are dropped**: a "do not" you already stated as a rule, and a failure line that only restates an earlier
   one, are not said twice (a heuristic: lines that share about 40% of their content words).
 

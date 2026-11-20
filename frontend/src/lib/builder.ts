@@ -1,4 +1,4 @@
-import type { BuildResultInfo, BuildSession, BuildStatus, JobInfo, Question, RequirementSpec, SessionUsage, TestCase } from "./types";
+import type { BuildResultInfo, BuildSession, BuildStatus, JobInfo, KindInfo, Question, RequirementSpec, SessionUsage, SlotInfo, TestCase } from "./types";
 
 export const SLOT_ORDER = ["goal", "inputs", "outputs", "constraints", "acceptance_criteria", "failure_behavior"] as const;
 
@@ -18,12 +18,31 @@ export interface SpecRow {
   quote: string; // the person's own words behind it, checked by the server
 }
 
+/** The skill's checklist as built in: used until (or unless) the server lists a kind's own slots. */
+export const DEFAULT_SLOTS: SlotInfo[] = SLOT_ORDER.map((key) => ({ key, label: SLOT_LABEL[key], question: "" }));
+
+/** The slots of a kind as the server lists them, or the skill's own when it does not list that kind. */
+export function slotsOf(kinds: KindInfo[] | undefined, kind: string): SlotInfo[] {
+  return kinds?.find((k) => k.key === kind)?.slots ?? DEFAULT_SLOTS;
+}
+
+/** A picker is shown only when there is something to choose between. */
+export function showKindPicker(kinds: KindInfo[] | undefined): boolean {
+  return (kinds?.length ?? 0) > 1;
+}
+
+/** A kind's name for a person, or its key when the server does not list it. */
+export function kindLabel(kinds: KindInfo[] | undefined, key: string): string {
+  return kinds?.find((k) => k.key === key)?.label ?? key;
+}
+
 /** The requirement as rows, each next to the words of the person that support it. */
-export function specRows(spec: RequirementSpec): SpecRow[] {
-  return SLOT_ORDER.map((slot) => {
-    const raw = spec[slot];
-    const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-    return { slot, label: SLOT_LABEL[slot], values, quote: spec.quotes[slot] ?? "" };
+export function specRows(spec: RequirementSpec, slots: SlotInfo[] = DEFAULT_SLOTS): SpecRow[] {
+  const fields = spec as unknown as Record<string, unknown>;
+  return slots.map(({ key, label }) => {
+    const raw = fields[key];
+    const values = Array.isArray(raw) ? raw.map(String) : raw ? [String(raw)] : [];
+    return { slot: key, label, values, quote: spec.quotes[key] ?? "" };
   });
 }
 

@@ -2,13 +2,15 @@
 
 import { useId, useState, type FormEvent } from "react";
 import { api } from "@/lib/api";
-import { SLOT_LABEL, answersToSend, canSendAnswers } from "@/lib/builder";
+import { answersToSend, canSendAnswers, slotsOf } from "@/lib/builder";
 import type { BuildSession } from "@/lib/types";
+import { useKinds } from "@/lib/useKinds";
 import { Alert, Button, Card } from "../ui";
 
 /** Only what the person's words did not cover is asked. The server decides that with a checklist, not the model. */
 export function QuestionsCard({ session, onSession }: { session: BuildSession; onSession: (s: BuildSession) => void }) {
   const base = useId();
+  const slots = slotsOf(useKinds().data, session.kind);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +42,7 @@ export function QuestionsCard({ session, onSession }: { session: BuildSession; o
           return (
             <div key={q.slot}>
               <label htmlFor={id} className="block">
-                <span className="font-medium">{SLOT_LABEL[q.slot] ?? q.slot}</span>
+                <span className="font-medium">{slots.find((s) => s.key === q.slot)?.label ?? q.slot}</span>
                 <span className="block text-sm text-muted">{q.text}</span>
               </label>
               <textarea

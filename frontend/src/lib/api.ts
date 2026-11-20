@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, KindInfo, ProviderStatus,
   RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
@@ -63,8 +63,13 @@ const get = async <T,>(path: string): Promise<T> => json<T>(await send(path));
 const post = async <T,>(path: string, body: unknown): Promise<T> =>
   json<T>(await send(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 
+/** `?kind=` is added only for a kind other than skill, so every skill URL is exactly what it always was. */
+const withKind = (path: string, kind?: string): string =>
+  kind && kind !== "skill" ? `${path}${path.includes("?") ? "&" : "?"}kind=${encodeURIComponent(kind)}` : path;
+
 export const api = {
   health: () => get<Health>("/api/health"),
+  kinds: () => get<KindInfo[]>("/api/kinds"),
   sandbox: () => get<SandboxStatus>("/api/sandbox"),
   provider: () => get<ProviderStatus>("/api/provider"),
 
@@ -73,39 +78,44 @@ export const api = {
   login: (token: string) => post<{ authenticated: boolean }>("/api/auth/login", { token }),
   logout: () => post<{ authenticated: boolean }>("/api/auth/logout", {}),
 
-  listSkills: () => get<SkillSummary[]>("/api/library"),
-  versions: (name: string) => get<{ name: string; versions: VersionInfo[] }>(`/api/library/${encodeURIComponent(name)}`),
-  diff: (name: string, from?: number, to?: number) => {
+  listSkills: (kind?: string) => get<SkillSummary[]>(withKind("/api/library", kind)),
+  versions: (name: string, kind?: string) =>
+    get<{ name: string; versions: VersionInfo[] }>(withKind(`/api/library/${encodeURIComponent(name)}`, kind)),
+  diff: (name: string, from?: number, to?: number, kind?: string) => {
     const q = new URLSearchParams();
     if (from !== undefined) q.set("frm", String(from));
     if (to !== undefined) q.set("to", String(to));
+    if (kind && kind !== "skill") q.set("kind", kind);
     const qs = q.toString();
     return get<DiffResult>(`/api/library/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ""}`);
   },
-  file: (name: string, version: number, path: string) =>
-    get<FileText>(`/api/library/${encodeURIComponent(name)}/versions/${version}/files/${encodePath(path)}`),
+  file: (name: string, version: number, path: string, kind?: string) =>
+    get<FileText>(withKind(`/api/library/${encodeURIComponent(name)}/versions/${version}/files/${encodePath(path)}`, kind)),
 
   /** Today's static checks on stored versions (every skill, or one). Reads only: nothing is changed or run. */
-  rescan: (name?: string) => get<RescanResult>(`/api/rescan${name ? `?name=${encodeURIComponent(name)}` : ""}`),
+  rescan: (name?: string, kind?: string) => get<RescanResult>(withKind(`/api/rescan${name ? `?name=${encodeURIComponent(name)}` : ""}`, kind)),
 
   /** 200 and 422 both carry a report (kept, or refused with the checks that failed); anything else is an error. */
-  async importZip(file: File, opts: { note?: string; testScripts?: boolean } = {}): Promise<ImportResult> {
+  async importZip(file: File, opts: { note?: string; testScripts?: boolean; kind?: string } = {}): Promise<ImportResult> {
     const q = new URLSearchParams({ filename: file.name });
     if (opts.note?.trim()) q.set("note", opts.note.trim());
     if (opts.testScripts) q.set("test_scripts", "true");
+    if (opts.kind && opts.kind !== "skill") q.set("kind", opts.kind);
     const res = await send(`/api/library/import?${q}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
     return json<ImportResult>(res, [422]);
   },
 
-  rollback: (name: string, to: number) =>
-    post<{ created: boolean; version: VersionInfo }>(`/api/library/${encodeURIComponent(name)}/rollback`, { to }),
+  rollback: (name: string, to: number, kind?: string) =>
+    post<{ created: boolean; version: VersionInfo }>(withKind(`/api/library/${encodeURIComponent(name)}/rollback`, kind), { to }),
 
-  install: (name: string, req: InstallRequest) => post<InstallResult>(`/api/library/${encodeURIComponent(name)}/install`, req),
+  install: (name: string, req: InstallRequest, kind?: string) =>
+    post<InstallResult>(withKind(`/api/library/${encodeURIComponent(name)}/install`, kind), req),
 
   // ---- the builder: a session you poll; each action returns the session as it is right after the action ----
   builds: () => get<BuildSummary[]>("/api/builds"),
   build: (id: string) => get<BuildSession>(`/api/builds/${encodeURIComponent(id)}`),
-  startBuild: (description: string, withScripts: boolean) => post<BuildSession>("/api/builds", { description, with_scripts: withScripts }),
+  startBuild: (description: string, withScripts: boolean, kind = "skill") =>
+    post<BuildSession>("/api/builds", kind === "skill" ? { description, with_scripts: withScripts } : { description, with_scripts: withScripts, kind }),
   answer: (id: string, answers: Record<string, string>) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/answers`, { answers }),
   approve: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/approve`, {}),
   retry: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/retry`, {}),
@@ -125,8 +135,9 @@ export const api = {
   },
 
   /** The zip as a Blob, with the file name the API suggested. */
-  async exportZip(name: string, version: number, withoutSpec: boolean): Promise<{ blob: Blob; filename: string }> {
+  async exportZip(name: string, version: number, withoutSpec: boolean, kind?: string): Promise<{ blob: Blob; filename: string }> {
     const q = new URLSearchParams({ version: String(version), without_spec: String(withoutSpec) });
+    if (kind && kind !== "skill") q.set("kind", kind);
     const res = await send(`/api/library/${encodeURIComponent(name)}/export?${q}`);
     if (!res.ok) {
       let body: unknown = null;

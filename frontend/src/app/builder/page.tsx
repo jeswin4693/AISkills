@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { EXAMPLES, statusInfo } from "@/lib/builder";
+import { EXAMPLES, kindLabel, showKindPicker, statusInfo } from "@/lib/builder";
 import { relativeTime } from "@/lib/format";
 import { notifyStatusChanged, useAsync } from "@/lib/useAsync";
+import { useKinds } from "@/lib/useKinds";
 
 function ModelBanner({ onCheck }: { onCheck: () => void }) {
   const provider = useAsync(api.provider, "provider-banner");
@@ -38,9 +39,15 @@ function ModelBanner({ onCheck }: { onCheck: () => void }) {
 export default function BuilderPage() {
   const router = useRouter();
   const textId = useId();
+  const kindGroup = useId();
   const provider = useAsync(api.provider, "provider-form");
   const sandbox = useAsync(api.sandbox, "sandbox-form");
   const recent = useAsync(api.builds, "builds");
+  const kinds = useKinds();
+  const [kind, setKind] = useState("skill");
+  const picker = showKindPicker(kinds.data); // with one kind there is nothing to choose, and the page is as it always was
+  const noun = kindLabel(kinds.data, kind).toLowerCase();
+  const isSkill = kind === "skill";
   const [description, setDescription] = useState("");
   const [withScripts, setWithScripts] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -54,7 +61,7 @@ export default function BuilderPage() {
     setBusy(true);
     setError(null);
     try {
-      const s = await api.startBuild(description, withScripts);
+      const s = await api.startBuild(description, isSkill && withScripts, kind);
       router.push(`/builder/${s.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -65,16 +72,29 @@ export default function BuilderPage() {
   return (
     <>
       <PageHeader
-        title="Build a skill"
-        subtitle="Say in your own words what the skill should do. I will ask only about what is missing, show you the requirement to approve, and only then build it."
+        title={`Build a ${noun}`}
+        subtitle={`Say in your own words what the ${noun} should do. I will ask only about what is missing, show you the requirement to approve, and only then build it.`}
       />
       <div className="space-y-6">
         <ModelBanner onCheck={provider.reload} />
         <Card className="p-5">
           <form onSubmit={start} className="space-y-4">
+            {picker && (
+              <fieldset>
+                <legend className="font-semibold">What do you want to build?</legend>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {(kinds.data ?? []).map((k) => (
+                    <label key={k.key} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm">
+                      <input type="radio" name={kindGroup} value={k.key} checked={kind === k.key} onChange={() => setKind(k.key)} />
+                      {k.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
             <div>
               <label htmlFor={textId} className="font-semibold">
-                What should the skill do?
+                What should the {noun} do?
               </label>
               <textarea
                 id={textId}
@@ -82,24 +102,31 @@ export default function BuilderPage() {
                 maxLength={10000}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="For example: A skill that counts TODO and FIXME comments in a folder and reports them for each file."
+                placeholder={
+                  isSkill
+                    ? "For example: A skill that counts TODO and FIXME comments in a folder and reports them for each file."
+                    : `Describe, in your own words, what the ${noun} should do.`
+                }
                 className="mt-1.5 block w-full rounded-md border border-border bg-bg px-3 py-2"
               />
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-sm">
-                <span className="text-muted">Try:</span>
-                {EXAMPLES.map((ex) => (
-                  <button
-                    key={ex}
-                    type="button"
-                    onClick={() => setDescription(ex)}
-                    className="rounded-full border border-border px-2.5 py-0.5 text-left text-xs hover:bg-surface-2"
-                    title={ex}
-                  >
-                    {ex.length > 52 ? ex.slice(0, 50) + "…" : ex}
-                  </button>
-                ))}
-              </div>
+              {isSkill && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-sm">
+                  <span className="text-muted">Try:</span>
+                  {EXAMPLES.map((ex) => (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => setDescription(ex)}
+                      className="rounded-full border border-border px-2.5 py-0.5 text-left text-xs hover:bg-surface-2"
+                      title={ex}
+                    >
+                      {ex.length > 52 ? ex.slice(0, 50) + "…" : ex}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+            {isSkill && (
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" checked={withScripts} onChange={(e) => setWithScripts(e.target.checked)} className="mt-1" />
               <span>
@@ -111,6 +138,7 @@ export default function BuilderPage() {
                 </span>
               </span>
             </label>
+            )}
             {error && (
               <Alert tone="bad" title="It could not be started">
                 {error}
@@ -145,6 +173,7 @@ export default function BuilderPage() {
                       <Link href={`/builder/${b.id}`} className="block px-4 py-3 hover:bg-surface-2 focus-visible:bg-surface-2">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                           <span className="min-w-0 flex-1 truncate font-medium">{b.skill || b.description}</span>
+                          {picker && <Badge tone="neutral">{kindLabel(kinds.data, b.kind)}</Badge>}
                           <Badge tone={s.tone}>{s.label}</Badge>
                           {b.draft && <Badge tone="warn">DRAFT</Badge>}
                           {b.saved && <Badge tone="ok">saved {b.saved.version}</Badge>}

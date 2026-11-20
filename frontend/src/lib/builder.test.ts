@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
-  activityText, answersToSend, canSendAnswers, elapsedSeconds, parseTests, progressSteps, specRows, statusInfo, tokenLine, traceability,
-  usageText,
+  DEFAULT_SLOTS, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
+  specRows, statusInfo, tokenLine, traceability, usageText,
 } from "./builder";
-import type { RequirementSpec, TestCase } from "./types";
+import type { KindInfo, RequirementSpec, TestCase } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,6 +26,44 @@ describe("the requirement as rows", () => {
 
   it("gives an empty list for an empty text item", () => {
     expect(specRows({ ...spec, failure_behavior: "" })[5].values).toEqual([]);
+  });
+});
+
+describe("kinds", () => {
+  const skill: KindInfo = {
+    key: "skill", label: "Skill", install_targets: ["personal", "folder"],
+    slots: DEFAULT_SLOTS.map((s) => ({ ...s, question: "?" })),
+  };
+  const agent: KindInfo = {
+    key: "agent", label: "Agent", install_targets: ["personal"],
+    slots: [{ key: "goal", label: "What the agent is for", question: "?" }, { key: "constraints", label: "What it must never do", question: "?" }],
+  };
+
+  it("shows the picker only when there is something to choose", () => {
+    expect(showKindPicker(undefined)).toBe(false);
+    expect(showKindPicker([])).toBe(false);
+    expect(showKindPicker([skill])).toBe(false);
+    expect(showKindPicker([skill, agent])).toBe(true);
+  });
+
+  it("builds the requirement rows from the slots the server lists for the kind", () => {
+    const rows = specRows(spec, agent.slots);
+    expect(rows.map((r) => r.slot)).toEqual(["goal", "constraints"]);
+    expect(rows[0]).toMatchObject({ label: "What the agent is for", values: ["Count TODO comments"], quote: "counts TODO" });
+    expect(rows[1].values).toEqual(["never edit files"]);
+  });
+
+  it("falls back to the built-in skill rows when the server does not list the kind", () => {
+    expect(slotsOf(undefined, "skill")).toEqual(DEFAULT_SLOTS);
+    expect(slotsOf([agent], "skill")).toEqual(DEFAULT_SLOTS);
+    expect(slotsOf([skill, agent], "agent")).toEqual(agent.slots);
+    expect(specRows(spec, slotsOf([agent], "skill"))).toEqual(specRows(spec));
+  });
+
+  it("names a kind by its label, or by its key when the server does not list it", () => {
+    expect(kindLabel([skill, agent], "agent")).toBe("Agent");
+    expect(kindLabel(undefined, "skill")).toBe("skill");
+    expect(kindLabel([skill], "gone")).toBe("gone");
   });
 });
 
@@ -121,6 +159,55 @@ describe("the builder's api calls", () => {
     vi.stubGlobal("fetch", f);
     await api.startBuild("A skill that does something", true);
     expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ description: "A skill that does something", with_scripts: true });
+  });
+
+  it("sends a kind other than skill, and leaves it out for a skill so that request is unchanged", async () => {
+    const f = vi.fn().mockImplementation(() => Promise.resolve(reply(201, { id: "a".repeat(32) })));
+    vi.stubGlobal("fetch", f);
+    await api.startBuild("An agent that reviews code", false, "agent");
+    await api.startBuild("A skill that does something", false);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ description: "An agent that reviews code", with_scripts: false, kind: "agent" });
+    expect(JSON.parse(f.mock.calls[1][1].body)).toEqual({ description: "A skill that does something", with_scripts: false });
+  });
+
+  it("asks which kinds there are", async () => {
+    const f = vi.fn().mockResolvedValue(reply(200, []));
+    vi.stubGlobal("fetch", f);
+    await api.kinds();
+    expect(String(f.mock.calls[0][0])).toMatch(/\/api\/kinds$/);
+  });
+
+  it("adds ?kind= to the library calls only for a kind other than skill, so every skill URL is unchanged", async () => {
+    const f = vi.fn().mockImplementation(() => Promise.resolve(reply(200, {})));
+    vi.stubGlobal("fetch", f);
+    await api.listSkills();
+    await api.listSkills("skill");
+    await api.listSkills("agent");
+    await api.versions("demo", "agent");
+    await api.diff("demo", 1, 2, "agent");
+    await api.file("demo", 1, "a/b.txt", "agent");
+    await api.rescan("demo", "agent");
+    await api.rescan(undefined, "agent");
+    await api.rollback("demo", 2, "agent");
+    await api.install("demo", { target: "personal" }, "agent");
+    await api.importZip(new File(["x"], "a.zip"), { kind: "agent" });
+    await api.importZip(new File(["x"], "a.zip"));
+    const urls = f.mock.calls.map((c) => String(c[0]).replace(/^https?:\/\/[^/]+/, ""));
+    expect(urls).toEqual([
+      "/api/library", "/api/library", "/api/library?kind=agent", "/api/library/demo?kind=agent",
+      "/api/library/demo/diff?frm=1&to=2&kind=agent", "/api/library/demo/versions/1/files/a/b.txt?kind=agent",
+      "/api/rescan?name=demo&kind=agent", "/api/rescan?kind=agent", "/api/library/demo/rollback?kind=agent",
+      "/api/library/demo/install?kind=agent", "/api/library/import?filename=a.zip&kind=agent", "/api/library/import?filename=a.zip",
+    ]);
+  });
+
+  it("adds the kind to an export too", async () => {
+    const f = vi.fn().mockImplementation(() => Promise.resolve(new Response("zip", { status: 200, headers: { "Content-Disposition": 'attachment; filename="a-v1.zip"' } })));
+    vi.stubGlobal("fetch", f);
+    await api.exportZip("demo", 1, false, "agent");
+    await api.exportZip("demo", 1, false);
+    expect(String(f.mock.calls[0][0])).toContain("kind=agent");
+    expect(String(f.mock.calls[1][0])).not.toContain("kind=");
   });
 
   it("returns a refused save as a result, but raises for a draft that was not accepted", async () => {

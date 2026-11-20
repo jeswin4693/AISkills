@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { specRows } from "@/lib/builder";
+import { slotsOf, specRows } from "@/lib/builder";
 import type { BuildSession } from "@/lib/types";
+import { useKinds } from "@/lib/useKinds";
 import { Alert, Button, ButtonLink, Card } from "../ui";
 
 /**
@@ -13,7 +14,8 @@ import { Alert, Button, ButtonLink, Card } from "../ui";
 export function RequirementCard({ session, onSession }: { session: BuildSession; onSession: (s: BuildSession) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const rows = session.spec ? specRows(session.spec) : [];
+  const kinds = useKinds();
+  const rows = session.spec ? specRows(session.spec, slotsOf(kinds.data, session.kind)) : [];
 
   async function approve() {
     setBusy(true);

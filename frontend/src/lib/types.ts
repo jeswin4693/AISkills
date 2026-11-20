@@ -202,8 +202,24 @@ export interface SessionUsage {
   models: string[];
 }
 
+/** One answer a kind's requirement must have, as the server lists it. */
+export interface SlotInfo {
+  key: string;
+  label: string;
+  question: string;
+}
+
+/** A kind of thing the app builds (today a skill), as GET /api/kinds lists it. */
+export interface KindInfo {
+  key: string;
+  label: string;
+  install_targets: string[];
+  slots: SlotInfo[];
+}
+
 export interface BuildSession {
   id: string;
+  kind: string;
   status: BuildStatus;
   description: string;
   round: number;
@@ -226,6 +242,7 @@ export interface BuildSession {
 
 export interface BuildSummary {
   id: string;
+  kind: string;
   status: BuildStatus;
   description: string;
   created_at: string;

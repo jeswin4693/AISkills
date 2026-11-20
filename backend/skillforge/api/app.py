@@ -165,7 +165,7 @@ def create_app(
         """What this app builds: each kind's checklist (labels and questions) and where it can be installed."""
         return [
             {"key": k.key, "label": k.label, "definition_file": k.definition_file, "install_targets": list(k.install_targets),
-             "personal_label": k.personal_label, "installs_as_file": bool(k.install_file),
+             "personal_label": k.personal_label, "installs_as_file": bool(k.install_file), "conversational": k.conversational,
              "slots": [asdict(s) for s in k.slots]}
             for k in all_kinds()
         ]
@@ -245,6 +245,9 @@ def create_app(
     def install(name: str, body: InstallBody, lib: Library = Depends(library_for)) -> dict:
         if hosted is not None:  # this would write into a folder on the server, which is not where anyone's agent reads skills
             raise HTTPException(403, "Installing into a folder on the server is turned off in the hosted version. Use Export to download the zip, and install it on your own computer.")
+        kind = get_kind(lib.kind)
+        if body.target not in kind.install_targets:
+            raise HTTPException(400, f"{kind.label}s can be installed to: {', '.join(kind.install_targets)}.")
         if body.target == "personal":
             folder = get_kind(lib.kind).personal_dir()
         elif body.folder and Path(body.folder).is_absolute():

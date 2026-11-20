@@ -382,3 +382,16 @@ def test_no_endpoint_is_about_keys_or_settings(client):
 def test_the_serve_command_exists_and_defaults_to_port_8000():
     assert cli._parser().parse_args(["serve"]).port == 8000
     assert cli._parser().parse_args(["serve", "--port", "9100"]).port == 9100
+
+
+def test_kinds_say_whether_they_are_built_from_a_description(client):
+    assert {k["key"]: k["conversational"] for k in client.get("/api/kinds").json()} == {"skill": True, "agent": True}
+
+
+def test_installing_to_a_target_the_kind_does_not_offer_is_a_plain_400(client, fake_kind, tmp_path, monkeypatch):
+    monkeypatch.setattr(type(fake_kind), "install_targets", ("folder",))
+    upload(client, thing_zip(), path="/api/library/import?kind=note")
+    r = client.post("/api/library/my-thing/install", params={"kind": "note"}, json={"target": "personal"})
+    assert r.status_code == 400 and "folder" in r.json()["detail"] and "Note" in r.json()["detail"]
+    ok = client.post("/api/library/my-thing/install", params={"kind": "note"}, json={"target": "folder", "folder": str(tmp_path / "out")})
+    assert ok.status_code == 200 and (tmp_path / "out" / "my-thing" / "thing.txt").exists()

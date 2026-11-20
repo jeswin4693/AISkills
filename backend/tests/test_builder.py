@@ -498,3 +498,14 @@ def test_a_build_started_over_http_with_a_kind_runs_that_kind(make, fake_kind):
     started = env.start("Make me a little thing that says hello", kind="note")
     assert started["kind"] == "note" and started["status"] == "awaiting_approval"
     assert [call[0] for call in fake_kind.calls] == ["understand"]
+
+
+def test_a_kind_that_is_composed_and_not_described_cannot_start_a_conversation(make, fake_kind, monkeypatch):
+    monkeypatch.setattr(type(fake_kind), "conversational", False)
+    env = make([])
+    with pytest.raises(BadRequest, match="not built from a description"):
+        env.builder.start("Make me a thing out of what I already have", kind="note")
+    r = env.client.post("/api/builds", json={"description": "Make me a thing out of what I already have", "kind": "note"})
+    assert r.status_code == 400 and "composed from what is already in the library" in r.json()["detail"]
+    with env.db.session() as s:
+        assert s.execute(select(BuildSession)).scalars().all() == []

@@ -157,7 +157,9 @@ class Builder:
 
     def start(self, description: str, with_scripts: bool = False, kind: str = "skill") -> dict:
         try:
-            get_kind(kind)
+            spec = get_kind(kind)
+            if not spec.conversational:
+                raise BuildError(f"{spec.label}s are not built from a description: they are composed from what is already in the library.")
             words = check_description(description)
         except (UnknownKind, BuildError) as exc:
             raise BadRequest(str(exc)) from exc

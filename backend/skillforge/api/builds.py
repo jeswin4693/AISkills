@@ -18,6 +18,7 @@ MAX_ANSWER = 5_000
 class StartBody(BaseModel):
     description: str = Field(max_length=MAX_DESCRIPTION)
     with_scripts: bool = False
+    kind: str = Field(default="skill", max_length=64)  # a registered kind; the builder refuses any other
 
 
 class AnswersBody(BaseModel):
@@ -75,7 +76,7 @@ def builds_router() -> APIRouter:
     @r.post("/builds", status_code=201)
     def start(body: StartBody, request: Request) -> dict:
         """Begin a session. The first reading of the words runs in the background: poll the session."""
-        return builder(request).start(body.description, body.with_scripts)
+        return builder(request).start(body.description, body.with_scripts, body.kind)
 
     @r.get("/builds/{sid}")
     def get(sid: str, request: Request) -> dict:

@@ -8,11 +8,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from test_kinds import fake_kind  # noqa: F401  (a pytest fixture: it registers a second kind for one test)
 from test_library import GOOD, NAME, hostile
 
 from skillforge import cli
 from skillforge.api import create_app
 from skillforge.api import app as api_module
+from skillforge.build.requirements import QUESTIONS
 from skillforge.library import Library
 from skillforge.sandbox import SandboxStatus
 
@@ -43,6 +45,68 @@ def client(lib) -> TestClient:
 
 def upload(client: TestClient, data: bytes, path: str = "/api/library/import", headers: dict | None = None, **kw):
     return client.post(path, content=data, headers={"Content-Type": "application/zip", **(headers or {})}, **kw)
+
+
+def thing_zip() -> bytes:
+    """A folder of the fake kind (see test_kinds.py): a thing.txt whose first line is the name. The files sit at the top of
+    the zip, because a zip's single top folder is only unwrapped when it holds a SKILL.md (library/package.py)."""
+    return zbytes({"thing.txt": "my-thing\nhello\n"})
+
+
+# ---- kinds -------------------------------------------------------------------------------------------
+
+
+def test_kinds_lists_the_skill_kind_with_its_slots(client):
+    kinds = client.get("/api/kinds").json()
+    assert [k["key"] for k in kinds] == ["skill"]
+    assert kinds[0]["label"] == "Skill" and kinds[0]["install_targets"] == ["personal", "folder"]
+    assert kinds[0]["slots"][0] == {"key": "goal", "label": "Goal", "question": QUESTIONS["goal"]}
+
+
+def test_the_library_routes_default_to_skills_and_take_a_kind(client, fake_kind):
+    r = upload(client, thing_zip(), path="/api/library/import?kind=note")
+    assert r.status_code == 200, r.text
+    assert [s["name"] for s in client.get("/api/library", params={"kind": "note"}).json()] == ["my-thing"]
+    assert client.get("/api/library").json() == []  # no kind means skills
+    assert client.get("/api/library/my-thing", params={"kind": "note"}).status_code == 200
+    assert client.get("/api/library/my-thing").status_code == 404
+    assert upload(client, skill_zip(), path="/api/library/import?kind=note").status_code == 422  # a skill is not a note
+
+
+def test_validate_takes_a_kind(client, fake_kind):
+    assert upload(client, thing_zip(), path="/api/validate?kind=note").json()["failed"] == 0
+    assert upload(client, skill_zip(), path="/api/validate?kind=note").json()["failed"] >= 1
+
+
+def test_installing_for_me_goes_where_the_kind_says(client, fake_kind, tmp_path, monkeypatch):
+    monkeypatch.setattr(type(fake_kind), "personal_dir", lambda self: tmp_path / "mine")
+    upload(client, thing_zip(), path="/api/library/import?kind=note")
+    r = client.post("/api/library/my-thing/install", params={"kind": "note"}, json={"target": "personal"})
+    assert r.status_code == 200, r.text
+    assert (tmp_path / "mine" / "my-thing" / "thing.txt").exists()
+
+
+ZIP_HEADERS = {"Content-Type": "application/zip"}
+
+
+@pytest.mark.parametrize("method,path,kwargs", [
+    ("get", "/api/library", {}),
+    ("get", "/api/library/x", {}),
+    ("get", "/api/library/x/diff", {}),
+    ("get", "/api/rescan", {}),
+    ("get", "/api/library/x/versions/1/files/a", {}),
+    ("get", "/api/library/x/export", {}),
+    ("post", "/api/library/import", {"content": skill_zip(), "headers": ZIP_HEADERS}),
+    ("post", "/api/validate", {"content": skill_zip(), "headers": ZIP_HEADERS}),
+    ("post", "/api/library/x/rollback", {"json": {"to": 1}}),
+    ("post", "/api/library/x/install", {"json": {"target": "personal"}}),
+])
+@pytest.mark.parametrize("bad", ["../x", "", "a/b"])
+def test_an_unknown_kind_is_a_400_that_names_the_kinds_on_every_library_route(client, tmp_path, method, path, kwargs, bad):
+    before = sorted(p.name for p in tmp_path.iterdir())
+    r = getattr(client, method)(path, params={"kind": bad}, **kwargs)
+    assert r.status_code == 400 and "skill" in r.json()["detail"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == before  # nothing was made on disk for it
 
 
 # ---- keeping the local API local ---------------------------------------------------------------------

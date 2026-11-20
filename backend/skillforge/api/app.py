@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from .. import __version__
 from ..builder import Builder, BuilderError, SessionNotFound, WrongState
 from ..graph import languages
+from ..kinds import UnknownKind, all_kinds, get_kind
 from ..library import (
     Conflict, Library, LibraryError, NotFound, check_source, compare_with_risk, import_source, install_skill, package_skill,
     read_zip_bytes, rescan, rollback,
@@ -64,8 +65,18 @@ async def read_upload(request: Request) -> bytes:
     return bytes(body)
 
 
-def _library(request: Request) -> Library:
-    return request.app.state.library
+def kind_of(kind: str = "skill") -> str:
+    """The kind named in `?kind=` (skills when it is left out). One that is not registered is a 400 naming the kinds there are."""
+    try:
+        get_kind(kind)
+    except UnknownKind as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return kind
+
+
+def library_for(request: Request, kind: str = Depends(kind_of)) -> Library:
+    """The library of that kind, next to the skill library."""
+    return request.app.state.library.for_kind(kind)
 
 
 def _label(request: Request) -> str:
@@ -149,16 +160,24 @@ def create_app(
             for n in names
         ]
 
+    @api.get("/kinds")
+    def kinds() -> list[dict]:
+        """What this app builds: each kind's checklist (labels and questions) and where it can be installed."""
+        return [
+            {"key": k.key, "label": k.label, "install_targets": list(k.install_targets), "slots": [asdict(s) for s in k.slots]}
+            for k in all_kinds()
+        ]
+
     @api.post("/validate")
-    async def validate(request: Request) -> dict:
+    async def validate(request: Request, kind: str = Depends(kind_of)) -> dict:
         """Check an uploaded .zip. Nothing is stored and nothing is run."""
         src = read_zip_bytes(await read_upload(request), _label(request))
-        checks = check_source(src)
+        checks = check_source(src, kind)
         return {"checks": _checks(checks), "failed": sum(c.status == "failed" for c in checks), "files": len(src.files)}
 
     @api.get("/library")
-    def list_skills(request: Request) -> list[dict]:
-        lib, out = _library(request), []
+    def list_skills(lib: Library = Depends(library_for)) -> list[dict]:
+        out = []
         for name in lib.names():
             try:
                 versions = lib.versions(name)
@@ -168,36 +187,38 @@ def create_app(
         return out
 
     @api.post("/library/import")
-    async def import_skill_upload(request: Request, note: str = "", test_scripts: bool = False) -> JSONResponse:
+    async def import_skill_upload(
+        request: Request, note: str = "", test_scripts: bool = False, lib: Library = Depends(library_for),
+    ) -> JSONResponse:
         """Check an uploaded .zip and keep it as the next version. 422 when a check fails; nothing is stored then.
 
         With test_scripts the skill's own cases run in the sandbox and this request waits for them."""
         src = read_zip_bytes(await read_upload(request), _label(request))
-        report = await run_in_threadpool(import_source, src, _library(request), test_scripts=test_scripts, note=note[:200])
+        report = await run_in_threadpool(import_source, src, lib, test_scripts=test_scripts, note=note[:200])
         return JSONResponse(_import_report(report), status_code=422 if report.refused else 200)
 
     @api.get("/library/{name}")
-    def versions(name: str, request: Request) -> dict:
-        found = _library(request).versions(name)
+    def versions(name: str, lib: Library = Depends(library_for)) -> dict:
+        found = lib.versions(name)
         if not found:
             raise NotFound(f"There is no skill named '{name}' in the library.")
         return {"name": name, "versions": [_version(v) for v in reversed(found)]}
 
     @api.get("/library/{name}/diff")
-    def diff(name: str, request: Request, frm: int | None = None, to: int | None = None) -> dict:
-        c = compare_with_risk(_library(request), name, frm, to)
+    def diff(name: str, frm: int | None = None, to: int | None = None, lib: Library = Depends(library_for)) -> dict:
+        c = compare_with_risk(lib, name, frm, to)
         return {"name": name, "from": c.older.tag, "to": c.newer.tag, "changes": [asdict(x) for x in c.changes], "risk": _risk(c.risk)}
 
     @api.get("/rescan")
-    def rescan_library(request: Request, name: str | None = None, version: int | None = None) -> dict:
+    def rescan_library(name: str | None = None, version: int | None = None, lib: Library = Depends(library_for)) -> dict:
         """Today's static checks on versions already stored, and which of them are now worse. Reads only; nothing is
         changed or run. Without `name` it covers every skill."""
-        return _rescan(rescan(_library(request), name, version))
+        return _rescan(rescan(lib, name, version))
 
     @api.get("/library/{name}/versions/{number}/files/{path:path}")
-    def read_file(name: str, number: int, path: str, request: Request) -> dict:
+    def read_file(name: str, number: int, path: str, lib: Library = Depends(library_for)) -> dict:
         """One stored file, after every file of that version was checked against its manifest."""
-        v, files = _library(request).read(name, number)
+        v, files = lib.read(name, number)
         if path not in files:  # a lookup in what was read, never a path on the disk
             raise NotFound(f"{name} {v.tag} has no file '{path}'.")
         try:
@@ -206,29 +227,29 @@ def create_app(
             return {"path": path, "binary": True, "text": ""}
 
     @api.post("/library/{name}/rollback")
-    def roll_back(name: str, body: RollbackBody, request: Request) -> dict:
-        version, created = rollback(_library(request), name, body.to)
+    def roll_back(name: str, body: RollbackBody, lib: Library = Depends(library_for)) -> dict:
+        version, created = rollback(lib, name, body.to)
         return {"created": created, "version": _version(version)}
 
     @api.get("/library/{name}/export")
-    def export(name: str, request: Request, version: int | None = None, without_spec: bool = False) -> Response:
-        pkg = package_skill(_library(request), name, version, without_spec=without_spec)
+    def export(name: str, version: int | None = None, without_spec: bool = False, lib: Library = Depends(library_for)) -> Response:
+        pkg = package_skill(lib, name, version, without_spec=without_spec)
         return Response(
             pkg.data, media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{pkg.filename}"', "X-Skill-Has-Scripts": str(pkg.has_scripts).lower()},
         )
 
     @api.post("/library/{name}/install")
-    def install(name: str, body: InstallBody, request: Request) -> dict:
+    def install(name: str, body: InstallBody, lib: Library = Depends(library_for)) -> dict:
         if hosted is not None:  # this would write into a folder on the server, which is not where anyone's agent reads skills
             raise HTTPException(403, "Installing into a folder on the server is turned off in the hosted version. Use Export to download the zip, and install it on your own computer.")
         if body.target == "personal":
-            folder = Path.home() / ".claude" / "skills"
+            folder = get_kind(lib.kind).personal_dir()
         elif body.folder and Path(body.folder).is_absolute():
             folder = Path(body.folder)
         else:
             raise HTTPException(400, "For target 'folder', give folder as an absolute path.")
-        r = install_skill(_library(request), name, body.version, folder, force=body.force)
+        r = install_skill(lib, name, body.version, folder, force=body.force)
         return {
             "path": str(r.path), "version": _version(r.version), "backup": str(r.backup) if r.backup else None,
             "has_scripts": r.has_scripts,

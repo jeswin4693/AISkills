@@ -478,3 +478,23 @@ def test_a_session_whose_kind_is_no_longer_registered_can_be_read_listed_and_dis
     env.builder.discard(waiting)
     env.builder.discard(finished_one)
     assert env.builder.list() == []
+
+
+def test_starting_a_build_over_http_with_an_unknown_kind_is_a_400(make):
+    env = make([])
+    r = env.client.post("/api/builds", json={"description": FIRST, "kind": "nope"})
+    assert r.status_code == 400 and "skill" in r.json()["detail"]
+    assert env.client.get("/api/builds").json() == []
+
+
+def test_the_default_kind_is_skill_and_the_session_says_so(make):
+    env = make([round_two()])
+    assert env.start(FULL)["kind"] == "skill"
+    assert env.client.get("/api/builds").json()[0]["kind"] == "skill"
+
+
+def test_a_build_started_over_http_with_a_kind_runs_that_kind(make, fake_kind):
+    env = make([])
+    started = env.start("Make me a little thing that says hello", kind="note")
+    assert started["kind"] == "note" and started["status"] == "awaiting_approval"
+    assert [call[0] for call in fake_kind.calls] == ["understand"]

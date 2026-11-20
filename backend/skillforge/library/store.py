@@ -22,10 +22,9 @@ from pathlib import Path
 
 from ..graph.store import data_dir
 from ..results import CheckResult
-from ..validate.static import SLUG, read_dir
+from ..validate.static import MAX_NAME, SLUG, read_dir
 from .package import Conflict, LibraryError, NotFound, replace_dir, write_tree
 
-MAX_NAME = 64
 SCHEMA = 1
 MAX_DIFF_LINES = 200
 _VERSION_DIR = re.compile(r"^v(\d+)$")

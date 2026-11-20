@@ -6,7 +6,6 @@ Nothing here runs a script on this machine. An import can ask the sandbox to re-
 
 from __future__ import annotations
 
-import re
 import shutil
 import tempfile
 from collections.abc import Mapping
@@ -14,29 +13,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
-
 from ..build.models import SkillDefinition
 from ..build.scriptfiles import script_files
 from ..build.scripts import SANDBOX_ROW, ScriptRunner, check_scripts, run_script_tests
+from ..kinds.skill import skill_name_of  # noqa: F401  (re-exported: the library has always offered it)
 from ..results import FAILED, NOT_RUN, WARNING, CheckResult
 from ..validate import validate_files
-from ..validate.static import SLUG
 from .package import Conflict, LibraryError, NotFound, SkillSource, read_source, replace_dir, write_tree, zip_bytes
 from .risk import RiskDiff, risk_diff
-from .store import MAX_NAME, FileChange, Library, Version, diff_files
-
-
-def skill_name_of(files: Mapping[str, bytes]) -> str | None:
-    """The name in SKILL.md's front matter, or None when it is missing or not a safe name."""
-    try:
-        text = files["SKILL.md"].decode("utf-8").replace("\r\n", "\n")
-        match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
-        meta = yaml.safe_load(match.group(1)) if match else None
-    except (KeyError, UnicodeDecodeError, yaml.YAMLError):
-        return None
-    name = meta.get("name") if isinstance(meta, dict) else None
-    return name if isinstance(name, str) and SLUG.match(name) and len(name) <= MAX_NAME else None
+from .store import FileChange, Library, Version, diff_files
 
 
 def _definition(files: Mapping[str, bytes]) -> SkillDefinition | None:

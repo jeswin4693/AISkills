@@ -23,6 +23,7 @@ MAX_FILE = 1_000_000
 MAX_TOTAL = 5_000_000
 MAX_SKILL_MD = 100_000
 MAX_DESCRIPTION = 1024
+MAX_NAME = 64  # the longest skill name the checks, the library and the kinds all accept
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 TEXT_SUFFIXES = {".md", ".json", ".txt", ".yaml", ".yml", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".toml", ".cfg", ".ini", ".csv"}
@@ -111,8 +112,8 @@ def _check_skill_md(files: Mapping[str, bytes], folder: str | None) -> list[Chec
         problems.append("front matter is not a set of key: value pairs")
     else:
         skill_name, desc = meta.get("name"), meta.get("description")
-        if not isinstance(skill_name, str) or not SLUG.match(skill_name) or len(skill_name) > 64:
-            problems.append("name must be lowercase letters, digits and hyphens, at most 64 characters")
+        if not isinstance(skill_name, str) or not SLUG.match(skill_name) or len(skill_name) > MAX_NAME:
+            problems.append(f"name must be lowercase letters, digits and hyphens, at most {MAX_NAME} characters")
         if not isinstance(desc, str) or not desc.strip():
             problems.append("description is missing or empty")
         elif len(" ".join(desc.split())) > MAX_DESCRIPTION:

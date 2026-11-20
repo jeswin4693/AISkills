@@ -174,13 +174,26 @@ def run_protocol_tests(defn: McpDefinition, files: Mapping[str, str], runner: Mc
     if raw.timed_out:
         why = f"it ran out of time. stderr: {_clip(raw.stderr) or '(empty)'}"
         return ProtocolReport([CheckResult(PROTOCOL_ROW, FAILED, why)], reason=why)
-    try:
-        data = json.loads(raw.stdout.strip().splitlines()[-1])
-        if not isinstance(data, dict):
-            raise ValueError("not an object")
-    except (ValueError, IndexError):
+    if raw.truncated:
+        # The server runs beside the harness and can write to the same output. If the output was cut, the real answer (written last) may be
+        # exactly the part that was lost, and what is left may be someone else's.
+        why = "the output was cut: far more was written than the harness would write, and the part that was lost may have been its real answer"
+        return ProtocolReport([CheckResult(PROTOCOL_ROW, FAILED, why)], reason=why)
+    answers: list[dict] = []
+    for line in raw.stdout.splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and "started" in value and "results" in value:
+            answers.append(value)
+    if len(answers) > 1:  # the harness writes one answer: a second one was written by something else
+        why = f"the harness's answer appears more than once on the output ({len(answers)} times): the server may have written one of them"
+        return ProtocolReport([CheckResult(PROTOCOL_ROW, FAILED, why)], reason=why)
+    if not answers:
         why = f"the test harness did not answer (exit code {raw.exit_code}). stdout: {_clip(raw.stdout) or '(empty)'} stderr: {_clip(raw.stderr) or '(empty)'}"
         return ProtocolReport([CheckResult(PROTOCOL_ROW, FAILED, why)], reason=why)
+    data = answers[0]
 
     checks: list[CheckResult] = []
     started = bool(data.get("started"))

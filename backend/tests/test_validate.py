@@ -408,7 +408,12 @@ def run_plugin(files: dict[str, bytes], folder: str | None = "demo-plugin"):
 def test_a_good_plugin_passes_every_check_and_no_skill_file_stands_in_for_its_manifest():
     market = {"name": "demo-plugin-local", "owner": {"name": "me"}, "plugins": [{"name": "demo-plugin", "source": "./"}]}
     results = validate_files(plugin_files(market=market), folder="demo-plugin", kind="plugin")
-    assert [r.status for r in results] == [PASSED] * len(results) and {N_PLUGIN, N_MARKET, N_NOTHING, N_PSCRIPTS} <= {r.name for r in results}
+    # every row passes, except the three shared script rows: they read a top-level scripts/ folder only, so for a plugin (whose code lives
+    # inside its components) they say "not run" rather than claim a pass for code they never saw. The component rows read that code.
+    not_run = [r.name for r in results if r.status == "not run"]
+    assert len(not_run) == 3 and all("script" in name for name in not_run)
+    assert all(r.status in (PASSED, "not run") for r in results) and {N_PLUGIN, N_MARKET, N_NOTHING, N_PSCRIPTS} <= {r.name for r in results}
+    assert any(r.name == "skill 'demo-skill' passes its own checks" and r.status == PASSED for r in results)
     assert status(run_plugin({"SKILL.md": SKILL_MD.encode()}), N_PLUGIN) == FAILED
     assert N_SKILL_MD not in run_plugin(plugin_files())
 

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import ast
 import json
-import keyword
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -21,10 +20,10 @@ from pathlib import Path
 from ..providers.base import LLMProvider
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult
 from ..validate import validate_files
-from ..validate.mcp import SECRET_PATTERNS, analyze_server, third_party
+from ..validate.mcp import SECRET_PATTERNS, allow_list_problems, analyze_server, other_code, third_party
 from ..validate.static import MAX_DESCRIPTION, SLUG
 from .agent import person_lines
-from .mcp import OFFERED_PERMISSIONS, McpDefinition, assemble_mcp, design_mcp, render_mcp_files
+from .mcp import IDENT, OFFERED_PERMISSIONS, McpDefinition, McpDesignError, assemble_mcp, design_mcp, render_mcp_files, valid_ident
 from .mcp_protocol import PROTOCOL_ROW, McpRunner, run_protocol_tests
 from .models import RequirementSpec
 from .pipeline import BuildError
@@ -36,7 +35,6 @@ MAX_TOOLS = 8
 MADE_UP = re.compile(r"\b(simulat\w*|placeholder|dummy|fake\w*|mock\w*|hard-?coded|stub\w*)\b", re.I)
 MAX_CASES = 30
 MAX_BODY_LINES = 60
-IDENT = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}\Z")
 Progress = Callable[[str], None]
 
@@ -54,8 +52,7 @@ class McpBuildResult:
     draft_reason: str = ""
 
 
-def _valid_ident(name: str) -> bool:
-    return bool(IDENT.match(name)) and not keyword.iskeyword(name)
+_valid_ident = valid_ident
 
 
 def _types_match(value: object, kind: str) -> bool:
@@ -125,6 +122,8 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
         row("no permission is declared that the code does not use", [f"{', '.join(unused)} is declared but the code never uses it"] if unused else [], status=WARNING)
         extra = third_party(facts)
         row("only the standard library and mcp are imported", [f"it also imports {', '.join(extra)}: nothing else is installed"] if extra else [])
+        allow = allow_list_problems(facts, network="network" in defn.permissions, read_files="read_files" in defn.permissions)
+        row("only allow-listed standard-library modules and builtins are used", allow)
         invalid = [n for n in defn.env_vars if not ENV_NAME.match(n)]
         env_problems = [f"'{n[:40]}' is not an environment variable name (capital letters, digits and underscores): give names, never values" for n in invalid]
         env_problems += [f"it reads {n} but the design does not list it in env_vars" for n in sorted(facts.env_names - set(defn.env_vars))]
@@ -137,6 +136,12 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
         row("no tool returns simulated or made-up data", [f"{', '.join(pretend)}: a tool must do the real job or raise an error, never pretend"] if pretend else [])
         big = [t.name for t in defn.tools if len([ln for item in t.body for ln in str(item).splitlines() if ln.strip()]) > MAX_BODY_LINES]
         row("tool bodies are short", [f"{', '.join(big)} is over {MAX_BODY_LINES} lines"] if big else [], status=WARNING)
+
+    beside = other_code({path: text.encode("utf-8") for path, text in files.items()})
+    row("server.py is the only code in the folder", [f"{', '.join(beside[:6])} would be loaded or run beside it, and the checks do not read it"] if beside else [], "only server.py")
+    wanted = f"mcp=={defn.sdk}"
+    lines = [ln.strip() for ln in files.get("requirements.txt", "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    row("requirements.txt installs only the pinned SDK", [f"it has {lines or 'nothing'}, it must be exactly [{wanted!r}]"] if lines != [wanted] else [], wanted)
 
     leaks = sorted({f"{path}: {label}" for path, text in files.items() for label, pattern in SECRET_PATTERNS if pattern.search(text)})
     row("no key or token in any file", [f"{'; '.join(leaks)}. Never type a key: name the environment variable it is read from"] if leaks else [], "none found")
@@ -180,13 +185,24 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
     return out
 
 
+def _render(defn: McpDefinition, spec: RequirementSpec) -> tuple[dict[str, str] | None, str]:
+    """(files, why not). A name in the design that is not a name is refused here, before any of it is written as code."""
+    try:
+        return render_mcp_files(defn, spec), ""
+    except McpDesignError as exc:
+        return None, str(exc)
+
+
 def _problems(checks: Sequence[CheckResult]) -> list[str]:
     return [f"{c.name}: {c.detail}" for c in checks if c.status in (FAILED, WARNING)]
 
 
 def _score(defn: McpDefinition, spec: RequirementSpec) -> tuple[int, int]:
     """(failed checks, warnings): smaller is better, and a failure outweighs any number of warnings."""
-    checks = check_mcp(defn, spec, render_mcp_files(defn, spec))
+    files, why = _render(defn, spec)
+    if files is None:
+        return (10_000, 0)  # a design that cannot be written is the worst there is
+    checks = check_mcp(defn, spec, files)
     return (sum(c.status == FAILED for c in checks), sum(c.status == WARNING for c in checks))
 
 
@@ -224,7 +240,8 @@ def build_mcp_from_spec(
     draft, used = design_mcp(provider, spec)
     calls += used
     defn = assemble_mcp(draft, spec, provider, now)
-    problems = _problems(check_mcp(defn, spec, render_mcp_files(defn, spec)))
+    first_files, why = _render(defn, spec)
+    problems = [f"design: {why}"] if first_files is None else _problems(check_mcp(defn, spec, first_files))
     if problems:
         say(f"The design has {len(problems)} problem(s); asking the model to fix them once")
         first = _score(defn, spec)
@@ -245,7 +262,9 @@ def build_mcp_from_spec(
         raise BuildError(f"'{defn.name}' is not a valid server name (lowercase letters, digits and hyphens, max {MAX_NAME}).")
     if defn.provenance.name_adjusted:
         notes.append(f"The model's name was changed to '{defn.name}' because it was not a valid name.")
-    files = render_mcp_files(defn, spec)
+    files, why = _render(defn, spec)
+    if files is None:
+        raise BuildError(f"The design cannot be written as a server: {why}.")
     static = validate_files({path: text.encode("utf-8") for path, text in files.items()}, folder=defn.name, kind="mcp")
     static_and_design = [*check_mcp(defn, spec, files), *static]
     if any(c.status == FAILED for c in static_and_design):

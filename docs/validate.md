@@ -51,7 +51,12 @@ or anything that happens at run time.
 For an MCP server the definition check is on `server.py` ([mcp-builder.md](mcp-builder.md)), read with `ast` and never run. It **fails** a file that does not parse, never creates an `MCPServer`,
 defines no tool or never calls `mcp.run()`; a folder whose name differs from the server's; code that starts other programs, builds code from text or loads native code; and a key or token written in the
 code (the report names the kind of key and the line, never the value). It **warns** about network use, file writes, a package outside the standard library and `mcp`, an environment variable read by a
-computed name, a tool without a description, and a name that is used but never defined or imported. It runs for every server kept or imported, so a hostile `server.py` in a downloaded zip is refused.
+computed name, a tool without a description, and a name that is used but never defined or imported. It runs for every server kept or imported. **This is a reading by syntax and cannot prove a file safe:** it resolves imports and aliases
+(`from os import system`, `import os as o`), flags the import as well as the call, and refuses encoding declarations that change how Python reads the
+file, any other code beside `server.py` that Python would import (`colorsys.py`, `mcp/__init__.py`, `sitecustomize.py`), a `requirements.txt` that
+names anything but the pinned SDK, and a key written in pieces or as bytes. It will still be possible to hide something from it, so read a server you
+did not build before you add it. For a server the BUILDER writes the rule is the other way round: an allow-list of safe standard-library modules
+([mcp-builder.md](mcp-builder.md)).
 
 ## The sandbox: run untrusted scripts in a locked-down container, or not at all
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import pytest
 
 from skillforge.build.mcp import (
-    MCP_DESIGN_SYSTEM, MCP_EXTRACT_SYSTEM, MCP_QUESTIONS, MCP_SDK_VERSION, McpCase, McpDraft, McpParam, McpTool,
+    MCP_DESIGN_SYSTEM, MCP_EXTRACT_SYSTEM, MCP_QUESTIONS, MCP_SDK_VERSION, McpCase, McpDesignError, McpDraft, McpParam, McpTool,
     assemble_mcp, render_mcp_files,
 )
 from skillforge.build.mcp_pipeline import build_mcp_from_spec, check_mcp
@@ -157,7 +157,7 @@ def test_server_py_is_written_by_code_from_the_design():
     assert "from mcp.server.mcpserver import MCPServer" in source
     assert 'mcp = MCPServer("word-tools", instructions="Counts the words in a text and shouts a text.")' in source
     assert "def count_words(text: str) -> str:" in source and "def shout(text: str) -> str:" in source
-    assert "        raise ValueError(\"text is empty\")" in source  # the model's lines are indented by code
+    assert "        raise ValueError('text is empty')" in source  # the model's statements are parsed and written out again, indented by code
     assert source.rstrip().endswith('if __name__ == "__main__":\n    mcp.run()')
     assert "Args:\n        text: the text to count in" in source
 
@@ -257,9 +257,12 @@ def test_a_key_in_the_persons_words_or_the_code_fails_and_is_never_repeated():
 
 
 def test_tool_and_parameter_names_must_be_valid_and_unique():
-    assert any("names" in n for n in failed(draft(tools=[with_tool(name="Bad Name")])))
+    # a name that is not a name (or a Python keyword) is refused before it is written into the file: see test_mcp_builder_hardening.py
+    for bad in (with_tool(name="Bad Name"), with_tool(params=[McpParam(name="class", type="str", description="x")])):
+        with pytest.raises(McpDesignError):
+            defn_and_files(draft(tools=[bad]))
+    # a repeated name is valid code, so the check says it
     assert any("names" in n for n in failed(draft(tools=[with_tool(), with_tool()])))
-    assert any("names" in n for n in failed(draft(tools=[with_tool(params=[McpParam(name="class", type="str", description="x")])])))
     assert any("names" in n for n in failed(draft(tools=[with_tool(params=[McpParam(name="a", type="str", description="x"), McpParam(name="a", type="int", description="y")])])))
     assert any("tools" in n for n in failed(draft(tools=[])))
 

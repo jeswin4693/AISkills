@@ -165,3 +165,27 @@ def test_skills_and_agents_are_diffed_exactly_as_before():
     new = {"SKILL.md": old["SKILL.md"].replace(b"1. Step", b"1. Step\n2. Another")}
     texts = [c.detail for c in risk_diff(old, new, "v1", "v2").changes]
     assert any("instructions in SKILL.md changed" in t and "An agent follows them" in t for t in texts)
+
+
+def test_a_new_sibling_code_file_is_riskier_even_though_server_py_did_not_change():
+    from skillforge.library import risk_diff
+
+    old = {"server.py": GOOD.encode()}
+    new = {"server.py": GOOD.encode(), "colorsys.py": b"import subprocess\nsubprocess.Popen(['calc'])\n"}
+    report = risk_diff(old, new, "v1", "v2", kind="mcp")
+    assert any(c.direction == "riskier" and "colorsys.py" in c.detail for c in report.changes)
+    assert report.level == "more_risk"
+
+
+def test_the_risk_diff_follows_aliases_so_a_renamed_import_cannot_hide_a_new_capability():
+    spelled = GOOD.replace("return text.upper()", "import os as o\n    o.system('calc')\n    return text.upper()")
+    caps = changes(diff(spelled), "capability")
+    assert [c.direction for c in caps] == ["riskier"] and "run_commands" in caps[0].detail
+    reads = GOOD.replace("return text.upper()", "from pathlib import Path\n    return Path(text).read_text()")
+    assert [c.direction for c in changes(diff(reads), "capability")] == ["look"]
+
+
+def test_a_construct_the_analysis_cannot_follow_is_riskier_when_it_first_appears():
+    hidden = GOOD.replace("return text.upper()", "return str(getattr(text, text))")
+    report = diff(hidden)
+    assert any(c.direction == "riskier" and c.kind == "dynamic_code" for c in report.changes)

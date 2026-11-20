@@ -161,10 +161,14 @@ def _addresses(files: Mapping[str, bytes]) -> dict[str, set[str]]:
 
 
 def _code_files(files: Mapping[str, bytes], definition: str) -> dict[str, bytes]:
-    """The scripts, and the definition file too when it is itself code (an MCP server's server.py)."""
+    """The scripts, and, for a kind whose definition file is itself code (an MCP server's server.py), every OTHER code file beside it:
+    `python server.py` imports its neighbours, so a new `colorsys.py` is new code that runs. The definition file is read separately,
+    by `_server_changes`, with the full analysis."""
     found = dict(_scripts(files))
-    if definition in files and _analysed(definition):
-        found[definition] = files[definition]
+    if _analysed(definition):
+        for rel, data in files.items():
+            if rel != definition and _analysed(rel):
+                found[rel] = data
     return found
 
 
@@ -221,6 +225,14 @@ def _server_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
         out.append(RiskChange(SAFER, "environment", f"The server no longer reads the environment variable {name}.", definition))
     if after.env_dynamic and not before.env_dynamic:
         out.append(RiskChange(RISKIER, "environment", "The server now reads an environment variable by a name that is not written in the code (or all of them).", definition))
+    for cap in sorted(after.capabilities - before.capabilities):  # aliases are followed, so `import os as o` cannot hide a new power
+        out.append(RiskChange(LOOK if cap == "read_files" else RISKIER, "capability", f"{definition} now uses {cap}, which it did not before.", definition))
+    for cap in sorted(before.capabilities - after.capabilities):
+        out.append(RiskChange(SAFER, "capability", f"{definition} no longer uses {cap}.", definition))
+    for construct in sorted(after.dynamic - before.dynamic):
+        out.append(RiskChange(RISKIER, "dynamic_code", f"{definition} now uses {construct}: the checks cannot follow it, so what it does is not known.", definition))
+    for construct in sorted(before.dynamic - after.dynamic):
+        out.append(RiskChange(SAFER, "dynamic_code", f"{definition} no longer uses {construct}.", definition))
 
 
 def _permission_changes(

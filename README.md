@@ -52,7 +52,10 @@ component is refused, reserved names are refused, and the version moves only whe
 writes `server.py` around them (the imports, the signatures, the tool annotations, `mcp.run()`), pins the official `mcp` SDK, writes a README with the exact `claude mcp add` command, and checks it by reading it:
 anything that starts programs, builds code from text, loads native code or carries a key **fails**, and a key is only ever the *name* of an environment variable. Then the server is **started in the sandbox and
 called over the real MCP protocol**, and the build says "ok" only if it really ran and every test case matched; a server that never ran, or whose tool needs the network, is an honest DRAFT. Two real builds with the
-configured model found and fixed two defects (missing imports, and a tool that returned simulated data). Not yet: TypeScript, HTTP, a run against a live Claude Code, and the MCP flow in a real browser.
+configured model found and fixed two defects (missing imports, and a tool that returned simulated data). **An independent review then found real gaps** (an encoding trick that hid code from the checks,
+code beside `server.py` that Python would import, alternate spellings of running a command, a forged sandbox verdict, and a tool name that could be written into the file as code); they are fixed and tested, and a server the
+builder writes may now import only an allow-list of safe standard-library modules. The checks are still a reading by syntax and **cannot prove a file safe**: read a server you did not build before you add it
+([docs/mcp-builder.md](docs/mcp-builder.md)). Not yet: TypeScript, HTTP, a run against a live Claude Code, and the MCP flow in a real browser.
 
 **What is next, in this order:**
 

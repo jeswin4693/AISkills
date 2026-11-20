@@ -19,27 +19,44 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> assemble -> CHECKS 
 | The model | Drafts the tools: a name and one-sentence description for each, typed parameters (`str`, `int`, `float`, `bool`), the statements of each function body, declared permissions (`read_files`, `network`), the **names** of environment variables, and test cases. |
 | Code | Writes everything around that: the imports, the signatures, the docstrings, the decorators, the **tool annotations** (read-only and open-world, worked out per tool from what its own code does), `mcp.run()`, the pinned `requirements.txt`, the README, the command that adds it, and every check. |
 
-Model text is data: it is inserted into the file and the file is only ever run in the sandbox. Every tool returns text. The person's own rules, criteria and
+Model text is data: it is inserted into the file, and the file is **tested** only in the sandbox (but you later run it without one, so it is checked hard: see below). Every tool returns text. The person's own rules, criteria and
 failure behaviour are carried into the README word for word (a check fails if one is missing).
 
 ## The checks (all by code, none by asking a model)
 
-**The server's own file** (`validate/mcp.py`, runs for the builder *and* for every server imported from outside):
+Two readers, because a server is code that **you run on your own machine, with no sandbox**, once you add it to Claude Code.
+
+**1. The library reader** (`validate/mcp.py`) runs for every server kept or imported, builder-made or not. It reads `server.py` with `ast`, by syntax.
+It resolves imports and aliases first (`from os import system`, `import os as o`, `importlib`, `builtins`), then classifies every name the code touches,
+**the import itself included**: it is the import that is flagged, not only the call.
 
 | Fails | Warns |
 |---|---|
-| it does not parse; it never creates an `MCPServer`, defines no tool or never calls `mcp.run()`; the folder name differs from the server name | a tool without a description (docstring) |
-| it starts other programs (`subprocess`, `os.system`), builds code from text (`eval`, `exec`, `__import__`) or loads native code (`ctypes`) | it can reach the network; it can write or delete files |
-| a key or token is written in the code (OpenAI, Google, GitHub, Slack, AWS, a private key, a bearer token, a signed web token); **the report never repeats it** | it imports a package outside the standard library and `mcp` |
-| | an environment variable read by a computed name, or all of them |
-| | a name that is used but never defined or imported (a `NameError` waiting for the first call) |
+| it does not parse; no `MCPServer`, no tool, no `mcp.run()`, more than one server; the folder name differs from the server name | a tool without a description |
+| it starts programs (`subprocess`, `os.system`, `os.exec*`, `asyncio` subprocesses, `mcp.client`, `posix`, `nt` ...) | it can reach the network (`socket`, `urllib.request`, `ssl`, `asyncio.open_connection` ...) |
+| code built from text or reaching Python's internals (`eval`, `exec`, `__import__`, `importlib`, `builtins`, `pickle`, `ctypes`, `globals`, `vars`, `getattr` with a computed name, dunder attributes, `.sys` / `.modules`) | it can write or delete files (any spelling of `open` with a writing or unknown mode, `os.write`, `shutil`, `sqlite3`, `tempfile`, `Path.write_text` ...) |
+| a key written in the code, **also in pieces, as bytes or built with `+`** (OpenAI, Google, GitHub, GitLab, Slack, AWS, Stripe, PyPI, Hugging Face, npm, private keys, bearer and signed tokens); the report never repeats it | a package outside the standard library and `mcp`; an environment variable read by a computed name; a name used but never defined |
+| an **encoding declaration or byte-order mark** that changes how Python reads the file (the checks would read something other than what runs) | `requirements.txt` naming a package other than the pinned SDK |
+| **any other code beside `server.py`** (`colorsys.py`, `mcp/__init__.py`, `sitecustomize.py`, `.pth`, `.so`, `scripts/`, `bin/`): `python server.py` imports its neighbours first, and the checks never read them | |
+| `requirements.txt` with an option, a URL or a VCS line (`--extra-index-url`, `git+https://...`) | |
 
-**The builder's own rules** (`build/mcp_pipeline.py`, stricter because the model was told not to): a package outside the standard library, an undeclared or
-not-offered permission (only `read_files` and `network` are offered; the code must not do more than the design declares), an environment variable that is not a plain
-name or is read but not listed, a name used but never imported or defined, an import that is never used (the mark of a stub), a tool that returns simulated or
-made-up data (placeholder, dummy, fake, mock, hard-coded, stub), a tool that never returns a value, invalid or repeated tool and parameter names, a test case that names
-a tool the server does not have or whose arguments do not match the parameters (right keys, right types), an acceptance criterion with no test case, and no negative case.
-One repair is allowed and is kept only if it is not worse.
+**It cannot prove a file safe.** It is a best-effort reading by syntax, and someone determined may still hide something from it. Read a server you did
+not build before you add it; the report says so on every pass.
+
+**2. The builder's own rules** (`build/mcp_pipeline.py`), stricter because the model was told not to and code can hold it to that. A tool body may import
+**only an allow-list** of safe standard-library modules (`json`, `re`, `math`, `datetime`, `collections`, `urllib.parse`, `hashlib`, ... the model is
+told the list in its prompt): `os` only for `os.environ.get("NAME")`, `io` only for `StringIO` / `BytesIO`, `pathlib` only for names unless `read_files` is
+declared, `urllib.request` / `http.client` / `ssl` only when `network` is declared, and no `print` (it would write into the protocol stream), `input`,
+`getattr`, `setattr`. Anything else fails, so the spellings above cannot even be imported. It also fails: an undeclared or not-offered permission, an
+environment variable that is not a plain listed name, a name used but never imported or defined, an import never used (the mark of a stub), a tool that
+returns simulated or made-up data, a tool that returns nothing, invalid or repeated names, a test case that names a missing tool or whose arguments do not
+match, an acceptance criterion with no case, no negative case, any other code or a `requirements.txt` other than exactly `mcp==2.3.0`. One repair is
+allowed and is kept only if it is not worse.
+
+**Names are data, never code.** A tool or parameter name is written into the file, so one that is not a plain identifier (an attempt to smuggle a statement
+in) is refused **before** anything is written: the build fails with a plain message and no folder is created. Bodies are parsed and written out again, so a
+comment cannot carry anything into the file and a multi-line string keeps its exact value. The `read_only_hint` / `open_world_hint` annotations are worked
+out per tool from the tool's own code, aliases followed; a tool with a construct the analysis cannot follow gets **no hints at all**.
 
 ## Run over the protocol, in the sandbox only
 
@@ -54,6 +71,11 @@ Code then compares: the tools listed must be exactly the designed tools, and eac
   **DRAFT** with that reason. A DRAFT can still be kept (the existing "keep it anyway" box).
 - A server that failed its checks is never started.
 - Secrets: a server gets only the environment variable **names** the design declared, with a dummy value. No real secret is ever in the box.
+- **The verdict cannot be written by the server.** The harness and the server run in the same container, so the server can write into the harness's output.
+  The grader therefore treats **cut output as a failure** (the real answer is written last and may be what was lost) and requires **exactly one** answer
+  line (a second one was written by something else). A review forged a pass this way (260 lines of forged JSON written to PID 1's output) and it is now a
+  test that runs in the real container and fails. The stronger design, not built, is to run the harness on the host and speak MCP over `docker run -i`, so the
+  verdict is never produced inside the box.
 
 ## Facts settled by a real install (2026-11-20, `pip install mcp` in a scratch venv)
 
@@ -91,10 +113,30 @@ Two real builds with the configured model (Gemini), through the real API, on 202
 - **Risk diff** (`library diff`): a changed `server.py` is called "code that runs on your machine", a new capability (network, writes, commands) is **riskier**, a new tool is "something to look at",
   a new environment variable is **riskier**, and a removed tool or variable is safer.
 
+## What an independent review found (2026-11-20), and what was done
+
+Two fresh reviewers read this slice and the Plugin Builder without being told the code was correct. The MCP reviewer ran its attacks in a scratch folder (and,
+for the sandbox forgery, in the real container); the first version of the checks was weaker than this document had said.
+
+| Found | Done |
+|---|---|
+| An encoding declaration (`# coding: utf-7`) hid code from the checks but not from Python; any file beside `server.py` (`colorsys.py`, `mcp/__init__.py`) ran unchecked | Refused: non-UTF-8 declarations and byte-order marks; any other code in the folder |
+| Plain alternate spellings of running a command passed (`from os import system`, `import os as o`, `importlib`, `builtins`, `asyncio` subprocess, `mcp.client`, `posix`, `nt`), and so did environment dumps, writes (`open(path, mode_variable)`, `os.open`, `sqlite3`, `shutil`), network (`asyncio.open_connection`, bare `urllib`) and keys written in pieces | The analyser resolves aliases and flags the import; the builder uses an allow-list; keys are folded before they are matched |
+| The generated `read_only_hint=True` / `open_world_hint=False` were published for tools that did all of the above | Hints come from each tool's own analysed code, and are omitted when the code cannot be followed |
+| A forged sandbox pass (flooding the harness's output) | Cut or doubled output is a failure; a live test proves it |
+| A model-written tool name was written into the file as code, and a draft folder with that code could be saved | Names are validated before anything is written; no folder is created |
+| `requirements.txt` was never read (`--extra-index-url`, VCS lines) | Read: only the pinned SDK is accepted |
+| A docstring ending in a quote broke the file; a multi-line string was silently re-indented; the README said "does not write files" even when the code did | Fixed, with tests; the README now reports what was found and says it cannot prove it |
+
+Not changed, said plainly: tools registered in another way are followed only for the usual `mcp.tool()(fn)` form; the made-up-data check is a list of words;
+an `expect: error` case passes on any crash (a stub that always raises still fails the positive case); and a hostile server could still try the sandbox itself
+(no network, a read-only disk, no capabilities, a non-root user, and the verdict hardening above are what stand in its way).
+
 ## Limits (honest)
 
 - **Not browser-tested:** the MCP flow in the web Builder and Library was not clicked through in a real browser (the typecheck, unit tests and the existing 39 browser checks cover the shared pages).
 - **Not run against a live Claude Code:** `claude mcp add` was not run (it changes your settings). The server was run over the protocol by our harness, not by Claude Code.
+- **A server from outside cannot be proven safe by reading it.** The library reader is best-effort; read what you add.
 - **Network tools stay DRAFT:** their cases cannot run in a box with no network. The real call is only read, not exercised.
 - **Python only; tools only.** No TypeScript, no HTTP transport, no resources or prompts, no OAuth, no packages beyond the standard library, no file writes, no commands.
 - **Test cases are as good as the model's expectations.** A case passes when the reply matches what the case says; a wrong expectation that the server happens to meet proves nothing.

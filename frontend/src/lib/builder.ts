@@ -36,6 +36,11 @@ export function kindLabel(kinds: KindInfo[] | undefined, key: string): string {
   return kinds?.find((k) => k.key === key)?.label ?? key;
 }
 
+/** "a skill", "an agent": the noun with the right article. */
+export function withArticle(noun: string): string {
+  return `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+}
+
 /** The requirement as rows, each next to the words of the person that support it. */
 export function specRows(spec: RequirementSpec, slots: SlotInfo[] = DEFAULT_SLOTS): SpecRow[] {
   const fields = spec as unknown as Record<string, unknown>;

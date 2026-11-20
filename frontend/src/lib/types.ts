@@ -213,6 +213,12 @@ export interface SlotInfo {
 export interface KindInfo {
   key: string;
   label: string;
+  /** The file that defines the thing: SKILL.md for a skill, AGENT.md for an agent. */
+  definition_file: string;
+  /** How the personal install folder is shown, such as ~/.claude/agents. */
+  personal_label: string;
+  /** True when installing writes one file (an agent), not a folder. */
+  installs_as_file: boolean;
   install_targets: string[];
   slots: SlotInfo[];
 }

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { EXAMPLES, kindLabel, showKindPicker, statusInfo } from "@/lib/builder";
+import { EXAMPLES, kindLabel, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
 import { relativeTime } from "@/lib/format";
 import { notifyStatusChanged, useAsync } from "@/lib/useAsync";
 import { useKinds } from "@/lib/useKinds";
@@ -72,7 +72,7 @@ export default function BuilderPage() {
   return (
     <>
       <PageHeader
-        title={`Build a ${noun}`}
+        title={`Build ${withArticle(noun)}`}
         subtitle={`Say in your own words what the ${noun} should do. I will ask only about what is missing, show you the requirement to approve, and only then build it.`}
       />
       <div className="space-y-6">

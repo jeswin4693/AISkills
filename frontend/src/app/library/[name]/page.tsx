@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { CheckBadges, CheckList } from "@/components/CheckList";
 import { FileViewer } from "@/components/FileViewer";
@@ -11,16 +11,20 @@ import { RescanPanel } from "@/components/RescanPanel";
 import { Alert, Badge, Button, ButtonLink, Card, ErrorBox, Loading, Modal, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatWhen, plural, relativeTime, shortHash, sourceText } from "@/lib/format";
-import type { VersionInfo } from "@/lib/types";
+import { withKindParam } from "@/lib/kind";
+import type { KindInfo, VersionInfo } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
+import { useKinds } from "@/lib/useKinds";
 
 type Notice = { tone: "ok" | "warn" | "bad" | "info"; title: string; text?: string };
 
 /** The notice lives in the page, not here: restoring selects a new version, which remounts this panel. */
 function VersionDetails({
-  v, latest, previous, onChanged, setNotice,
+  v, kind, kindInfo, latest, previous, onChanged, setNotice,
 }: {
   v: VersionInfo;
+  kind: string;
+  kindInfo: KindInfo | undefined;
   latest: boolean;
   previous: VersionInfo | undefined;
   onChanged: (select: number) => void;
@@ -38,7 +42,7 @@ function VersionDetails({
     setBusy("export");
     setNotice(null);
     try {
-      const { blob, filename } = await api.exportZip(v.name, v.version, withoutSpec);
+      const { blob, filename } = await api.exportZip(v.name, v.version, withoutSpec, kind);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -63,7 +67,7 @@ function VersionDetails({
     setBusy("restore");
     setNotice(null);
     try {
-      const r = await api.rollback(v.name, v.version);
+      const r = await api.rollback(v.name, v.version, kind);
       setConfirmRestore(false);
       setNotice({
         tone: r.created ? "ok" : "info",
@@ -96,7 +100,7 @@ function VersionDetails({
           {v.note && <p className="mt-1 text-sm">&ldquo;{v.note}&rdquo;</p>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {previous && <ButtonLink href={`/library/${v.name}/diff?from=${previous.version}&to=${v.version}`}>Changes since {previous.tag}</ButtonLink>}
+          {previous && <ButtonLink href={withKindParam(`/library/${v.name}/diff?from=${previous.version}&to=${v.version}`, kind)}>Changes since {previous.tag}</ButtonLink>}
           <Button busy={busy === "export"} onClick={() => void exportZip()}>
             Export .zip
           </Button>
@@ -122,7 +126,7 @@ function VersionDetails({
       <div className="mt-5 space-y-6">
         <section>
           <h3 className="mb-2 font-semibold">Files</h3>
-          <FileViewer id={`${v.name}/${v.version}`} paths={Object.keys(v.files)} hashes={v.files} load={(p) => api.file(v.name, v.version, p)} />
+          <FileViewer id={`${v.name}/${v.version}`} paths={Object.keys(v.files)} hashes={v.files} load={(p) => api.file(v.name, v.version, p, kind)} />
         </section>
         <section>
           <h3 className="mb-2 font-semibold">Checks when it was imported</h3>
@@ -131,7 +135,7 @@ function VersionDetails({
         </section>
       </div>
 
-      {installing && <InstallDialog version={v} open onClose={() => setInstalling(false)} />}
+      {installing && <InstallDialog version={v} kind={kind} kindInfo={kindInfo} open onClose={() => setInstalling(false)} />}
       <Modal open={confirmRestore} onClose={() => setConfirmRestore(false)} title={`Restore ${v.tag}?`}>
         <p className="text-sm">
           This adds a <strong>new</strong> version with exactly the content of {v.tag}. Nothing is deleted: every older version stays, and you can restore any of them
@@ -150,7 +154,9 @@ function VersionDetails({
 
 export default function SkillPage() {
   const { name } = useParams<{ name: string }>();
-  const data = useAsync(() => api.versions(name), name);
+  const kind = useSearchParams().get("kind") ?? "skill";
+  const kindInfo = useKinds().data?.find((k) => k.key === kind);
+  const data = useAsync(() => api.versions(name, kind), `${kind}/${name}`);
   const [picked, setPicked] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -160,7 +166,7 @@ export default function SkillPage() {
         <PageHeader title={name} />
         <ErrorBox error={data.error} onRetry={data.reload} />
         <p className="mt-4 text-sm">
-          <Link href="/library" className="text-accent underline">
+          <Link href={withKindParam("/library", kind)} className="text-accent underline">
             Back to the library
           </Link>
         </p>
@@ -176,7 +182,7 @@ export default function SkillPage() {
   return (
     <>
       <p className="mb-2 text-sm">
-        <Link href="/library" className="text-accent underline">
+        <Link href={withKindParam("/library", kind)} className="text-accent underline">
           Library
         </Link>{" "}
         / {name}
@@ -184,7 +190,7 @@ export default function SkillPage() {
       <PageHeader
         title={name}
         subtitle={`${plural(versions.length, "version")}. Pick one to read its files and checks, export it, install it or restore it.`}
-        actions={versions.length > 1 ? <ButtonLink href={`/library/${name}/diff`}>Compare versions</ButtonLink> : undefined}
+        actions={versions.length > 1 ? <ButtonLink href={withKindParam(`/library/${name}/diff`, kind)}>Compare versions</ButtonLink> : undefined}
       />
       <div className="space-y-6">
         <Card>
@@ -227,6 +233,8 @@ export default function SkillPage() {
         <VersionDetails
           key={selected.version}
           v={selected}
+          kind={kind}
+          kindInfo={kindInfo}
           latest={selected.version === versions[0].version}
           previous={previous}
           setNotice={setNotice}
@@ -235,7 +243,7 @@ export default function SkillPage() {
             data.reload();
           }}
         />
-        <RescanPanel name={name} />
+        <RescanPanel name={name} kind={kind} />
       </div>
     </>
   );

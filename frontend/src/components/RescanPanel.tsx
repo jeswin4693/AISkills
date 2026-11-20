@@ -5,13 +5,14 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { findingText, rescanHeadline, SCAN_LABEL, SCAN_TONE } from "@/lib/risk";
 import type { RescanResult } from "@/lib/types";
+import { withKindParam } from "@/lib/kind";
 import { Alert, Badge, Button, Card } from "./ui";
 
 /**
  * Run today's static checks on skills already in the library. A skill is checked once when it comes in, and checks
  * improve: this says which stored versions would not pass today. It changes nothing and runs nothing.
  */
-export function RescanPanel({ name }: { name?: string }) {
+export function RescanPanel({ name, kind }: { name?: string; kind?: string }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RescanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +21,7 @@ export function RescanPanel({ name }: { name?: string }) {
     setBusy(true);
     setError(null);
     try {
-      setResult(await api.rescan(name));
+      setResult(await api.rescan(name, kind));
     } catch (e) {
       setResult(null);
       setError(e instanceof Error ? e.message : String(e));
@@ -60,7 +61,7 @@ export function RescanPanel({ name }: { name?: string }) {
                       {name ? (
                         <span className="font-medium">{s.tag || s.name}</span>
                       ) : (
-                        <Link href={`/library/${s.name}`} className="font-medium text-accent underline">
+                        <Link href={withKindParam(`/library/${s.name}`, kind)} className="font-medium text-accent underline">
                           {s.name} {s.tag}
                         </Link>
                       )}

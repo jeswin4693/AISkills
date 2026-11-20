@@ -8,6 +8,7 @@ import { RiskSummary } from "@/components/RiskSummary";
 import { Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { plural } from "@/lib/format";
+import { withKindParam } from "@/lib/kind";
 import { useAsync } from "@/lib/useAsync";
 
 function num(value: string | null): number | undefined {
@@ -21,22 +22,23 @@ function Diff() {
   const params = useSearchParams();
   const from = num(params.get("from"));
   const to = num(params.get("to"));
-  const versions = useAsync(() => api.versions(name), `versions/${name}`);
-  const diff = useAsync(() => api.diff(name, from, to), `diff/${name}/${from}/${to}`);
+  const kind = params.get("kind") ?? "skill";
+  const versions = useAsync(() => api.versions(name, kind), `versions/${kind}/${name}`);
+  const diff = useAsync(() => api.diff(name, from, to, kind), `diff/${kind}/${name}/${from}/${to}`);
 
   const tags = versions.data?.versions ?? [];
   const fromNow = diff.data ? Number(diff.data.from.slice(1)) : from;
   const toNow = diff.data ? Number(diff.data.to.slice(1)) : to;
-  const go = (a: number | undefined, b: number | undefined) => router.replace(`/library/${name}/diff?from=${a}&to=${b}`);
+  const go = (a: number | undefined, b: number | undefined) => router.replace(withKindParam(`/library/${name}/diff?from=${a}&to=${b}`, kind));
 
   return (
     <>
       <p className="mb-2 text-sm">
-        <Link href="/library" className="text-accent underline">
+        <Link href={withKindParam("/library", kind)} className="text-accent underline">
           Library
         </Link>{" "}
         /{" "}
-        <Link href={`/library/${name}`} className="text-accent underline">
+        <Link href={withKindParam(`/library/${name}`, kind)} className="text-accent underline">
           {name}
         </Link>{" "}
         / changes

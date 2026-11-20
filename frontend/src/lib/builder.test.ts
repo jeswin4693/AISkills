@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
-  DEFAULT_SLOTS, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
+  DEFAULT_SLOTS, withArticle, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
   specRows, statusInfo, tokenLine, traceability, usageText,
 } from "./builder";
 import type { KindInfo, RequirementSpec, TestCase } from "./types";
@@ -31,11 +31,11 @@ describe("the requirement as rows", () => {
 
 describe("kinds", () => {
   const skill: KindInfo = {
-    key: "skill", label: "Skill", install_targets: ["personal", "folder"],
+    key: "skill", label: "Skill", definition_file: "SKILL.md", personal_label: "~/.claude/skills", installs_as_file: false, install_targets: ["personal", "folder"],
     slots: DEFAULT_SLOTS.map((s) => ({ ...s, question: "?" })),
   };
   const agent: KindInfo = {
-    key: "agent", label: "Agent", install_targets: ["personal"],
+    key: "agent", label: "Agent", definition_file: "AGENT.md", personal_label: "~/.claude/agents", installs_as_file: true, install_targets: ["personal"],
     slots: [{ key: "goal", label: "What the agent is for", question: "?" }, { key: "constraints", label: "What it must never do", question: "?" }],
   };
 
@@ -58,6 +58,12 @@ describe("kinds", () => {
     expect(slotsOf([agent], "skill")).toEqual(DEFAULT_SLOTS);
     expect(slotsOf([skill, agent], "agent")).toEqual(agent.slots);
     expect(specRows(spec, slotsOf([agent], "skill"))).toEqual(specRows(spec));
+  });
+
+  it("puts the right article before the noun", () => {
+    expect(withArticle("skill")).toBe("a skill");
+    expect(withArticle("agent")).toBe("an agent");
+    expect(withArticle("Agent")).toBe("an Agent");
   });
 
   it("names a kind by its label, or by its key when the server does not list it", () => {

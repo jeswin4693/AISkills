@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useId, useState } from "react";
 import { api } from "@/lib/api";
+import { withArticle } from "@/lib/builder";
 import { plural } from "@/lib/format";
+import { withKindParam } from "@/lib/kind";
 import type { ImportResult } from "@/lib/types";
 import { CheckList } from "./CheckList";
 import { RiskSummary } from "./RiskSummary";
 import { Alert, Card } from "./ui";
 
-function ImportResultView({ result, onDismiss }: { result: ImportResult; onDismiss: () => void }) {
+function ImportResultView({ result, kind, onDismiss }: { result: ImportResult; kind: string; onDismiss: () => void }) {
   if (result.refused) {
     const failed = result.checks.filter((c) => c.status === "failed").length;
     return (
@@ -27,7 +29,7 @@ function ImportResultView({ result, onDismiss }: { result: ImportResult; onDismi
       <Alert tone="info" title={`Unchanged: '${result.name}' is identical to ${v.tag}`} onDismiss={onDismiss}>
         <p>No new version was made.</p>
         <p className="mt-1">
-          <Link href={`/library/${result.name}`} className="font-medium text-accent underline">
+          <Link href={withKindParam(`/library/${result.name}`, kind)} className="font-medium text-accent underline">
             Open the skill
           </Link>
         </p>
@@ -38,7 +40,7 @@ function ImportResultView({ result, onDismiss }: { result: ImportResult; onDismi
     <Alert tone="ok" title={`Imported '${result.name}' as ${v.tag}`} onDismiss={onDismiss}>
       <p>
         {result.previous ? `A new version after ${result.previous}; ${plural(result.changes.length, "file")} differ.` : "This is its first version."}{" "}
-        <Link href={`/library/${result.name}`} className="font-medium text-accent underline">
+        <Link href={withKindParam(`/library/${result.name}`, kind)} className="font-medium text-accent underline">
           Open the skill
         </Link>
       </p>
@@ -60,7 +62,9 @@ function ImportResultView({ result, onDismiss }: { result: ImportResult; onDismi
 }
 
 /** Choose or drop a .zip. The checks run on the server; this only shows what they found. */
-export function ImportPanel({ onImported }: { onImported: () => void }) {
+export function ImportPanel(
+  { onImported, kind = "skill", noun = "skill", definitionFile = "SKILL.md" }: { onImported: () => void; kind?: string; noun?: string; definitionFile?: string },
+) {
   const inputId = useId();
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -75,7 +79,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
     setResult(null);
     setError(null);
     try {
-      const r = await api.importZip(file, { note, testScripts });
+      const r = await api.importZip(file, { note, testScripts, kind });
       setResult(r);
       if (!r.refused) onImported();
     } catch (e) {
@@ -87,9 +91,9 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
 
   return (
     <Card className="p-4">
-      <h2 className="font-semibold">Import a skill</h2>
+      <h2 className="font-semibold">Import {withArticle(noun)}</h2>
       <p className="mt-0.5 text-sm text-muted">
-        A <code className="font-mono">.zip</code> of a skill folder (the one with <code className="font-mono">SKILL.md</code>). It is checked first and refused if
+        A <code className="font-mono">.zip</code> of {withArticle(noun)} folder (the one with <code className="font-mono">{definitionFile}</code>). It is checked first and refused if
         a check fails. Nothing in it is run.
       </p>
       <label
@@ -146,7 +150,7 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
       </details>
       <div aria-live="polite" className="mt-3 space-y-2">
         {error && <Alert tone="bad" title="The import could not be done" onDismiss={() => setError(null)}>{error}</Alert>}
-        {result && <ImportResultView result={result} onDismiss={() => setResult(null)} />}
+        {result && <ImportResultView result={result} kind={kind} onDismiss={() => setResult(null)} />}
         {result?.risk && <RiskSummary risk={result.risk} />}
         {result && (
           <p className="text-xs text-muted">Static checks only: nothing was run unless a line says so, and passing is not proof that a skill is safe.</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { withKindParam } from "@/lib/kind";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { parseTests, tokenLine, traceability, usageText } from "@/lib/builder";
@@ -64,7 +65,7 @@ function SavePanel({ session, onSession }: { session: BuildSession; onSession: (
   if (session.saved) {
     return (
       <Alert tone="ok" title={`Saved to the library as '${session.saved.name}' ${session.saved.version}`}>
-        <Link href={`/library/${session.saved.name}`} className="font-medium text-accent underline">
+        <Link href={withKindParam(`/library/${session.saved.name}`, session.kind)} className="font-medium text-accent underline">
           Open it in the library
         </Link>{" "}
         to read its versions, export it or install it.

@@ -18,7 +18,8 @@ export function FileViewer({
   hashes?: Record<string, string>;
   load: (path: string) => Promise<FileText>;
 }) {
-  const paths = [...given].sort((a, b) => (a === "SKILL.md" ? -1 : b === "SKILL.md" ? 1 : a.localeCompare(b)));
+  const definesIt = (p: string) => p === "SKILL.md" || p === "AGENT.md"; // the file that defines the thing comes first
+  const paths = [...given].sort((a, b) => (definesIt(a) ? -1 : definesIt(b) ? 1 : a.localeCompare(b)));
   const [picked, setPicked] = useState<string | null>(null);
   const path = picked && paths.includes(picked) ? picked : (paths[0] ?? null);
   const file = useAsync(() => (path ? load(path) : Promise.resolve(undefined)), `${id}/${path}`);

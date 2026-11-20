@@ -3,11 +3,17 @@
 import { useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { conflictPath } from "@/lib/format";
-import type { InstallResult, VersionInfo } from "@/lib/types";
+import type { InstallResult, KindInfo, VersionInfo } from "@/lib/types";
 import { Alert, Button, Modal } from "./ui";
 
 /** Copy one version to a skills folder where an agent reads it. The person must choose where; nothing is guessed. */
-export function InstallDialog({ version, open, onClose }: { version: VersionInfo; open: boolean; onClose: () => void }) {
+export function InstallDialog(
+  { version, kind, kindInfo, open, onClose }: { version: VersionInfo; kind?: string; kindInfo?: KindInfo; open: boolean; onClose: () => void },
+) {
+  const personal = kindInfo?.personal_label || "~/.claude/skills";
+  const asFile = kindInfo?.installs_as_file ?? false; // an agent is installed as one file, a skill as a folder
+  const noun = kindInfo?.label.toLowerCase() ?? "skill";
+  const folderName = personal.split("/").pop() ?? "skills";
   const [target, setTarget] = useState<"personal" | "folder">("personal");
   const [folder, setFolder] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,7 +26,7 @@ export function InstallDialog({ version, open, onClose }: { version: VersionInfo
     setError(null);
     setConflict(null);
     try {
-      setDone(await api.install(version.name, { version: version.version, target, folder: target === "folder" ? folder.trim() : undefined, force }));
+      setDone(await api.install(version.name, { version: version.version, target, folder: target === "folder" ? folder.trim() : undefined, force }, kind));
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setConflict(e.message);
       else setError(e instanceof Error ? e.message : String(e));
@@ -38,7 +44,7 @@ export function InstallDialog({ version, open, onClose }: { version: VersionInfo
         <div className="space-y-3">
           <Alert tone="ok" title="Installed">
             <p className="break-all font-mono text-xs">{done.path}</p>
-            {done.backup && <p className="mt-1">The folder that was there was copied to <span className="break-all font-mono text-xs">{done.backup}</span> first.</p>}
+            {done.backup && <p className="mt-1">The {asFile ? "file" : "folder"} that was there was copied to <span className="break-all font-mono text-xs">{done.backup}</span> first.</p>}
           </Alert>
           {done.has_scripts && (
             <Alert tone="warn" title="This skill has scripts">
@@ -64,7 +70,7 @@ export function InstallDialog({ version, open, onClose }: { version: VersionInfo
             <label className="flex items-start gap-2 text-sm">
               <input type="radio" name="target" checked={target === "personal"} onChange={() => setTarget("personal")} className="mt-1" />
               <span>
-                Personal: <code className="font-mono">~/.claude/skills</code>
+                Personal: <code className="font-mono">{personal}</code>
                 <span className="block text-muted">Every Claude Code session on this machine can use it.</span>
               </span>
             </label>
@@ -72,14 +78,14 @@ export function InstallDialog({ version, open, onClose }: { version: VersionInfo
               <input type="radio" name="target" checked={target === "folder"} onChange={() => setTarget("folder")} className="mt-1" />
               <span className="min-w-0 flex-1">
                 A folder I choose
-                <span className="block text-muted">The skill goes to FOLDER/{version.name}. Give an absolute path, such as a project&apos;s .claude/skills.</span>
+                <span className="block text-muted">{asFile ? `The ${noun} goes to FOLDER/${version.name}.md.` : `The ${noun} goes to FOLDER/${version.name}.`} Give an absolute path, such as a project&apos;s .claude/{folderName}.</span>
                 {target === "folder" && (
                   <input
                     autoFocus
                     value={folder}
                     onChange={(e) => setFolder(e.target.value)}
-                    aria-label="Skills folder (absolute path)"
-                    placeholder="C:\path\to\project\.claude\skills"
+                    aria-label={`${folderName.charAt(0).toUpperCase()}${folderName.slice(1)} folder (absolute path)`}
+                    placeholder={`C:\\path\\to\\project\\.claude\\${folderName}`}
                     className="mt-1.5 block w-full rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-xs"
                   />
                 )}
@@ -92,7 +98,7 @@ export function InstallDialog({ version, open, onClose }: { version: VersionInfo
             </Alert>
           )}
           {conflict && (
-            <Alert tone="warn" title="That folder already exists">
+            <Alert tone="warn" title={`That ${asFile ? "file" : "folder"} already exists`}>
               <p className="break-all font-mono text-xs">{conflictPath(conflict)}</p>
               <p className="mt-2">Replacing it saves the old copy to a backup first, so nothing is lost.</p>
               <div className="mt-2">

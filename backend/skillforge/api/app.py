@@ -29,6 +29,7 @@ from ..library import (
 from ..sandbox import probe_sandbox
 from .builds import builds_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
+from .plugins import plugins_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
 from .views import import_view as _import_report
@@ -262,5 +263,6 @@ def create_app(
 
     api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
+    api.include_router(plugins_router())
     app.include_router(api)
     return app

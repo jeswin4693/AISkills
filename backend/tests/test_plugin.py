@@ -135,3 +135,98 @@ def test_the_composed_plugin_passes_its_own_checks_and_a_failing_one_is_reported
 def test_composing_the_same_things_twice_gives_the_same_bytes(tmp_path):
     lib = make_library(tmp_path)
     assert compose(lib).files == compose(lib).files
+
+
+# ---- over HTTP: preview, keep, export, install ---------------------------------------------------------
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from skillforge.api import create_app  # noqa: E402
+from skillforge.library import import_source, read_zip_bytes, rescan  # noqa: E402
+
+BODY = {
+    "name": "my-plugin", "description": "Two helpers.", "author": "Jeswin",
+    "components": [{"kind": "skill", "name": SKILL}, {"kind": "agent", "name": AGENT}],
+}
+
+
+def client_for(tmp_path):
+    lib = make_library(tmp_path)
+    return TestClient(create_app(lib), base_url="http://localhost"), lib
+
+
+def test_a_preview_shows_files_capabilities_and_checks_and_keeps_nothing(tmp_path):
+    client, lib = client_for(tmp_path)
+    r = client.post("/api/plugins/preview", json=BODY)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["version"] == "0.1.0" and body["failed"] is False and body["name"] == "my-plugin"
+    assert [f["path"] for f in body["files"]] == [
+        ".claude-plugin/marketplace.json", ".claude-plugin/plugin.json", "README.md", f"agents/{AGENT}.md",
+        f"skills/{SKILL}/README.md", f"skills/{SKILL}/SKILL.md",
+    ]
+    assert body["capabilities"]["tools"] == ["Glob", "Grep", "Read"] and body["capabilities"]["notes"] == ["It can only read and search files."]
+    assert json.loads(body["manifest"])["name"] == "my-plugin" and any(c["status"] == "passed" for c in body["checks"])
+    assert lib.for_kind("plugin").names() == []  # a preview keeps nothing
+
+
+def test_keeping_a_plugin_puts_it_in_its_own_library_and_the_same_content_makes_no_new_version(tmp_path):
+    client, lib = client_for(tmp_path)
+    saved = client.post("/api/plugins", json=BODY)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["created"] is True and saved.json()["version"]["tag"] == "v1"
+    assert lib.names() == [SKILL] and lib.for_kind("plugin").names() == ["my-plugin"]
+    assert [row["name"] for row in client.get("/api/library", params={"kind": "plugin"}).json()] == ["my-plugin"]
+    again = client.post("/api/plugins", json=BODY)
+    assert again.status_code == 200 and again.json()["created"] is False  # nothing changed, so no second version
+    assert len(lib.for_kind("plugin").versions("my-plugin")) == 1
+
+
+def test_a_changed_component_makes_a_new_plugin_version_with_the_next_version_number(tmp_path):
+    client, lib = client_for(tmp_path)
+    client.post("/api/plugins", json=BODY)
+    import_skill(write_skill(tmp_path / SKILL, body="A different body.\n"), lib)  # demo-skill is now v2
+    second = client.post("/api/plugins", json=BODY).json()
+    assert second["created"] is True and second["version"]["tag"] == "v2"
+    plugins = lib.for_kind("plugin")
+    assert json.loads(plugins.read("my-plugin", 1)[1][".claude-plugin/plugin.json"])["version"] == "0.1.0"
+    assert json.loads(plugins.read("my-plugin", 2)[1][".claude-plugin/plugin.json"])["version"] == "0.1.1"  # a pinned version must change to update
+    assert [c["version"] for c in json.loads(client.post("/api/plugins/preview", json=BODY).text)["components"]] == ["v2", "v1"]
+
+
+def test_bad_input_is_a_plain_error_and_nothing_is_kept(tmp_path):
+    client, lib = client_for(tmp_path)
+    for bad, code in (
+        ({**BODY, "name": "claude-helpers"}, 400), ({**BODY, "name": "Bad Name"}, 400), ({**BODY, "description": " "}, 400),
+        ({**BODY, "components": [{"kind": "skill", "name": "no-such-skill"}]}, 404),
+        ({**BODY, "components": [{"kind": "skill", "name": SKILL}, {"kind": "skill", "name": SKILL}]}, 400),
+        ({**BODY, "components": []}, 422), ({**BODY, "components": [{"kind": "plugin", "name": "x"}]}, 422),
+    ):
+        for route in ("/api/plugins/preview", "/api/plugins"):
+            assert client.post(route, json=bad).status_code == code, (bad, route)
+    assert lib.for_kind("plugin").names() == []
+    assert "reserved" in client.post("/api/plugins", json={**BODY, "name": "claude-helpers"}).json()["detail"]
+
+
+def test_a_kept_plugin_exports_and_imports_back_identical_and_rescans_the_same(tmp_path):
+    client, lib = client_for(tmp_path)
+    client.post("/api/plugins", json=BODY)
+    exported = client.get("/api/library/my-plugin/export", params={"kind": "plugin"})
+    assert exported.status_code == 200
+    elsewhere = Library(tmp_path / "elsewhere").for_kind("plugin")
+    report = import_source(read_zip_bytes(exported.content, "x.zip"), elsewhere)  # the zip's one top folder holds .claude-plugin/
+    assert not report.refused and report.name == "my-plugin"
+    assert report.version.content_hash == lib.for_kind("plugin").pick("my-plugin").content_hash
+    assert [scan.status for scan in rescan(lib.for_kind("plugin"))] == ["same"]
+
+
+def test_a_plugin_installs_from_a_folder_only(tmp_path):
+    client, lib = client_for(tmp_path)
+    client.post("/api/plugins", json=BODY)
+    out = tmp_path / "out"
+    ok = client.post("/api/library/my-plugin/install", params={"kind": "plugin"}, json={"target": "folder", "folder": str(out)})
+    assert ok.status_code == 200, ok.text
+    assert json.loads((out / "my-plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"] == "my-plugin"
+    assert (out / "my-plugin" / "agents" / f"{AGENT}.md").exists() and (out / "my-plugin" / "skills" / SKILL / "SKILL.md").exists()
+    personal = client.post("/api/library/my-plugin/install", params={"kind": "plugin"}, json={"target": "personal"})
+    assert personal.status_code == 400 and "folder" in personal.json()["detail"]

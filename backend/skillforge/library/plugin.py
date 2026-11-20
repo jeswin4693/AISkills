@@ -9,6 +9,7 @@ scripts it ships and what those can do) is computed from the files and shown bef
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -18,11 +19,12 @@ from ..validate.plugin import MANIFEST, MARKETPLACE, name_problem
 from ..validate.static import JS_LANGS, PY_SUFFIXES, script_capabilities
 from .package import LibraryError
 from .risk import _front_matter, _words
-from .store import Library
+from .store import Library, content_hash
 
 COMPONENT_KINDS = ("skill", "agent")
 LEFT_OUT = {"spec.json"}  # the requester's own words stay in the library
 MAX_DESCRIPTION = 1000
+_SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 MAX_AUTHOR = 100
 TOOL_NOTES = {
     "Bash": "run any shell command", "Edit": "change existing files", "Write": "create or overwrite files",
@@ -185,3 +187,29 @@ def compose_plugin(
     files["README.md"] = _readme(name, description, version, plan, caps).encode("utf-8")
     ordered = dict(sorted(files.items()))
     return PluginPlan(name, version, ordered, caps, plan, validate_files(ordered, folder=name, kind="plugin"))
+
+
+def compose_for_keeping(
+    library: Library, components: list[ComponentRef], *, name: str, description: str, author: str = "",
+) -> PluginPlan:
+    """The plugin as it would be kept. Its version (0.1.<n>) is pinned by Claude Code, so it moves only when the content does:
+    the latest kept version's number when nothing changed, the next one when something did."""
+    problem = name_problem(name)
+    if problem:
+        raise PluginError(f"'{name}' cannot be a plugin name: {problem}.")
+    plugins = library.for_kind("plugin")
+    versions = plugins.versions(name)
+    kwargs = dict(name=name, description=description, author=author)
+    if not versions:
+        return compose_plugin(library, components, version="0.1.0", **kwargs)
+    latest, files = plugins.read(name)
+    try:
+        current = str(json.loads(files[MANIFEST].decode("utf-8")).get("version", ""))
+    except (KeyError, ValueError, AttributeError):
+        current = ""
+    current = current if _SEMVER.match(current) else "0.1.0"
+    same = compose_plugin(library, components, version=current, **kwargs)
+    if content_hash(same.files) == latest.content_hash:
+        return same
+    major, minor, patch = _SEMVER.match(current).groups()
+    return compose_plugin(library, components, version=f"{major}.{minor}.{int(patch) + 1}", **kwargs)

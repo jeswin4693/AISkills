@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..graph.store import data_dir
+from ..kinds import get_kind
 from ..results import CheckResult
 from ..validate.static import MAX_NAME, SLUG, read_dir
 from .package import Conflict, LibraryError, NotFound, replace_dir, write_tree
@@ -99,12 +100,23 @@ def diff_files(old: Mapping[str, bytes], new: Mapping[str, bytes]) -> list[FileC
 
 
 class Library:
-    def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root else data_dir() / "library"
+    """The versions of one kind of thing (skills, and later agents and the rest). Each kind has its own root, so names
+    never collide across kinds. The skill library stays exactly where it always was."""
+
+    def __init__(self, root: Path | None = None, kind: str = "skill") -> None:
+        spec = get_kind(kind)  # an unknown kind is refused here, before anything is joined into a path or touched on disk
+        self.kind = kind
+        self.root = Path(root) if root else data_dir() / spec.library_dir
+
+    def for_kind(self, kind: str) -> "Library":
+        """The library of another kind, next to this one (this very object for the same kind)."""
+        if kind == self.kind:
+            return self
+        return Library(self.root.parent / get_kind(kind).library_dir, kind)
 
     @property
     def backups(self) -> Path:
-        return self.root.parent / "backups"
+        return self.root.parent / ("backups" if self.kind == "skill" else f"backups-{self.kind}")
 
     # ---- reading -----------------------------------------------------------------------------------
 

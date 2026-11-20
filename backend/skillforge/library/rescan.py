@@ -62,7 +62,7 @@ def scan_version(library: Library, name: str, v: Version) -> VersionScan:
         _, files = library.read(name, v.version)  # also proves the files still match the manifest
     except LibraryError as exc:
         return VersionScan(name, v.tag, DAMAGED, message=str(exc))
-    findings = checks_worse(v.checks, validate_files(files))
+    findings = checks_worse(v.checks, validate_files(files, kind=library.kind))
     findings.sort(key=lambda f: f.status != FAILED)
     status = FAILING if any(f.status == FAILED for f in findings) else WORSE if findings else SAME
     return VersionScan(name, v.tag, status, findings)

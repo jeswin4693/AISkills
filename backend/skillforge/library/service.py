@@ -16,6 +16,7 @@ from pathlib import Path
 from ..build.models import SkillDefinition
 from ..build.scriptfiles import script_files
 from ..build.scripts import SANDBOX_ROW, ScriptRunner, check_scripts, run_script_tests
+from ..kinds import get_kind
 from ..kinds.skill import skill_name_of  # noqa: F401  (re-exported: the library has always offered it)
 from ..results import FAILED, NOT_RUN, WARNING, CheckResult
 from ..validate import validate_files
@@ -57,18 +58,21 @@ def retest_scripts(files: Mapping[str, bytes], runner: ScriptRunner | None = Non
     return structural + run_script_tests(sdm.scripts, sdm.script_cases, runner).results
 
 
-def _gate(files: Mapping[str, bytes], folder: str | None, problems: list[tuple[str, str]] | None = None) -> list[CheckResult]:
-    """Every static check. `folder` is the folder name the skill sat in, or None when there was none to compare."""
-    return validate_files(files, folder=folder, problems=problems)
+def _gate(
+    files: Mapping[str, bytes], folder: str | None, problems: list[tuple[str, str]] | None = None, kind: str = "skill",
+) -> list[CheckResult]:
+    """Every static check, with the definition check of `kind`. `folder` is the folder name the thing sat in, or None
+    when there was none to compare."""
+    return validate_files(files, folder=folder, problems=problems, kind=kind)
 
 
 def _failed(checks: list[CheckResult]) -> list[CheckResult]:
     return [c for c in checks if c.status == FAILED]
 
 
-def check_source(src: SkillSource) -> list[CheckResult]:
+def check_source(src: SkillSource, kind: str = "skill") -> list[CheckResult]:
     """Every static check on a source, storing nothing and running nothing."""
-    return _gate(src.files, src.folder, src.problems)
+    return _gate(src.files, src.folder, src.problems, kind)
 
 
 @dataclass
@@ -136,8 +140,8 @@ def import_source(
     note: str = "", now: datetime | None = None,
 ) -> ImportReport:
     """The same as import_skill, for a source that is already in memory (an upload)."""
-    checks = check_source(src)
-    name = skill_name_of(src.files)
+    checks = check_source(src, library.kind)
+    name = get_kind(library.kind).name_of(src.files)
     has_scripts = any(rel.startswith("scripts/") for rel in src.files)
     if has_scripts:
         if test_scripts and not _failed(checks):
@@ -168,7 +172,7 @@ def import_source(
 def rollback(library: Library, name: str, to: int, *, now: datetime | None = None) -> tuple[Version, bool]:
     """A new version with the content of an old one. History is never rewritten or deleted."""
     old, files = library.read(name, to)
-    checks = _gate(files, name)
+    checks = _gate(files, name, kind=library.kind)
     if _failed(checks):
         raise LibraryError(f"{name} {old.tag} no longer passes the checks ({_failed(checks)[0].name}), so it was not restored.")
     return library.add(
@@ -198,7 +202,7 @@ class Package:
 def package_skill(library: Library, name: str, version: int | None, *, without_spec: bool = False) -> Package:
     """One version as a zip with a single `<name>/` folder, ready to share. It is checked again first."""
     v, files = library.read(name, version)
-    failed = _failed(_gate(files, name))
+    failed = _failed(_gate(files, name, kind=library.kind))
     if failed:
         raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not exported.")
     dropped: list[str] = []
@@ -248,7 +252,7 @@ def install_skill(
 
     An existing folder is never touched unless force is given, and then it is copied to the library's backups first."""
     v, files = library.read(name, version)
-    failed = _failed(_gate(files, name))
+    failed = _failed(_gate(files, name, kind=library.kind))
     if failed:
         raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not installed.")
     skills_dir = Path(skills_dir)

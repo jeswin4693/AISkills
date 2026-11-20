@@ -243,3 +243,26 @@ def test_a_plugin_that_fails_its_own_checks_is_refused_in_the_usual_shape_and_no
     assert body["refused"] is True and body["created"] is False and body["version"] is None and body["name"] == "my-plugin"
     assert any(c["status"] == "failed" and "hidden" in c["name"] for c in body["checks"]) and body["changes"] == [] and body["risk"] is None
     assert lib.for_kind("plugin").names() == []
+
+
+def test_a_reserved_name_in_a_zip_from_outside_is_refused_on_import(tmp_path):
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        z.writestr(".claude-plugin/plugin.json", json.dumps({"name": "claude-helpers", "version": "0.1.0"}))
+        z.writestr("skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: Says hello.\n---\n\nSay hello.\n")
+    plugins = Library(tmp_path / "plugins").for_kind("plugin")
+    report = import_source(read_zip_bytes(buffer.getvalue(), "outside.zip"), plugins)
+    assert report.refused and plugins.names() == []
+    assert any(c.status == FAILED and "reserved" in c.detail for c in report.checks)
+
+
+@pytest.mark.parametrize("path", ["../x", "a/../b", "/abs", "..", ""])
+def test_a_component_file_that_would_leave_the_plugin_folder_is_refused(path):
+    from skillforge.library.plugin import _inside
+
+    with pytest.raises(PluginError, match="outside"):
+        _inside(path)
+    assert _inside("scripts/a.py") == "scripts/a.py"

@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry) and the Agent Builder are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the Plugin and MCP-server builders, and the web pages for the graph, suggestions and settings.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder and the Plugin Builder are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the MCP-server builder, and the web pages for the graph, suggestions and settings.
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -39,8 +39,13 @@ what is in your library) and an **MCP-server** builder. The approved plan, the p
 (or `"kind": "agent"` in the API) and describe a Claude Code subagent. You get an `AGENT.md` whose `tools` line is written by code
 (never empty, never every tool), with your rules and acceptance criteria carried in word for word, checked, kept in its own library,
 exported, and installed as one file in `~/.claude/agents`. The Library has an Agents tab. Not yet: a run against a live model,
-`eval` for agents, an agent flow in the real browser, `--kind` on the command line, and the Plugin and MCP-server builders
-(Phase 2 and 3 of the plan).
+`eval` for agents, an agent flow in the real browser, `--kind` on the command line.
+
+**Phase 2, the Plugin Builder, is built too** ([docs/plugin-builder.md](docs/plugin-builder.md)): a plugin bundles skills and agents so Claude Code can add them
+in one step. It is **composed, not described**: no conversation and no model. On the **Plugins** page you pick skills and agents from your library, and the app writes the plugin
+folder (manifest, a local marketplace file, `skills/`, `agents/`, a README) and works out, by code, what it can do on your machine before you keep it. A damaged or failing
+component is refused, reserved names are refused, and the version moves only when the content does. A plugin built this way passes Claude Code's own
+`claude plugin validate --strict`. Not yet: hooks and MCP servers (Phase 4), and the MCP-server builder (Phase 3).
 
 ## Layout
 
@@ -53,7 +58,7 @@ AISkills/
 │   ├── skillforge/evaluate/  # the test harness: a skill's test cases run against a model, graded by code
 │   ├── skillforge/validate/  # static checks on any skill folder (run nothing)
 │   ├── skillforge/sandbox/   # the Linux Docker sandbox that generated scripts run in (fails closed)
-│   ├── skillforge/kinds/     # the kind registry: what the app builds (skill and agent) and each one's checklist
+│   ├── skillforge/kinds/     # the kind registry: what the app builds (skill, agent and plugin) and each one's checklist
 │   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
 │   ├── skillforge/ai/        # the one model service: model by task, retries, usage, redaction, backup models
 │   ├── skillforge/providers/ # the model adapters (Gemini, OpenAI-compatible, Anthropic) and a mock for tests
@@ -144,6 +149,14 @@ What code decides, not the model: the `tools` line (at least `Read, Grep, Glob`,
 anything beyond reading is flagged for you to read), the front matter, and that your own rules and acceptance criteria appear in
 the file word for word. What is not done: its test cases are not run against a model, and no live-model run of this builder has
 been made yet.
+
+## Compose a plugin
+
+Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills and agents to include and press **Preview the plugin**. You see its files,
+**what it can do on your machine** (every tool its parts grant and every script it ships, worked out by code) and every check. **Keep this plugin** stores it in the
+library's Plugins tab, where you can export it as a zip or install it from a folder. Its README has the two commands that add it to Claude Code:
+`claude plugin marketplace add "<folder>"` and `claude plugin install <name>@<name>-local`. The app never writes Claude's settings: adding it is your command
+([docs/plugin-builder.md](docs/plugin-builder.md)).
 
 ## Check any skill folder
 

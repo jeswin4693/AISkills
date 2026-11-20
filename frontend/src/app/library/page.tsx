@@ -8,7 +8,7 @@ import { ImportPanel } from "@/components/ImportPanel";
 import { RescanPanel } from "@/components/RescanPanel";
 import { Badge, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { kindLabel, showKindPicker, withArticle } from "@/lib/builder";
+import { kindLabel, withArticle } from "@/lib/builder";
 import { formatWhen, plural, relativeTime, sourceText } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
 import { useAsync } from "@/lib/useAsync";
@@ -27,7 +27,7 @@ function LibraryContent({ kind }: { kind: string }) {
         subtitle={`${capital(noun)}s you have kept, as numbered versions. Every ${noun} passed the static checks to get in, and is checked again before it leaves.`}
       />
       <div className="space-y-6">
-        {showKindPicker(kinds.data) && (
+        {(kinds.data?.length ?? 0) > 1 && (
           <nav aria-label="What is kept" className="flex flex-wrap gap-2">
             {(kinds.data ?? []).map((k) => (
               <Link

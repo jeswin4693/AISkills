@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { EXAMPLES, kindLabel, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
+import { EXAMPLES, conversationalKinds, kindLabel, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
 import { relativeTime } from "@/lib/format";
 import { notifyStatusChanged, useAsync } from "@/lib/useAsync";
 import { useKinds } from "@/lib/useKinds";
@@ -83,7 +83,7 @@ export default function BuilderPage() {
               <fieldset>
                 <legend className="font-semibold">What do you want to build?</legend>
                 <div className="mt-1.5 flex flex-wrap gap-2">
-                  {(kinds.data ?? []).map((k) => (
+                  {conversationalKinds(kinds.data).map((k) => (
                     <label key={k.key} className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm">
                       <input type="radio" name={kindGroup} value={k.key} checked={kind === k.key} onChange={() => setKind(k.key)} />
                       {k.label}

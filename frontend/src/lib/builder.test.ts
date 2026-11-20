@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import {
-  DEFAULT_SLOTS, withArticle, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
+  DEFAULT_SLOTS, conversationalKinds, withArticle, activityText, answersToSend, canSendAnswers, elapsedSeconds, kindLabel, parseTests, progressSteps, showKindPicker, slotsOf,
   specRows, statusInfo, tokenLine, traceability, usageText,
 } from "./builder";
 import type { KindInfo, RequirementSpec, TestCase } from "./types";
@@ -31,11 +31,11 @@ describe("the requirement as rows", () => {
 
 describe("kinds", () => {
   const skill: KindInfo = {
-    key: "skill", label: "Skill", definition_file: "SKILL.md", personal_label: "~/.claude/skills", installs_as_file: false, install_targets: ["personal", "folder"],
+    key: "skill", label: "Skill", definition_file: "SKILL.md", personal_label: "~/.claude/skills", installs_as_file: false, install_targets: ["personal", "folder"], conversational: true,
     slots: DEFAULT_SLOTS.map((s) => ({ ...s, question: "?" })),
   };
   const agent: KindInfo = {
-    key: "agent", label: "Agent", definition_file: "AGENT.md", personal_label: "~/.claude/agents", installs_as_file: true, install_targets: ["personal"],
+    key: "agent", label: "Agent", definition_file: "AGENT.md", personal_label: "~/.claude/agents", installs_as_file: true, install_targets: ["personal"], conversational: true,
     slots: [{ key: "goal", label: "What the agent is for", question: "?" }, { key: "constraints", label: "What it must never do", question: "?" }],
   };
 
@@ -265,5 +265,22 @@ describe("what the model was asked, in words", () => {
   it("shows nothing when there was no attempt, or the server did not send usage", () => {
     expect(usageText({ calls: 0, errors: 0, input_tokens: null, output_tokens: null, models: [] })).toBe("");
     expect(usageText(undefined)).toBe("");
+  });
+});
+
+describe("kinds that are composed and not described", () => {
+  const base = { definition_file: "SKILL.md", personal_label: "", installs_as_file: false, install_targets: ["personal", "folder"], slots: [] };
+  const skill: KindInfo = { ...base, key: "skill", label: "Skill", conversational: true };
+  const agent: KindInfo = { ...base, key: "agent", label: "Agent", conversational: true };
+  const plugin: KindInfo = { ...base, key: "plugin", label: "Plugin", conversational: false };
+
+  it("lists only the kinds that are described in words in the builder", () => {
+    expect(conversationalKinds([skill, agent, plugin]).map((k) => k.key)).toEqual(["skill", "agent"]);
+    expect(conversationalKinds(undefined)).toEqual([]);
+  });
+
+  it("shows the builder's picker only when there is a real choice between described kinds", () => {
+    expect(showKindPicker([skill, plugin])).toBe(false); // a plugin is never an option there
+    expect(showKindPicker([skill, agent, plugin])).toBe(true);
   });
 });

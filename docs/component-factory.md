@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
 **Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
-([ai-engine.md](ai-engine.md)), Phase 0, the foundation, and Phase 1, the Agent Builder (both 2026-11-20; plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md); what they did and did not do is under "Phase 0: what was built" and "Phase 1: what was built" below, and in [agent-builder.md](agent-builder.md)). Nothing else here is built.** Next slice: Phase 2, the Plugin Builder.
+([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder) and Phase 2 (the Plugin Builder), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md); what each did and did not do is under "Phase 0/1/2: what was built" below, in [agent-builder.md](agent-builder.md) and in [plugin-builder.md](plugin-builder.md)). Nothing else here is built.** Next slice: Phase 3, the MCP Builder.
 
 ## What
 
@@ -91,6 +91,22 @@ and `installs_as_file`; a test that every registered kind has a definition check
 **Not done, on purpose:** a run against a live model, an agent flow in the real browser, `eval` for agents (their test cases are data and
 are reported as not run), unknown front-matter keys for agents (the list is not verified), risk-diff rules beyond `AGENT.md` and its `tools` line (Phase 4), a `model`
 choice for the agent, `--kind` on the command line, and Phase 0's `eval` from the web pages.
+
+## Phase 2: what was built (2026-11-20)
+
+The Plugin Builder, in [plugin-builder.md](plugin-builder.md). A plugin is **composed, not described**: no conversation and no model. You pick
+skills and agents already in the library; `library/plugin.py` reads each through the library (hash-verified and re-gated), writes `.claude-plugin/plugin.json`,
+a local `.claude-plugin/marketplace.json` that points at the folder itself, `skills/`, `agents/` and a README, and computes what the plugin can do on the
+machine (tools granted, scripts shipped and what they use). `PluginKind` (`library-plugin`, installs from a folder only, `conversational = False`),
+`validate/plugin.py` (a valid manifest, a name that is not reserved (`claude-`, `anthropic-`), a matching marketplace entry, something inside, and what the
+scripts inside can do), `POST /api/plugins/preview` and `POST /api/plugins`, a **Plugins** page (`/composer`), and a version `0.1.<n>` that moves only when the
+content does. Changes beyond the plugin: `Kind.conversational` (the Builder refuses and does not list a kind that is composed), and install refuses a target the kind
+does not offer.
+
+**Checked against the real tool:** a plugin built by this code passes `claude plugin validate --strict` (Claude Code 2.1.325, 2026-11-20): the manifest, the
+skills folder, the agents folder and the whole folder. **Not done, on purpose:** hooks, MCP servers and `userConfig` (Phase 4), a risk diff that sees scripts
+nested under `skills/` (Phase 4), a real `claude plugin marketplace add` and `install` (they change the person's Claude settings, so the person runs them), a
+LICENSE or icon, `--kind` on the command line.
 
 ## Decisions (approved)
 

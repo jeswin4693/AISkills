@@ -10,11 +10,12 @@ import { Alert, Button, Modal } from "./ui";
 export function InstallDialog(
   { version, kind, kindInfo, open, onClose }: { version: VersionInfo; kind?: string; kindInfo?: KindInfo; open: boolean; onClose: () => void },
 ) {
-  const personal = kindInfo?.personal_label || "~/.claude/skills";
+  const personal = kindInfo ? kindInfo.personal_label : "~/.claude/skills"; // "" for a kind with no personal folder (a plugin)
+  const offersPersonal = kindInfo ? kindInfo.install_targets.includes("personal") : true;
   const asFile = kindInfo?.installs_as_file ?? false; // an agent is installed as one file, a skill as a folder
   const noun = kindInfo?.label.toLowerCase() ?? "skill";
-  const folderName = personal.split("/").pop() ?? "skills";
-  const [target, setTarget] = useState<"personal" | "folder">("personal");
+  const folderName = personal.split("/").pop() || `${noun}s`;
+  const [target, setTarget] = useState<"personal" | "folder">(offersPersonal ? "personal" : "folder");
   const [folder, setFolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export function InstallDialog(
         <div className="space-y-3">
           <Alert tone="ok" title="Installed">
             <p className="break-all font-mono text-xs">{done.path}</p>
+            {kindInfo?.key === "plugin" && <p className="mt-1">Now add it to Claude Code with the two commands in its README.</p>}
             {done.backup && <p className="mt-1">The {asFile ? "file" : "folder"} that was there was copied to <span className="break-all font-mono text-xs">{done.backup}</span> first.</p>}
           </Alert>
           {done.has_scripts && (
@@ -67,6 +69,7 @@ export function InstallDialog(
         >
           <fieldset className="space-y-2">
             <legend className="mb-1 text-sm font-medium">Where should it go?</legend>
+            {offersPersonal && (
             <label className="flex items-start gap-2 text-sm">
               <input type="radio" name="target" checked={target === "personal"} onChange={() => setTarget("personal")} className="mt-1" />
               <span>
@@ -74,18 +77,19 @@ export function InstallDialog(
                 <span className="block text-muted">Every Claude Code session on this machine can use it.</span>
               </span>
             </label>
+            )}
             <label className="flex items-start gap-2 text-sm">
               <input type="radio" name="target" checked={target === "folder"} onChange={() => setTarget("folder")} className="mt-1" />
               <span className="min-w-0 flex-1">
                 A folder I choose
-                <span className="block text-muted">{asFile ? `The ${noun} goes to FOLDER/${version.name}.md.` : `The ${noun} goes to FOLDER/${version.name}.`} Give an absolute path, such as a project&apos;s .claude/{folderName}.</span>
+                <span className="block text-muted">{asFile ? `The ${noun} goes to FOLDER/${version.name}.md.` : `The ${noun} goes to FOLDER/${version.name}.`} Give an absolute path{personal ? <>, such as a project&apos;s .claude/{folderName}</> : null}.</span>
                 {target === "folder" && (
                   <input
                     autoFocus
                     value={folder}
                     onChange={(e) => setFolder(e.target.value)}
                     aria-label={`${folderName.charAt(0).toUpperCase()}${folderName.slice(1)} folder (absolute path)`}
-                    placeholder={`C:\\path\\to\\project\\.claude\\${folderName}`}
+                    placeholder={personal ? `C:\\path\\to\\project\\.claude\\${folderName}` : "C:\\path\\to\\a\\folder"}
                     className="mt-1.5 block w-full rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-xs"
                   />
                 )}

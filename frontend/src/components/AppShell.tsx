@@ -11,6 +11,7 @@ import { Loading } from "./ui";
 const NAV = [
   { href: "/builder", label: "Builder", hint: "Describe a skill and build it" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
+  { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
 ];
 
 function Shell({ children }: { children: ReactNode }) {

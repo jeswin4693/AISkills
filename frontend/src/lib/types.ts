@@ -219,8 +219,51 @@ export interface KindInfo {
   personal_label: string;
   /** True when installing writes one file (an agent), not a folder. */
   installs_as_file: boolean;
+  /** False for a kind that is composed from the library (a plugin), not described in the Builder. */
+  conversational: boolean;
   install_targets: string[];
   slots: SlotInfo[];
+}
+
+/** One skill or agent in a plugin. */
+export interface PluginComponentRef {
+  kind: "skill" | "agent";
+  name: string;
+  version?: number;
+}
+
+export interface PluginRequest {
+  name: string;
+  description: string;
+  author: string;
+  components: PluginComponentRef[];
+}
+
+/** What a plugin can do on the machine, worked out by code from its files. */
+export interface PluginCapabilities {
+  tools: string[];
+  by_component: { kind: string; name: string; tools: string[]; scripts: string[]; script_capabilities: string[] }[];
+  scripts: string[];
+  script_capabilities: string[];
+  hooks: string[];
+  mcp_servers: string[];
+  notes: string[];
+}
+
+export interface PluginPreview {
+  name: string;
+  version: string;
+  components: { kind: string; name: string; version: string }[];
+  manifest: string;
+  files: { path: string; bytes: number }[];
+  capabilities: PluginCapabilities;
+  checks: Check[];
+  failed: boolean;
+}
+
+export interface PluginSaveResult extends ImportResult {
+  capabilities?: PluginCapabilities;
+  components?: { kind: string; name: string; version: string }[];
 }
 
 export interface BuildSession {

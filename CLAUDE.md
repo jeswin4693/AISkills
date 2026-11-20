@@ -17,8 +17,8 @@ goes through one service that picks a model by task, owns the retry policy, coun
 asks backup models (`LLM_FALLBACKS`, any provider) when the first cannot answer; [docs/ai-engine.md](docs/ai-engine.md)), and the
 hosted version (one Docker image, a sign-in, one public address: [docs/hosting.md](docs/hosting.md)).
 The Component Factory's Phase 0 is built: a kind registry, and a library, validator, builder session and API that work per kind
-(`skill` and `agent` are registered; the Agent Builder is Phase 1, [docs/agent-builder.md](docs/agent-builder.md); plan: [docs/component-factory.md](docs/component-factory.md)).
-Next: Phase 2 of the Component Factory, the Plugin Builder (then the MCP-server builder), then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
+(`skill`, `agent` and `plugin` are registered; Phase 1 is the Agent Builder, [docs/agent-builder.md](docs/agent-builder.md), and Phase 2 the Plugin Builder, [docs/plugin-builder.md](docs/plugin-builder.md); plan: [docs/component-factory.md](docs/component-factory.md)).
+Next: Phase 3 of the Component Factory, the MCP-server builder, then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
 the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
 Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 

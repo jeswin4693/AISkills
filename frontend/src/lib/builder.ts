@@ -26,9 +26,14 @@ export function slotsOf(kinds: KindInfo[] | undefined, kind: string): SlotInfo[]
   return kinds?.find((k) => k.key === kind)?.slots ?? DEFAULT_SLOTS;
 }
 
-/** A picker is shown only when there is something to choose between. */
+/** The kinds that are described in words in the Builder: a plugin is composed from the library instead. */
+export function conversationalKinds(kinds: KindInfo[] | undefined): KindInfo[] {
+  return (kinds ?? []).filter((k) => k.conversational);
+}
+
+/** The Builder's picker is shown only when there is something to choose between. */
 export function showKindPicker(kinds: KindInfo[] | undefined): boolean {
-  return (kinds?.length ?? 0) > 1;
+  return conversationalKinds(kinds).length > 1;
 }
 
 /** A kind's name for a person, or its key when the server does not list it. */

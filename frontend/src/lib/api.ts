@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, KindInfo, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
@@ -70,6 +70,15 @@ const withKind = (path: string, kind?: string): string =>
 export const api = {
   health: () => get<Health>("/api/health"),
   kinds: () => get<KindInfo[]>("/api/kinds"),
+
+  // ---- plugins: composed from the library, no model ----
+  previewPlugin: (req: PluginRequest) => post<PluginPreview>("/api/plugins/preview", req),
+  /** 200 and 422 both carry a report (kept or unchanged, or refused with the checks that failed). */
+  async savePlugin(req: PluginRequest): Promise<PluginSaveResult> {
+    const res = await send("/api/plugins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
+    return json<PluginSaveResult>(res, [422]);
+  },
+
   sandbox: () => get<SandboxStatus>("/api/sandbox"),
   provider: () => get<ProviderStatus>("/api/provider"),
 

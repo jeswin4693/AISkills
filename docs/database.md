@@ -19,6 +19,10 @@ SHA-256 manifests ([library.md](library.md)), so a file edited behind its back i
 the round, the questions being asked, the requirement spec, the result summary (checks, file list, `report.md`
 text), the error and whether a retry can help, model calls, notes, and the library name and version once saved.
 
+Migration 0003 added `kind` (a key of the kind registry; `skill` by default, so every earlier session is a skill) and `parent_id`
+(for a plugin's child builds, later; no foreign key, because SQLite cannot add one to an existing table). A session whose kind is no
+longer registered can still be read, listed and discarded.
+
 `jobs`: a sequence id (a higher id is a later job), the session, kind (`understand` or `build`), status
 (`queued`, `running`, `succeeded`, `failed`), times, the progress events the UI shows, and the error.
 

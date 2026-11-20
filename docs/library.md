@@ -97,6 +97,12 @@ The data folder is `%LOCALAPPDATA%` on Windows (the same place as the graph cach
 inside a repository and never inside OneDrive. The manifest stores the *name* of the folder or file a skill came
 from, not its full path.
 
+**One library per kind.** The skill library is the folder above. Every other kind the app learns to build has its own sibling
+folder (`library-<kind>` and `backups-<kind>`), so names never collide across kinds; `Library(kind=...)` and `?kind=` pick one, and
+an unknown kind is refused before any path is made. Import, rescan, rollback, export and install check with the library's own kind.
+A zip's single top folder is unwrapped only when it holds a `SKILL.md` (`library/package.py`), so a zip of another kind must keep
+its files at the top of the zip until that kind chooses its own layout.
+
 ## What keeps this safe
 
 - **Import is checked first.** A skill with hidden characters, a missing or broken `SKILL.md`, bad JSON, binaries,

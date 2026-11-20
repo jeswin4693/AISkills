@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build, Safety, Scripts, the skill Library, a local API with a database, and the web UI's Library pages are built and tested; Suggest, Build, the builder API and Scripts are verified live with Gemini.**
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the Agent, Plugin and MCP-server builders, and the web pages for the graph, suggestions and settings.
 See [docs/roadmap.md](docs/roadmap.md).
 
 ```
@@ -11,22 +11,58 @@ See [docs/roadmap.md](docs/roadmap.md).
           (no AI)                     (AI + graph)                      (AI + templates)
 ```
 
+## Where it is going: more than skills (the Component Factory)
+
+The builder is being grown into four builders that share one app, one database, one library and one model service:
+a **skill** builder (built), then an **agent** builder (a Claude Code subagent file), a **plugin** builder (assembled from
+what is in your library) and an **MCP-server** builder. The approved plan, the phases and the rules are in
+[docs/component-factory.md](docs/component-factory.md).
+
+**Phase 0, the foundation, is built.** Nothing changes for skills; the app is ready for a second kind:
+
+- **A kind registry** (`skillforge/kinds/`): what the app can build, the checklist a requirement of that kind must fill, and
+  where it installs. Today it holds one kind, the skill.
+- **One library per kind.** The skill library stays exactly where it was; every other kind gets its own folder, so names
+  never collide. A kind is only ever a key looked up in the registry, never part of a file path.
+- **The static checks take a kind.** Every check runs for every kind; only the check of the definition file (for a skill,
+  `SKILL.md`) belongs to the kind.
+- **Builder sessions remember their kind** (database migration 0003), and the builder runs that kind's own reading and
+  building steps.
+- **The API:** `GET /api/kinds`, `?kind=` on every library route, rescan and validate, and a `kind` when starting a build.
+  An unknown kind is a plain 400 that names the kinds there are.
+- **The web Builder** shows a kind picker as soon as there is more than one kind, and a kind badge on past builds. With one
+  kind the page is exactly as it was.
+- **Two small skill improvements:** a skill's permissions are written into `SKILL.md` as `allowed-tools` by code, and the
+  checks warn about front-matter keys that Claude Code does not know (both described below).
+
+Not yet: the second kind itself (Phase 1, the Agent Builder, is next), running `eval` from the web pages, and library tabs
+per kind.
+
 ## Layout
 
 ```
 AISkills/
 ├── backend/
-│   ├── skillforge/graph/   # repository graph: parse, resolve, query (no AI)
-│   ├── skillforge/library/ # skill versions: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
-│   ├── skillforge/api/     # local HTTP API (FastAPI), localhost only
-│   ├── skillforge/builder/ # the skill builder as a database-backed conversation with background jobs
-│   ├── skillforge/db/      # SQLAlchemy models + Alembic migrations (SQLite first)
+│   ├── skillforge/graph/     # repository graph: parse, resolve, query (no AI)
+│   ├── skillforge/suggest/   # review and ideas over graph facts (AI), every suggestion cites real graph nodes
+│   ├── skillforge/build/     # requirement checklist, skill design, rendering, quality checks, scripts
+│   ├── skillforge/evaluate/  # the test harness: a skill's test cases run against a model, graded by code
+│   ├── skillforge/validate/  # static checks on any skill folder (run nothing)
+│   ├── skillforge/sandbox/   # the Linux Docker sandbox that generated scripts run in (fails closed)
+│   ├── skillforge/kinds/     # the kind registry: what the app builds (today the skill) and its checklist
+│   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
+│   ├── skillforge/ai/        # the one model service: model by task, retries, usage, redaction, backup models
+│   ├── skillforge/providers/ # the model adapters (Gemini, OpenAI-compatible, Anthropic) and a mock for tests
+│   ├── skillforge/api/       # local HTTP API (FastAPI), localhost only; the hosted mode adds a sign-in
+│   ├── skillforge/builder/   # the builder as a database-backed conversation with background jobs
+│   ├── skillforge/db/        # SQLAlchemy models + Alembic migrations (SQLite first)
 │   ├── skillforge/conductor/ # the read-only Task Plan: scope, size, process, rules, token plan
-├── frontend/               # web UI: Next.js + React + TypeScript + Tailwind (talks to the local API)
-│   ├── skillforge/cli.py   # `python -m skillforge ...`
-│   ├── tests/              # offline tests, no key or network needed
-│   └── scripts/            # Step 0 smoke test for the LLM provider
-├── docs/                   # roadmap, graph design, decisions, environment notes
+│   ├── skillforge/cli.py     # `python -m skillforge ...`
+│   ├── tests/                # offline tests, no key or network needed
+│   └── scripts/              # Step 0 smoke test for the LLM provider
+├── frontend/                 # web UI: Next.js + React + TypeScript + Tailwind (talks to the API)
+├── docs/                     # roadmap, component factory plan, design docs per slice, decisions, environment notes
+├── Dockerfile, deploy/       # the hosted version: one image with the pages and the API
 ├── .env.example
 └── README.md
 ```
@@ -78,6 +114,12 @@ trigger phrases), your rules and acceptance criteria are carried into `SKILL.md`
 worked example, what is only for people lives in the README, and the result says what it costs in tokens (an estimate).
 Checks warn about vague wording, an input no step uses and similar weaknesses ([docs/build.md](docs/build.md)).
 
+If the skill needs files, commands or the network, the permissions it asks for are written into `SKILL.md` as
+`allowed-tools`, by code and in a fixed order (`read_files` is `Read Grep Glob`, `write_files` is `Edit Write`,
+`run_commands` is `Bash`, `network` is `WebFetch WebSearch`). That is a **grant**: Claude Code lets the skill use those
+tools without asking while it is active, and `Bash` is not narrowed to the skill's own scripts. A skill that is only text
+gets no `allowed-tools` line at all. The format was not tried against a live Claude Code.
+
 Does the skill actually help? `build --eval` (or `python -m skillforge eval <skill-folder>`) runs the skill's own test
 cases against a model **with the skill and without it**, and code grades the replies by simple checks (a model never
 judges). It says whether the skill helped, adds nothing for the tokens it costs, or made things worse. It works for
@@ -91,7 +133,9 @@ scripts never ran is marked DRAFT ([docs/scripts.md](docs/scripts.md)).
 
 Static safety and structure checks that run nothing, for skills made here or downloaded
 ([docs/validate.md](docs/validate.md)). Scripts are never run unless a Linux sandbox is available, and never on
-your machine directly.
+your machine directly. It also warns about front-matter keys that Claude Code does not know: Claude Code ignores them
+without a word, so a typo such as `allowed_tools` would quietly do nothing. The list of known keys is data, with the day it
+was read (2026-11-20).
 
 ```powershell
 cd backend
@@ -116,7 +160,8 @@ python -m skillforge plan "..." --repo C:\path\to\repo --no-ai --type bugfix    
 
 Import a skill folder or `.zip` (made here or downloaded): it is checked first and **refused if a check fails**.
 Accepted skills are kept as v1, v2, ... that you can diff, roll back, export as a `.zip` or install where an agent
-reads them ([docs/library.md](docs/library.md)). Needs no AI and no key; importing never runs a script.
+reads them ([docs/library.md](docs/library.md)). Needs no AI and no key; importing never runs a script. Each kind of
+thing the app builds has its own library folder (the skill library is where it always was).
 
 A skill that was clean when you imported it can be edited into a bad one later, so every new version is compared with
 the one before it and **what got riskier is listed** (a script that now uses the network, a new permission or web
@@ -143,6 +188,8 @@ python -m skillforge serve        # http://127.0.0.1:8000/api/docs, this machine
 
 The same library, validate, sandbox and language features over HTTP, locked to localhost, plus the skill builder as a
 conversation you can poll: questions, answers, approval, then a background build ([docs/api.md](docs/api.md)).
+`GET /api/kinds` lists what the app builds (today only the skill) with each kind's checklist, and the library routes take
+`?kind=`.
 Sessions are kept in a SQLite file ([docs/database.md](docs/database.md)); the plan for the web UI on top is in
 [docs/ui-and-database-plan.md](docs/ui-and-database-plan.md).
 
@@ -156,7 +203,8 @@ cd frontend; npm run dev                    # terminal 2: the UI, at http://127.
 The **Builder** is the front door: describe a skill in a sentence, answer only what is missing, approve the requirement
 (each line shown beside the words of yours that back it), watch it build, see which tests cover each way you said you
 would know it works, and save it. The **Library** manages what you keep: versions, files, compare, export, install,
-restore, all with the safety checks shown in plain words. The Builder needs a model set up in `.env`. First-time setup and
+restore, all with the safety checks shown in plain words. When the app builds more than one kind of thing, a picker at the
+top of the Builder chooses which; with one kind the page is unchanged. The Builder needs a model set up in `.env`. First-time setup and
 what was checked: [frontend/README.md](frontend/README.md) and [docs/ui.md](docs/ui.md). Where this project can be
 genuinely different from other skill tools: [docs/differentiators.md](docs/differentiators.md).
 

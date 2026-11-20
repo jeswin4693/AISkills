@@ -19,6 +19,7 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 | `POST /api/provider/check` | One tiny call to each distinct model that is set up, so each key and model is shown to really work: `{"configured", "detail", "checks": [{provider, model, roles, ok, kind, detail, latency_ms, input_tokens, output_tokens}]}`. It uses a little quota, so it runs only when asked. Never a key. |
 | `GET /api/sandbox` | Is a Linux sandbox available here, and why or why not. |
 | `GET /api/languages` | Every language with its level, grammar status and extensions. Never downloads a grammar. |
+| `GET /api/kinds` | What the app builds: each kind's `key`, `label`, `install_targets` and checklist `slots` (`key`, `label`, `question`). Today only `skill`. |
 | `POST /api/validate` | Body: a `.zip`. Runs every static check. Stores nothing, runs nothing. |
 | `GET /api/library` | The skills, each with its version count and latest version. |
 | `POST /api/library/import` | Body: a `.zip` (`?filename=`, `?note=`, `?test_scripts=true`). **200** when kept (or identical to the latest, `created: false`); **422** when a check failed, with the checks, and nothing is stored. `test_scripts` runs the skill's cases in the sandbox and the request waits for them. The answer has a `risk` object (as in `diff`) when it added a version after another, and `null` otherwise. |
@@ -37,6 +38,11 @@ interactive docs are off. Local mode is unchanged.
 Status codes: 400 a problem the person can fix (message in `detail`), 404 not in the library, 409 something is
 already there, 413 upload over 6 MB, 422 a skill that failed its checks (import) or a malformed request body.
 
+**Kinds.** Every `/api/library*` route, `GET /api/rescan` and `POST /api/validate` take `?kind=` (default `skill`). The library of
+each kind is its own folder, so a name in one kind never shows in another. A kind that is not registered (`?kind=../x` included) is a
+400 whose message names the kinds there are, and nothing is created on disk for it. `POST /api/library/{name}/install` with
+`"target": "personal"` goes to that kind's own personal folder (`~/.claude/skills` for a skill).
+
 ## The skill builder (step H2)
 
 The builder is a **session** you talk to across requests. The two slow steps (reading your words, writing the skill)
@@ -53,7 +59,7 @@ run as background jobs: the request that starts one returns at once with `status
 | Method and path | What it does |
 |---|---|
 | `GET /api/provider` | `{"configured", "provider", "model", "detail", "tiers", "escalation", "capabilities"}`: is a model set up, and which model serves each tier of work (`tiers`: fast, design, code, actor, each with provider and model; `escalation`: the stronger model, or null). Never a key, and no call to the model. See [ai-engine.md](ai-engine.md). |
-| `POST /api/builds` | `{"description", "with_scripts"}` starts a session (201). A sentence under 10 characters is a 400. |
+| `POST /api/builds` | `{"description", "with_scripts", "kind"}` (`kind` defaults to `skill`; an unknown kind is a 400 and nothing is stored) starts a session (201). A sentence under 10 characters is a 400. |
 | `GET /api/builds` | Sessions, newest first, each with its status and what became of it. |
 | `GET /api/builds/{id}` | The whole session: `status`, `questions` (when it is waiting for answers), `spec` (the requirement waiting for approval), `result` (when done), `error`, `retryable`, `usage` (`{calls, errors, input_tokens, output_tokens, models}`: attempts at the model with failed ones counted, and the tokens the provider reported, null when it gave none), and `job` with its progress `events`. |
 | `POST /api/builds/{id}/answers` | `{"answers": {"<slot>": "text"}}`. Only slots that were asked; at least one non-empty answer. |

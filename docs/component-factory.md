@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
-**Status: planned and approved by the project owner (2026-11-19). Nothing in this document is built yet except the shared
-model service ([ai-engine.md](ai-engine.md)).** Next slice: Phase 0 below.
+**Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
+([ai-engine.md](ai-engine.md)) and Phase 0, the foundation (2026-11-20; plan: [superpowers/plans/2026-11-20-component-factory-phase-0.md](superpowers/plans/2026-11-20-component-factory-phase-0.md); what it did and did not do is under "Phase 0: what was built" below). Nothing else here is built.** Next slice: Phase 1, the Agent Builder.
 
 ## What
 
@@ -49,6 +49,32 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> render -> CHECKS ->
 
 Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, XL more), including tests, docs and a live check.
 
+## Phase 0: what was built (2026-11-20)
+
+- `skillforge/kinds/`: `Kind` (key, label, `library_dir`, checklist `slots`, `install_targets`, `name_of`, `personal_dir`, `understand`,
+  `build`), the registry (`KINDS`, `get_kind`, `all_kinds`) and `SkillKind`, a thin adapter over the old functions.
+- `Library(root, kind="skill")` and `Library.for_kind(kind)`: one root per kind next to the skill one (`library-<kind>`,
+  `backups-<kind>`); the skill library did not move.
+- `validate_files(..., kind=)` with `DEFINITION_CHECKS`: only the definition-file check varies by kind.
+- Migration 0003: `build_sessions.kind` (default `skill`) and `parent_id` (no foreign key: SQLite cannot add one to an existing table).
+- The builder runs `understand` and `build` through the session's kind. A session whose kind is no longer registered can be read,
+  listed and discarded, and fails plainly when continued.
+- API: `GET /api/kinds`; `?kind=` on every library route, `rescan` and `validate`; `kind` on `POST /api/builds`. An unknown kind is a 400.
+- UI: a kind picker and badge, shown only when more than one kind exists; the requirement and question labels come from the server.
+- `build/tools.py`: a skill's permissions become `allowed-tools` (a grant; `Bash` is not narrowed to the skill's scripts).
+  `validate/formats.py`: the front-matter keys Claude Code knows, read on 2026-11-20 from the skills page through a summarising fetch;
+  an unknown key warns.
+
+**Not done, on purpose:** running `eval` from the web pages (it takes minutes and many model calls, the hosted version forwards
+`/api/*` through a rewrite that I believe cuts a request at about 30 seconds, and the `jobs` table only exists per builder session, so
+it needs a job that is not a builder session); library tabs and per-kind skill and compare pages (Phase 1, when a second kind exists
+to look at); a `--kind` flag on the command line.
+
+**Skill-shaped parts a second kind must decide for itself:** a zip's single top folder is unwrapped only when it holds a `SKILL.md`
+(`library/package.py`), so a zip of another kind keeps its files at the top of the zip until that kind chooses a layout;
+`retest_scripts` and the risk diff read skill files (Phase 4 widens the risk diff); `Round`, which a kind's `understand` returns,
+still carries a skill-shaped `RequirementSpec`.
+
 ## Decisions (approved)
 
 Order as above. "Agent Builder" here means **definition files**, not a runtime agent loop (the Task Conductor's native loop in
@@ -57,6 +83,9 @@ images (Python, Node) made once with network and never pulled at run time; this 
 in exec form (`command` + `args`, no shell), and are always flagged as riskier. One library root per kind.
 
 ## Rules this adds
+
+- **A kind is a registry key, never a path.** `Library`, the API and the builder look a kind up in the registry before they touch a
+  folder, so `?kind=../x` cannot name one.
 
 - **Least privilege by code.** An omitted `tools` field gives an agent every tool, so code always writes an explicit `tools` list,
   derived from the permission posture (Read/Grep/Glob = `read_files`, Edit/Write = `write_files`, Bash = `run_commands`,

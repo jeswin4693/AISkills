@@ -13,6 +13,7 @@ from skillforge.build.render import schema_for
 from skillforge.build.tools import tools_for
 from skillforge.library.risk import RISKIER, risk_diff
 from skillforge.providers import MockProvider
+from skillforge.validate import validate_files
 from skillforge.validate.static import read_dir
 
 NOW = datetime(2026, 11, 17, 12, 0, 0, tzinfo=timezone.utc)
@@ -414,3 +415,9 @@ def test_the_risk_diff_sees_a_skill_gaining_allowed_tools(tmp_path):
     diff = risk_diff(read_dir(text_only.out_dir)[0], read_dir(networked.out_dir)[0], "v1", "v2")
     tool = [c for c in diff.changes if c.kind == "tool"]
     assert len(tool) == 1 and tool[0].direction == RISKIER and "WebFetch" in tool[0].detail
+
+
+def test_a_skill_built_here_has_no_unknown_key_warning(tmp_path):
+    result, _ = run(tmp_path, [round_one(), round_two(), draft(permissions=["read_files", "write_files", "run_commands", "network"])])
+    checks = {c.name: c for c in validate_files(read_dir(result.out_dir)[0], folder=result.out_dir.name)}
+    assert checks["front matter uses only keys Claude Code knows"].status == "passed"

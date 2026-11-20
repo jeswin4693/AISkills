@@ -16,6 +16,7 @@ python -m skillforge validate C:\path\to\skill-folder --json
 | Check | Result when it finds something |
 |---|---|
 | `SKILL.md` exists, front matter is valid YAML, name is a safe slug, description is present and within 1024 characters | failed |
+| front matter uses only keys Claude Code knows (the list is data in `validate/formats.py`, with the day it was read) | warning |
 | folder name matches the skill name | warning |
 | no symbolic links, no repeated file names (zips), no paths that leave the folder | failed |
 | file sizes within limits (1 MB per file, 5 MB total, `SKILL.md` 100 KB) | failed |
@@ -27,6 +28,16 @@ python -m skillforge validate C:\path\to\skill-folder --json
 | every script `SKILL.md` mentions exists | failed |
 | scripts use only the capabilities the skill declares (`read_files`, `write_files`, `run_commands`, `network`) | failed if a script exceeds its declaration |
 | no binary files; shell scripts are noted because they are not analysed | failed / warning |
+
+**Kinds:** `validate_files(files, kind=...)` runs every check above for every kind of thing the app keeps. Only the first
+row (the definition file) is the kind's own: a skill's is the `SKILL.md` check; another kind registers its own in
+`DEFINITION_CHECKS`. An unregistered kind is refused, not guessed.
+
+**The key list is a snapshot.** Claude Code ignores a front-matter key it does not know and says nothing, so a typo such
+as `allowed_tools` would quietly do nothing; that is why an unknown key warns. The list was read on 2026-11-20 from the
+Claude Code skills page through a summarising fetch, so the wording is paraphrased. A new Claude Code may know more keys:
+add them to `validate/formats.py` and change the date. An older stored skill with a key that is missing from the list
+shows up as "worse" in `library rescan`.
 
 **Why some are warnings:** a pattern is not understanding. The wording check cannot tell an attack from a
 security guide quoting one, so it asks a person to read the line instead of rejecting the skill.

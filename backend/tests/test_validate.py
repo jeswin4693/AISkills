@@ -9,12 +9,14 @@ from conftest import write_files
 from skillforge import cli
 from skillforge.results import FAILED, PASSED, WARNING, CheckResult
 from skillforge.validate import DEFINITION_CHECKS, validate_files, validate_skill_dir
+from skillforge.validate.formats import SKILL_FORMAT_CHECKED_ON
 from skillforge.validate.static import python_capabilities, script_capabilities
 
 SKILL_MD = "---\nname: demo-skill\ndescription: Does a demo job. Use it when testing.\n---\n\n# Demo Skill\n\nRead the file and report.\n"
 
 N_SKILL_MD = "SKILL.md exists and its front matter is valid"
 N_FOLDER = "folder name matches the skill name"
+N_KEYS = "front matter uses only keys Claude Code knows"
 N_PATHS = "no symbolic links or paths that leave the folder"
 N_SIZE = "file sizes are within limits"
 N_HIDDEN = "no hidden or direction-changing characters in text files"
@@ -56,7 +58,7 @@ def status(results, name):
 
 def test_a_good_skill_passes_every_check():
     results = validate_files(good(), folder="demo-skill")
-    assert [r.status for r in results] == [PASSED] * len(results) and len(results) == 12
+    assert [r.status for r in results] == [PASSED] * len(results) and len(results) == 13
 
 
 # ---- structure ---------------------------------------------------------------------------------------------
@@ -259,7 +261,7 @@ def test_cli_validate_exit_codes_and_json(capsys, tmp_path):
     ok = write_files(tmp_path / "demo-skill", {k: v.decode() for k, v in good().items()})
     assert cli.main(["validate", str(ok)]) == 0
     out = capsys.readouterr().out
-    assert "12 passed, 0 warning(s), 0 failed" in out and "not proof" in out
+    assert "13 passed, 0 warning(s), 0 failed" in out and "not proof" in out
 
     bad = write_files(tmp_path / "bad-skill", {**{k: v.decode() for k, v in good().items()}, "scripts/x.py": "def broken(:\n"})
     assert cli.main(["validate", str(bad), "--json"]) == 1
@@ -289,3 +291,28 @@ def test_another_kind_swaps_only_the_definition_check(monkeypatch):
 def test_an_unregistered_kind_is_refused():
     with pytest.raises(ValueError, match="'nope'"):
         validate_files(good(), kind="nope")
+
+
+# ---- front-matter keys Claude Code does not know -----------------------------------------------------------
+
+
+def skill_md_with(extra_lines: str) -> bytes:
+    """The demo SKILL.md with more front-matter lines (each ending in a newline) before the closing ---."""
+    return SKILL_MD.replace("\n---\n\n# Demo Skill", f"\n{extra_lines}---\n\n# Demo Skill").encode()
+
+
+def test_known_front_matter_keys_pass():
+    results = run(good(SKILL_dot_md=skill_md_with("allowed-tools: Read Grep\n")), folder="demo-skill")
+    assert status(results, N_KEYS) == PASSED
+
+
+def test_an_unknown_front_matter_key_warns_and_names_it():
+    results = run(good(SKILL_dot_md=skill_md_with("colour: red\n")), folder="demo-skill")
+    found = results[N_KEYS]
+    assert found.status == WARNING and "colour" in found.detail and SKILL_FORMAT_CHECKED_ON in found.detail
+    assert status(results, N_SKILL_MD) == PASSED  # the structure is fine: this is only a warning
+
+
+def test_front_matter_that_is_not_a_mapping_adds_no_second_result():
+    results = run(good(SKILL_dot_md=b"---\n- a\n- b\n---\n\nbody\n"))
+    assert N_KEYS not in results and status(results, N_SKILL_MD) == FAILED

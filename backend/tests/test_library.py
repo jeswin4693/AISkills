@@ -569,3 +569,12 @@ def test_zip_bytes_orders_files_and_does_not_depend_on_dict_order():
     a = zip_bytes("s", {"b.md": b"2", "a.md": b"1"})
     b = zip_bytes("s", {"a.md": b"1", "b.md": b"2"})
     assert a == b
+
+
+def test_an_unknown_front_matter_key_only_warns_so_the_import_goes_through(lib, tmp_path):
+    src = write_skill(tmp_path / NAME)
+    md = src / "SKILL.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("description:", "colour: red\ndescription:", 1), encoding="utf-8", newline="\n")
+    report = import_skill(src, lib)
+    assert not report.refused and report.version.tag == "v1"
+    assert any(c.status == "warning" and "colour" in c.detail for c in report.checks)

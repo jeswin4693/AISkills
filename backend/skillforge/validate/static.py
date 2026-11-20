@@ -18,6 +18,7 @@ from jsonschema.exceptions import SchemaError
 
 from ..graph import languages
 from ..results import FAILED, PASSED, WARNING, CheckResult
+from .formats import SKILL_FORMAT_CHECKED_ON, SKILL_FRONT_MATTER_KEYS
 
 MAX_FILE = 1_000_000
 MAX_TOTAL = 5_000_000
@@ -119,11 +120,27 @@ def _check_skill_md(files: Mapping[str, bytes], folder: str | None) -> list[Chec
         elif len(" ".join(desc.split())) > MAX_DESCRIPTION:
             problems.append(f"description is longer than {MAX_DESCRIPTION} characters")
     out = [CheckResult(name, FAILED, "; ".join(problems)) if problems else CheckResult(name, PASSED)]
+    if isinstance(meta, dict):
+        out.append(_check_front_matter_keys(meta))
     if folder is not None and isinstance(meta, dict) and isinstance(meta.get("name"), str) and meta["name"] != folder:
         out.append(CheckResult("folder name matches the skill name", WARNING, f"folder '{folder}' but name is '{meta['name']}'"))
     elif folder is not None:
         out.append(CheckResult("folder name matches the skill name", PASSED))
     return out
+
+
+def _check_front_matter_keys(meta: dict) -> CheckResult:
+    """A key that Claude Code does not know is ignored by it without a word, so a typo (`allowed_tools`) would quietly
+    do nothing. A warning, never a failure: a newer Claude Code may know the key (see validate/formats.py)."""
+    name = "front matter uses only keys Claude Code knows"
+    unknown = sorted(str(key) for key in meta if key not in SKILL_FRONT_MATTER_KEYS)
+    if not unknown:
+        return CheckResult(name, PASSED)
+    return CheckResult(
+        name, WARNING,
+        f"not in the list of keys Claude Code knows (read {SKILL_FORMAT_CHECKED_ON}): {', '.join(unknown)}. "
+        "Claude Code ignores such a key without saying so; a newer version may know it.",
+    )
 
 
 def _check_paths_and_size(files: Mapping[str, bytes], problems: list[tuple[str, str]]) -> list[CheckResult]:

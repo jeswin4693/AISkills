@@ -55,7 +55,7 @@ def test_the_manifest_and_the_local_marketplace_carry_the_name_and_point_at_the_
         "plugins": [{"name": "my-plugin", "source": "./", "description": "Two helpers."}],
     }
     anonymous = compose(make_library(tmp_path / "x"), author="")
-    assert "author" not in json.loads(anonymous.files[".claude-plugin/plugin.json"])
+    assert json.loads(anonymous.files[".claude-plugin/plugin.json"])["author"] == {"name": "me"}  # `claude plugin validate --strict` wants one
     assert json.loads(anonymous.files[".claude-plugin/marketplace.json"])["owner"] == {"name": "me"}
 
 

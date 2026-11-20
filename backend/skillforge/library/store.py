@@ -28,7 +28,7 @@ from .package import Conflict, LibraryError, NotFound, replace_dir, write_tree
 
 SCHEMA = 1
 MAX_DIFF_LINES = 200
-_VERSION_DIR = re.compile(r"^v(\d+)$")
+_VERSION_DIR = re.compile(r"^v(\d+)\Z")
 
 
 def sha256(data: bytes) -> str:

@@ -78,10 +78,15 @@ def _read_zip(source: Path | io.BytesIO, label: str) -> SkillSource:
             problems.append(("size", f"the zip holds {len(infos)} files (limit {MAX_ENTRIES})"))
             return SkillSource({}, problems, "zip", label, None)
         total = 0
+        spelled: dict[str, str] = {}  # a file's name with case and path spelling ignored -> the name it came in as
         for info in infos:
             name = info.filename
             if name in files:
                 problems.append(("duplicate", f"{name} appears twice in the zip"))
+                continue
+            same = spelled.setdefault(PurePosixPath(name).as_posix().casefold(), name)  # "./a", "a//b" and "A" are the same file on some systems
+            if same != name:
+                problems.append(("duplicate", f"{name} and {same} are the same file once capital letters and path spelling are ignored"))
                 continue
             if stat.S_ISLNK(info.external_attr >> 16):
                 problems.append(("symlink", f"{name} is a symbolic link"))

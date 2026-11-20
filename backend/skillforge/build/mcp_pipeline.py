@@ -36,8 +36,8 @@ MAX_TOOLS = 8
 MADE_UP = re.compile(r"\b(simulat\w*|placeholder|dummy|fake\w*|mock\w*|hard-?coded|stub\w*)\b", re.I)
 MAX_CASES = 30
 MAX_BODY_LINES = 60
-IDENT = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+IDENT = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}\Z")
 Progress = Callable[[str], None]
 
 

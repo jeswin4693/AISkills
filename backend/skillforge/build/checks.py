@@ -13,8 +13,8 @@ from .models import SkillDefinition
 from .render import schema_for
 from .scriptfiles import script_path
 
-SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+SLUG = re.compile(r"^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\Z)[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]*\Z")
 MAX_DESCRIPTION = 1024
 
 

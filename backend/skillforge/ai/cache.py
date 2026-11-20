@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
-_KEY = re.compile(r"^[0-9a-f]{64}$")
+_KEY = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class ResponseCache(Protocol):

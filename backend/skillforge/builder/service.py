@@ -38,7 +38,7 @@ from .usage import DbUsageRecorder, usage_summary
 
 MAX_ROUNDS = 3
 MAX_EVENTS = 50
-_ID = re.compile(r"^[0-9a-f]{32}$")
+_ID = re.compile(r"^[0-9a-f]{32}\Z")
 log = logging.getLogger(__name__)
 
 

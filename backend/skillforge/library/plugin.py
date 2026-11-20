@@ -1,8 +1,8 @@
 """Compose a Claude Code plugin from skills and agents that are already in the library.
 
 No model is involved: a plugin is an assembly, and everything about it is decided by code. Each component is read through the
-library, which proves its files against their SHA-256 manifest and re-runs the static checks first, so a damaged or failing
-component can never end up inside a plugin. What the plugin can do on the machine (the tools its skills and agents grant, the
+library, which proves its files against their SHA-256 manifest; the plugin's own check then runs every component through that
+kind's own checks, so a damaged or failing component fails the plugin and is refused when it is kept. What the plugin can do on the machine (the tools its skills and agents grant, the
 scripts it ships and what those can do) is computed from the files and shown before anything is kept or installed.
 """
 
@@ -15,21 +15,23 @@ from pathlib import PurePosixPath
 
 from ..results import FAILED, CheckResult
 from ..validate import validate_files
-from ..validate.plugin import MANIFEST, MARKETPLACE, name_problem
-from ..validate.static import JS_LANGS, PY_SUFFIXES, script_capabilities
-from .package import LibraryError
-from .risk import _front_matter, _words
+from ..validate.plugin import MANIFEST, MARKETPLACE, name_problem, shipped_code
+from ..validate.static import JS_LANGS, PY_SUFFIXES, script_capabilities, split_tools
+from .package import MAX_ENTRIES, LibraryError
+from .risk import _front_matter
 from .store import Library, content_hash
 
 COMPONENT_KINDS = ("skill", "agent")
 LEFT_OUT = {"spec.json"}  # the requester's own words stay in the library
 MAX_DESCRIPTION = 1000
-_SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)\Z")
 MAX_AUTHOR = 100
+DEFAULT_AUTHOR = "me"  # `claude plugin validate --strict` wants an author, and the local marketplace already names an owner
 TOOL_NOTES = {
     "Bash": "run any shell command", "Edit": "change existing files", "Write": "create or overwrite files",
     "WebFetch": "fetch web pages", "WebSearch": "search the web",
 }
+READ_TOOLS = {"Read", "Grep", "Glob"}
 
 
 class PluginError(LibraryError):
@@ -49,8 +51,8 @@ class Capabilities:
     by_component: list[dict]  # {"kind", "name", "tools", "scripts", "script_capabilities"} for each
     scripts: list[str]  # plugin-relative paths
     script_capabilities: list[str]  # network, run_commands, write_files: what the scripts use, by syntax only
-    hooks: list[str] = field(default_factory=list)  # a v1 plugin has none
-    mcp_servers: list[str] = field(default_factory=list)  # nor these
+    hooks: list[str] = field(default_factory=list)  # the components that declare hooks in their front matter
+    mcp_servers: list[str] = field(default_factory=list)  # the components that declare MCP servers in their front matter
     notes: list[str] = field(default_factory=list)  # the same, in plain sentences
 
 
@@ -81,50 +83,69 @@ def _inside(path: str) -> str:
 
 
 def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> Capabilities:
+    """What the plugin can do, by reading the files. A tool is named by what comes before a bracket (`Bash(git *)` is Bash); a tool
+    SkillForge cannot describe is named, never called read-only; hooks, MCP servers and a bypassed approval in a component's front
+    matter are listed; and code in ANY folder of a skill counts as shipped code, not only `scripts/`."""
     by: list[dict] = []
     all_tools: set[str] = set()
     all_scripts: list[str] = []
     all_caps: set[str] = set()
     unanalysed: list[str] = []
     granted_by: dict[str, list[str]] = {}
+    hooks: list[str] = []
+    servers: list[str] = []
+    bypass: list[str] = []
     for ref, files in kinds_files:
         definition = "SKILL.md" if ref.kind == "skill" else "AGENT.md"
         key = "allowed-tools" if ref.kind == "skill" else "tools"
-        tools = sorted(_words(_front_matter(files, definition)[0].get(key)))
+        meta = _front_matter(files, definition)[0]
+        tools = sorted({entry.split("(")[0].strip() for entry in split_tools(meta.get(key)) if entry.split("(")[0].strip()})
+        who = f"{ref.kind} {ref.name}"
+        if meta.get("hooks"):
+            hooks.append(who)
+        if meta.get("mcpServers") or meta.get("mcp_servers"):
+            servers.append(who)
+        if str(meta.get("permissionMode", "")) == "bypassPermissions":
+            bypass.append(who)
         scripts: list[str] = []
         caps: set[str] = set()
-        for rel, data in sorted(files.items()):
-            if ref.kind != "skill" or "scripts" not in PurePosixPath(rel).parts[:-1]:
-                continue
-            path = f"skills/{ref.name}/{rel}"
-            scripts.append(path)
-            suffix = PurePosixPath(rel).suffix.lower()
-            if suffix in PY_SUFFIXES or suffix in JS_LANGS:
-                found, dynamic = script_capabilities(rel, data)
-                caps |= found
-                if dynamic:
+        if ref.kind == "skill":
+            for rel, data in sorted(shipped_code(files).items()):
+                path = f"skills/{ref.name}/{rel}"
+                scripts.append(path)
+                suffix = PurePosixPath(rel).suffix.lower()
+                if suffix in PY_SUFFIXES or suffix in JS_LANGS:
+                    found, dynamic = script_capabilities(rel, data)
+                    caps |= found
+                    if dynamic:
+                        unanalysed.append(path)
+                else:
                     unanalysed.append(path)
-            else:
-                unanalysed.append(path)
         by.append({"kind": ref.kind, "name": ref.name, "tools": tools, "scripts": scripts, "script_capabilities": sorted(caps)})
         all_tools |= set(tools)
         all_scripts += scripts
         all_caps |= caps
         for tool in tools:
             granted_by.setdefault(tool, []).append(ref.name)
-    notes = [
-        f"It can {TOOL_NOTES[tool]} ({tool}), from {', '.join(sorted(set(granted_by[tool])))}."
-        for tool in sorted(all_tools) if tool in TOOL_NOTES
-    ]
+    notes: list[str] = []
+    for tool in sorted(all_tools):
+        who = ", ".join(sorted(set(granted_by[tool])))
+        if tool in TOOL_NOTES:
+            notes.append(f"It can {TOOL_NOTES[tool]} ({tool}), from {who}.")
+        elif tool not in READ_TOOLS:
+            notes.append(f"It can use {tool}, which SkillForge cannot describe, from {who}: read what it does.")
+    notes += [f"The {who} declares hooks: commands that run on this machine when it is used. Read them." for who in hooks]
+    notes += [f"The {who} declares MCP servers: programs it starts or connects to. Read them." for who in servers]
+    notes += [f"The {who} skips permission prompts (permissionMode: bypassPermissions)." for who in bypass]
     if all_scripts:
         n = len(all_scripts)
         used = ", ".join(sorted(c.replace("_", " ") for c in all_caps)) or "nothing risky by syntax"
         notes.append(f"It ships {n} script{'s that run' if n != 1 else ' that runs'} on this machine and can use: {used}.")
     if unanalysed:
-        notes.append("These scripts could not be analysed, so read them: " + ", ".join(unanalysed) + ".")
+        notes.append("These could not be analysed, so read them: " + ", ".join(unanalysed) + ".")
     if not notes:
         notes.append("It can only read and search files.")
-    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), notes=notes)
+    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), hooks, servers, notes)
 
 
 def _readme(name: str, description: str, version: str, plan: list[dict], caps: Capabilities) -> str:
@@ -153,6 +174,11 @@ def compose_plugin(
         raise PluginError("Say in a sentence what the plugin is for: the description is empty.")
     if len(description.strip()) > MAX_DESCRIPTION or len(author) > MAX_AUTHOR:
         raise PluginError(f"The description may be {MAX_DESCRIPTION} characters and the author {MAX_AUTHOR}.")
+    for label, value in (("description", description), ("author", author)):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PluginError(f"The {label} is not valid text: it contains a character that cannot be written to a file.") from None
     if not components:
         raise PluginError("A plugin needs at least one skill or agent.")
     seen: set[tuple[str, str]] = set()
@@ -175,16 +201,17 @@ def compose_plugin(
         else:
             files[f"agents/{ref.name}.md"] = component_files["AGENT.md"]
     caps = _capabilities(read)
-    manifest: dict = {"name": name, "version": version, "description": description.strip()}
-    if author.strip():
-        manifest["author"] = {"name": author.strip()}
+    owner = author.strip() or DEFAULT_AUTHOR
+    manifest: dict = {"name": name, "version": version, "description": description.strip(), "author": {"name": owner}}
     market = {
-        "name": f"{name}-local", "description": description.strip(), "owner": {"name": author.strip() or "me"},
+        "name": f"{name}-local", "description": description.strip(), "owner": {"name": owner},
         "plugins": [{"name": name, "source": "./", "description": description.strip()}],
     }
     files[MANIFEST] = _json(manifest)
     files[MARKETPLACE] = _json(market)
     files["README.md"] = _readme(name, description, version, plan, caps).encode("utf-8")
+    if len(files) > MAX_ENTRIES:
+        raise PluginError(f"This plugin would hold {len(files)} files, and a plugin of more than {MAX_ENTRIES} files cannot be imported back.")
     ordered = dict(sorted(files.items()))
     return PluginPlan(name, version, ordered, caps, plan, validate_files(ordered, folder=name, kind="plugin"))
 
@@ -203,13 +230,24 @@ def compose_for_keeping(
     if not versions:
         return compose_plugin(library, components, version="0.1.0", **kwargs)
     latest, files = plugins.read(name)
+    current = _manifest_version(files)
+    same = compose_plugin(library, components, version=current, **kwargs)
+    if content_hash(same.files) == latest.content_hash:
+        return same
+    highest = (0, 1, 0)
+    for stored in versions:  # a rollback makes the latest version carry an OLD number: the next one must beat them all
+        try:
+            seen = _SEMVER.match(_manifest_version(plugins.read(name, stored.version)[1]))
+        except LibraryError:
+            continue  # a damaged old version cannot tell its number; the others still count
+        if seen:
+            highest = max(highest, tuple(int(part) for part in seen.groups()))
+    return compose_plugin(library, components, version=f"{highest[0]}.{highest[1]}.{highest[2] + 1}", **kwargs)
+
+
+def _manifest_version(files: dict[str, bytes]) -> str:
     try:
         current = str(json.loads(files[MANIFEST].decode("utf-8")).get("version", ""))
     except (KeyError, ValueError, AttributeError):
         current = ""
-    current = current if _SEMVER.match(current) else "0.1.0"
-    same = compose_plugin(library, components, version=current, **kwargs)
-    if content_hash(same.files) == latest.content_hash:
-        return same
-    major, minor, patch = _SEMVER.match(current).groups()
-    return compose_plugin(library, components, version=f"{major}.{minor}.{int(patch) + 1}", **kwargs)
+    return current if _SEMVER.match(current) else "0.1.0"

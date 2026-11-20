@@ -246,6 +246,18 @@ class InstallReport:
     has_scripts: bool
 
 
+def _unused(path: Path) -> Path:
+    """`path`, or `path` with -2, -3 ... added before its suffix when it is taken. Two forced installs in the same second must never
+    overwrite the first backup, which holds the person's original."""
+    if not path.exists():
+        return path
+    for n in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}-{n}{path.suffix}") if path.suffix and path.is_file() else path.with_name(f"{path.name}-{n}")
+        if not candidate.exists():
+            return candidate
+    raise LibraryError(f"Too many backups share the name {path.name}. Remove some from {path.parent}.")
+
+
 def _install_file(
     library: Library, v: Version, data: bytes, name: str, suffix: str, folder: Path, *, force: bool, now: datetime | None,
 ) -> InstallReport:
@@ -259,7 +271,7 @@ def _install_file(
         if not force:
             raise Conflict(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
         stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
-        backup = library.backups / f"{name}-{stamp}{suffix}"
+        backup = _unused(library.backups / f"{name}-{stamp}{suffix}")
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(target, backup)
     folder.mkdir(parents=True, exist_ok=True)
@@ -296,7 +308,7 @@ def install_skill(
         if not force:
             raise Conflict(f"{target} already exists. Use --force to replace it (the old copy is saved to a backup first).")
         stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
-        backup = library.backups / f"{name}-{stamp}"
+        backup = _unused(library.backups / f"{name}-{stamp}")
         shutil.copytree(target, backup, symlinks=True)
     skills_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=skills_dir))  # built aside, then moved into place

@@ -14,6 +14,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
@@ -117,6 +118,13 @@ def create_app(
     if hosted is not None:
         app.add_middleware(AuthMiddleware, hosted=hosted)
     app.add_middleware(LocalOnlyMiddleware, origins=trusted, hosts=hosted.allowed_hosts if hosted else None)  # added last, so it runs first
+
+    @app.exception_handler(RequestValidationError)
+    async def bad_request_body(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's own 422 echoes the rejected input back. A server should not repeat what it refused (it can be large, or a
+        # secret, or text that cannot even be written out again), so say where and why, never what.
+        detail = [{"loc": list(e.get("loc", ())), "msg": str(e.get("msg", "")), "type": str(e.get("type", ""))} for e in exc.errors()]
+        return JSONResponse({"detail": detail}, status_code=422)
 
     @app.exception_handler(SessionNotFound)
     async def session_not_found(_: Request, exc: SessionNotFound) -> JSONResponse:

@@ -17,7 +17,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from ..graph import languages
-from ..results import FAILED, PASSED, WARNING, CheckResult
+from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult
 from .formats import SKILL_FORMAT_CHECKED_ON, SKILL_FRONT_MATTER_KEYS
 
 MAX_FILE = 1_000_000
@@ -25,7 +25,7 @@ MAX_TOTAL = 5_000_000
 MAX_SKILL_MD = 100_000
 MAX_DESCRIPTION = 1024
 MAX_NAME = 64  # the longest skill name the checks, the library and the kinds all accept
-SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SLUG = re.compile(r"^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\Z)[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 TEXT_SUFFIXES = {".md", ".json", ".txt", ".yaml", ".yml", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".toml", ".cfg", ".ini", ".csv"}
 PY_SUFFIXES = {".py"}
@@ -401,12 +401,39 @@ def _check_binaries(files: Mapping[str, bytes]) -> CheckResult:
     return CheckResult(name, PASSED)
 
 
+def split_tools(value: object) -> list[str]:
+    """The entries of a tools field (`allowed-tools` or `tools`): a string split on commas and white space except inside brackets
+    (so `Bash(git push *)` is ONE entry and keeps its scope), or a list."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if not isinstance(value, str):
+        return []
+    entries: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for ch in value:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if depth == 0 and (ch == "," or ch.isspace()):
+            if current:
+                entries.append("".join(current))
+                current = []
+        else:
+            current.append(ch)
+    if current:
+        entries.append("".join(current))
+    return entries
+
+
 # ---- entry points ------------------------------------------------------------------------------------
 
 # The one check that differs by kind: does the definition file exist and is it well formed. Every other check
 # runs for every kind. A kind that is not listed here has no checks, so it is refused rather than let through.
 DefinitionCheck = Callable[[Mapping[str, bytes], str | None], list[CheckResult]]
 DEFINITION_CHECKS: dict[str, DefinitionCheck] = {"skill": _check_skill_md}
+CODE_IN_COMPONENTS = {"plugin"}  # kinds whose code is not in a top-level scripts/ folder
 
 
 def validate_files(
@@ -423,9 +450,10 @@ def validate_files(
     results.append(_check_hidden_characters(files))
     results += _check_markup_and_wording(files)
     results.append(_check_json(files))
-    results.append(_check_scripts_parse(files))
-    results.append(_check_script_references(files))
-    results.append(_check_capabilities(files))
+    shared = [_check_scripts_parse(files), _check_script_references(files), _check_capabilities(files)]
+    if kind in CODE_IN_COMPONENTS:  # these three read a top-level scripts/ folder only: they must not claim a pass for code they never saw
+        shared = [CheckResult(c.name, NOT_RUN, "this kind keeps its code inside its components, whose own checks read it") for c in shared]
+    results += shared
     results.append(_check_binaries(files))
     return results
 

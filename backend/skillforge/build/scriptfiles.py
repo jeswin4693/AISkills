@@ -17,10 +17,10 @@ from .models import Fixture, Script, ScriptCase
 EXTENSIONS = {
     "python": ".py", "javascript": ".js", "typescript": ".ts", "bash": ".sh", "ruby": ".rb", "php": ".php", "java": ".java",
 }
-SCRIPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
-CASE_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SCRIPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}\Z")
+CASE_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 # A fixture path: plain segments of letters, digits, '_', '.', '-'; a segment never starts with '.', so there is no '..'.
-FIXTURE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)*$")
+FIXTURE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*(/[A-Za-z0-9_][A-Za-z0-9_.\-]*)*\Z")
 FIXTURES = "{fixtures}"  # the placeholder a case writes for its own fixture folder (replaced as plain text, never evaluated)
 
 

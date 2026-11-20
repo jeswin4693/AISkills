@@ -31,7 +31,7 @@ import yaml
 
 from ..kinds import get_kind
 from ..validate import validate_files
-from ..validate.static import JS_LANGS, PY_SUFFIXES, TEXT_SUFFIXES, markup_findings, script_capabilities, wording_findings
+from ..validate.static import JS_LANGS, PY_SUFFIXES, TEXT_SUFFIXES, markup_findings, script_capabilities, split_tools, wording_findings
 
 RISKIER = "riskier"  # something that can do more, or look worse, than before
 LOOK = "look"  # a change that deserves reading, and that code cannot judge
@@ -100,12 +100,9 @@ def _front_matter(files: Mapping[str, bytes], definition: str = "SKILL.md") -> t
 
 
 def _words(value: object) -> set[str]:
-    """`allowed-tools` is written as a comma or space separated string, or as a list."""
-    if isinstance(value, str):
-        return {w for w in re.split(r"[,\s]+", value) if w}
-    if isinstance(value, list):
-        return {str(w) for w in value}
-    return set()
+    """`allowed-tools` is written as a comma or space separated string, or as a list. An entry keeps its scope: `Bash(git *)`
+    and `Bash(*)` are different entries, so widening a scope shows up in the risk diff."""
+    return set(split_tools(value))
 
 
 def _declared_permissions(files: Mapping[str, bytes]) -> set[str]:

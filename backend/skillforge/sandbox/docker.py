@@ -14,8 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
-IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?$")
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?\Z")
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 DOCKER = ("docker",)
 
 

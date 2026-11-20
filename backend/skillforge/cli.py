@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import asdict
 from typing import Any
@@ -25,6 +26,8 @@ from .ai import service_from_env
 from .ai.doctor import check_models, describe
 from .providers import LLMProvider, ProviderError
 from .sandbox import probe_sandbox
+from .sandbox.docker import _decode as _decode_engine_text
+from .sandbox.images import MCP_DOCKERFILE, MCP_IMAGE, mcp_build_command
 from .suggest.facts import collect_facts
 from .suggest.pipeline import SuggestReport
 from .suggest.pipeline import suggest as run_suggest
@@ -498,6 +501,22 @@ def _run_sandbox_status(args: argparse.Namespace) -> int:
     return 0 if s.available else 1
 
 
+def _run_sandbox_build_mcp(args: argparse.Namespace) -> int:
+    """Build the one image that MCP servers are tested in. Needs a network, once; testing a server never builds or pulls anything."""
+    s = probe_sandbox()
+    if not s.available:
+        print("UNAVAILABLE: " + s.reason)
+        print("The image is built with Docker, so a Linux container engine is needed first (docs/sandbox-wsl.md).")
+        return 1
+    print(f"Building {MCP_IMAGE} from python:3.13-slim and the pinned SDK (one time, needs a network; this can take a minute)...")
+    done = subprocess.run(mcp_build_command(s), input=MCP_DOCKERFILE.encode("utf-8"), capture_output=True, timeout=900)
+    shown = [ln for text in (done.stdout, done.stderr) for ln in _decode_engine_text(text).splitlines() if ln.strip()]
+    for line in shown[-8:]:
+        print(line)
+    print(f"{MCP_IMAGE} is ready." if done.returncode == 0 else f"The build failed (exit code {done.returncode}).")
+    return done.returncode
+
+
 def _when(stamp: str) -> str:
     return stamp[:16].replace("T", " ")
 
@@ -734,6 +753,7 @@ def _parser() -> argparse.ArgumentParser:
     v.add_argument("--json", action="store_true", help="print machine-readable JSON")
 
     area.add_parser("sandbox-status", help="is a safe place to run skill scripts available on this machine?")
+    area.add_parser("sandbox-build-mcp", help="build, once, the image that generated MCP servers are tested in (needs Docker and a network)")
     md = area.add_parser("models", help="which models are set up, which keys are unused; with --test, ask each model one tiny question")
     md.add_argument("--test", action="store_true", help="make one tiny call to each model (uses a little of your quota)")
     md.add_argument("--json", action="store_true")
@@ -800,10 +820,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "languages", "library", "serve", "plan", "eval", "models"):
+    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "sandbox-build-mcp", "languages", "library", "serve", "plan", "eval", "models"):
         handler = {
             "suggest": _run_suggest, "build": _run_build, "render": _run_render,
-            "validate": _run_validate, "sandbox-status": _run_sandbox_status, "languages": _run_languages,
+            "validate": _run_validate, "sandbox-status": _run_sandbox_status, "sandbox-build-mcp": _run_sandbox_build_mcp, "languages": _run_languages,
             "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval, "models": _run_models,
         }[args.area]
         try:

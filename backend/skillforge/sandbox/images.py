@@ -19,6 +19,18 @@ RUNNERS: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 
 
+# The image that runs a generated MCP server. It is not a public image: it is built ONCE, with network, from the two lines below
+# (`python -m skillforge sandbox-build-mcp`), and never built or pulled when a server is tested.
+MCP_SDK_VERSION = "2.3.0"  # the official `mcp` package; its names were settled by a real install on 2026-11-20 (docs/mcp-builder.md)
+MCP_IMAGE = f"skillforge-mcp:{MCP_SDK_VERSION}"
+MCP_DOCKERFILE = f"FROM python:3.13-slim\nRUN pip install --no-cache-dir mcp=={MCP_SDK_VERSION}\n"
+
+
+def mcp_build_command(status) -> list[str]:
+    """The exact `docker build`, reaching docker the way `status` says. The Dockerfile is sent on standard input: no files, no context."""
+    return [*status.prefix, "build", "-t", MCP_IMAGE, "-"]
+
+
 def runnable_languages() -> list[str]:
     return sorted(RUNNERS)
 

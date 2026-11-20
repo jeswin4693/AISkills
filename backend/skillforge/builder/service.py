@@ -227,7 +227,11 @@ class Builder:
                 raise WrongState("There is no finished skill in this session yet.")
         if result["status"] == "draft" and not accept_draft:
             why = result["draft_reason"] or f"{result['counts']['failed']} check(s) failed"
-            raise WrongState(f"This skill is a DRAFT ({why}). Say accept_draft to keep it anyway.")
+            try:
+                noun = get_kind(kind).label.lower()  # "skill", "agent", "mcp server": the message names what the person built
+            except UnknownKind:
+                noun = "skill"
+            raise WrongState(f"This {noun} is a DRAFT ({why}). Say accept_draft to keep it anyway.")
         try:
             library = self.library.for_kind(kind)
         except UnknownKind as exc:

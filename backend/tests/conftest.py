@@ -24,6 +24,22 @@ def never_reach_a_real_provider(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def never_start_a_container_by_accident(monkeypatch):
+    """A built MCP server is started in the sandbox. An offline test that does not hand in its own runner gets "no sandbox", so
+    no test ever starts a container by accident. The live tests pass a real runner themselves."""
+    from skillforge.sandbox import SandboxUnavailable
+
+    class NoSandbox:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __call__(self, folder):
+            raise SandboxUnavailable("Not run. Tests never start a container.")
+
+    monkeypatch.setattr("skillforge.build.mcp_protocol.SandboxMcpRunner", NoSandbox)
+
+
 def write_files(root: Path, files: dict[str, str]) -> Path:
     for rel, text in files.items():
         p = root / rel

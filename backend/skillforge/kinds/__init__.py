@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from .agent import AgentKind
 from .base import Kind, Slot, UnknownKind
+from .mcp import McpKind
 from .plugin import PluginKind
 from .skill import SkillKind
 
-KINDS: dict[str, Kind] = {"skill": SkillKind(), "agent": AgentKind(), "plugin": PluginKind()}
+KINDS: dict[str, Kind] = {"skill": SkillKind(), "agent": AgentKind(), "plugin": PluginKind(), "mcp": McpKind()}
 
 
 def get_kind(key: str) -> Kind:
@@ -25,4 +26,4 @@ def all_kinds() -> list[Kind]:
     return list(KINDS.values())
 
 
-__all__ = ["AgentKind", "KINDS", "Kind", "PluginKind", "Slot", "SkillKind", "UnknownKind", "all_kinds", "get_kind"]
+__all__ = ["AgentKind", "KINDS", "Kind", "McpKind", "PluginKind", "Slot", "SkillKind", "UnknownKind", "all_kinds", "get_kind"]

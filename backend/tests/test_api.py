@@ -58,7 +58,7 @@ def thing_zip() -> bytes:
 
 def test_kinds_lists_the_skill_kind_with_its_slots(client):
     kinds = client.get("/api/kinds").json()
-    assert [k["key"] for k in kinds] == ["skill", "agent", "plugin"]
+    assert [k["key"] for k in kinds] == ["skill", "agent", "plugin", "mcp"]
     assert kinds[0]["label"] == "Skill" and kinds[0]["install_targets"] == ["personal", "folder"]
     assert kinds[0]["slots"][0] == {"key": "goal", "label": "Goal", "question": QUESTIONS["goal"]}
 
@@ -385,7 +385,7 @@ def test_the_serve_command_exists_and_defaults_to_port_8000():
 
 
 def test_kinds_say_whether_they_are_built_from_a_description(client):
-    assert {k["key"]: k["conversational"] for k in client.get("/api/kinds").json()} == {"skill": True, "agent": True, "plugin": False}
+    assert {k["key"]: k["conversational"] for k in client.get("/api/kinds").json()} == {"skill": True, "agent": True, "plugin": False, "mcp": True}
 
 
 def test_installing_to_a_target_the_kind_does_not_offer_is_a_plain_400(client, fake_kind, tmp_path, monkeypatch):

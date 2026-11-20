@@ -163,8 +163,16 @@ def _addresses(files: Mapping[str, bytes]) -> dict[str, set[str]]:
 # ---- the comparison ----------------------------------------------------------------------------------
 
 
-def _script_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
-    old_scripts, new_scripts = _scripts(old), _scripts(new)
+def _code_files(files: Mapping[str, bytes], definition: str) -> dict[str, bytes]:
+    """The scripts, and the definition file too when it is itself code (an MCP server's server.py)."""
+    found = dict(_scripts(files))
+    if definition in files and _analysed(definition):
+        found[definition] = files[definition]
+    return found
+
+
+def _script_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], definition: str = "SKILL.md") -> None:
+    old_scripts, new_scripts = _code_files(old, definition), _code_files(new, definition)
     for rel in sorted(new_scripts.keys() - old_scripts.keys()):
         caps, dynamic = script_capabilities(rel, new_scripts[rel])
         uses = sorted(caps | dynamic)
@@ -190,6 +198,32 @@ def _script_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
             added, removed = _line_changes(_text(old_scripts[rel]), _text(new_scripts[rel]))
             note = "" if _analysed(rel) else " This kind of script is not analysed for what it does."
             out.append(RiskChange(LOOK, "script_changed", f"{rel} changed ({_lines(added, removed)}); its capabilities are the same.{note}", rel))
+
+
+def _server_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], definition: str) -> None:
+    """For an MCP server: the tools it offers Claude and the environment variables it reads, by syntax."""
+    from ..validate.mcp import analyze_server  # imported here: `validate` must not need `library` and `library` need not load it for other kinds
+
+    def facts(files: Mapping[str, bytes]):
+        try:
+            return analyze_server(_text(files[definition]))
+        except (KeyError, SyntaxError, ValueError, RecursionError):
+            return None
+
+    before, after = facts(old), facts(new)
+    if before is None or after is None:
+        return
+    old_tools, new_tools = {t.name for t in before.tools}, {t.name for t in after.tools}
+    for name in sorted(new_tools - old_tools):
+        out.append(RiskChange(LOOK, "tool", f"The server now offers a new tool, {name}: it is one more thing Claude can do through it.", definition))
+    for name in sorted(old_tools - new_tools):
+        out.append(RiskChange(SAFER, "tool", f"The server no longer offers the tool {name}.", definition))
+    for name in sorted(after.env_names - before.env_names):
+        out.append(RiskChange(RISKIER, "environment", f"The server now reads the environment variable {name}: whatever value you give it is reachable by the tools.", definition))
+    for name in sorted(before.env_names - after.env_names):
+        out.append(RiskChange(SAFER, "environment", f"The server no longer reads the environment variable {name}.", definition))
+    if after.env_dynamic and not before.env_dynamic:
+        out.append(RiskChange(RISKIER, "environment", "The server now reads an environment variable by a name that is not written in the code (or all of them).", definition))
 
 
 def _permission_changes(
@@ -251,7 +285,10 @@ def _text_changes(
     if definition in old or definition in new:
         added, removed = _line_changes(old_body, new_body)
         if added or removed:
-            out.append(RiskChange(LOOK, "instructions", f"The instructions in {definition} changed ({_lines(added, removed)}). An agent follows them.", definition))
+            if _analysed(definition):  # code is not read by an agent: it runs on this machine
+                out.append(RiskChange(LOOK, "instructions", f"The code in {definition} changed ({_lines(added, removed)}). It runs on your machine when the server starts.", definition))
+            else:
+                out.append(RiskChange(LOOK, "instructions", f"The instructions in {definition} changed ({_lines(added, removed)}). An agent follows them.", definition))
     for rel in sorted(old.keys() | new.keys()):  # other Markdown an agent may be sent to read
         if rel == definition or PurePosixPath(rel).suffix.lower() != ".md" or old.get(rel) == new.get(rel):
             continue
@@ -283,7 +320,9 @@ def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "
     `kind` says which definition file and which tools key to read (SKILL.md and allowed-tools, AGENT.md and tools)."""
     spec = get_kind(kind)
     changes: list[RiskChange] = []
-    _script_changes(old, new, changes)
+    _script_changes(old, new, changes, spec.definition_file)
+    if spec.definition_file.endswith(".py"):
+        _server_changes(old, new, changes, spec.definition_file)
     _permission_changes(old, new, changes, spec.definition_file, spec.tools_field)
     _wording_changes(old, new, changes)
     _address_changes(old, new, changes)

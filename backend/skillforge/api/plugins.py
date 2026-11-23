@@ -20,7 +20,7 @@ from .views import checks_view, import_view
 
 
 class ComponentBody(BaseModel):
-    kind: Literal["skill", "agent"]
+    kind: Literal["skill", "agent", "mcp"]
     name: str = Field(max_length=64)
     version: int | None = Field(default=None, ge=1)  # none: the latest
 

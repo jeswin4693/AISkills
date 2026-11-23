@@ -7,7 +7,7 @@ import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from
 import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
-import { canPreview, isPicked, keepRequest, nameHint, pluginRequest, togglePick, type ComponentPick, type PluginForm } from "@/lib/plugin";
+import { canPreview, isPicked, keepRequest, nameHint, partLabel, pluginRequest, serverPowers, togglePick, type ComponentPick, type PluginForm } from "@/lib/plugin";
 import type { PluginPreview, PluginSaveResult, SkillSummary } from "@/lib/types";
 import { useAsync, type AsyncState } from "@/lib/useAsync";
 
@@ -17,7 +17,7 @@ function Parts({
   title, kind, list, picks, onToggle,
 }: {
   title: string;
-  kind: "skill" | "agent";
+  kind: ComponentPick["kind"];
   list: AsyncState<SkillSummary[]>;
   picks: ComponentPick[];
   onToggle: (p: ComponentPick) => void;
@@ -30,7 +30,7 @@ function Parts({
       ) : list.data === undefined ? (
         <Loading what={title.toLowerCase()} />
       ) : list.data.length === 0 ? (
-        <Empty title={`No ${kind}s kept yet`}>Build one in the Builder and save it, or import one in the Library.</Empty>
+        <Empty title={`No ${title.toLowerCase()} kept yet`}>Build one in the Builder and save it, or import one in the Library.</Empty>
       ) : (
         <ul className="mt-2 space-y-1">
           {list.data.filter((s) => s.latest).map((s) => {
@@ -54,6 +54,7 @@ function Parts({
 export default function ComposerPage() {
   const skills = useAsync(() => api.listSkills("skill"), "composer-skills");
   const agents = useAsync(() => api.listSkills("agent"), "composer-agents");
+  const servers = useAsync(() => api.listSkills("mcp"), "composer-servers");
   const [form, setForm] = useState<PluginForm>({ name: "", description: "", author: "" });
   const [picks, setPicks] = useState<ComponentPick[]>([]);
   const [preview, setPreview] = useState<PluginPreview | null>(null);
@@ -99,7 +100,7 @@ export default function ComposerPage() {
     <>
       <PageHeader
         title="Compose a plugin"
-        subtitle="Combine skills and agents you already have into one plugin for Claude Code. No AI model is used here: you pick the parts, and the app works out what the plugin can do on your machine before you keep it."
+        subtitle="Combine skills, agents and MCP servers you already have into one plugin for Claude Code. No AI model is used here: you pick the parts, and the app works out what the plugin can do on your machine before you keep it."
       />
       <div className="space-y-6">
         <Card className="space-y-4 p-5">
@@ -133,9 +134,10 @@ export default function ComposerPage() {
           </div>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Parts title="Skills" kind="skill" list={skills} picks={picks} onToggle={toggle} />
           <Parts title="Agents" kind="agent" list={agents} picks={picks} onToggle={toggle} />
+          <Parts title="MCP servers" kind="mcp" list={servers} picks={picks} onToggle={toggle} />
         </div>
 
         {error && (
@@ -151,7 +153,7 @@ export default function ComposerPage() {
           >
             Preview the plugin
           </Button>
-          {!ready && <span className="text-sm text-muted">Give it a name, a description and at least one skill or agent.</span>}
+          {!ready && <span className="text-sm text-muted">Give it a name, a description and at least one skill, agent or MCP server.</span>}
         </div>
 
         {preview && (
@@ -176,8 +178,40 @@ export default function ComposerPage() {
                   </Badge>
                 ))}
               </div>
-              <p className="mt-1 text-xs text-muted">Worked out by code from the files. Hooks and MCP servers are not part of this kind of plugin yet.</p>
+              <p className="mt-1 text-xs text-muted">Worked out by code from the files. Hooks are not part of this kind of plugin yet.</p>
             </section>
+            {preview.capabilities.servers.length > 0 && (
+              <section>
+                <h3 className="mb-1 font-semibold">Programs this plugin starts</h3>
+                <p className="mb-2 text-sm text-muted">
+                  Claude Code starts each {partLabel("mcp")} when the plugin is enabled, with your permissions and outside any sandbox. This is read from its code by syntax, not run, and is not proof.
+                </p>
+                <ul className="space-y-3">
+                  {preview.capabilities.servers.map((s) => {
+                    const powers = serverPowers(s.capabilities);
+                    return (
+                      <li key={s.name} className="rounded-md border border-border p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{s.name}</span>
+                          <code className="text-xs text-muted">{s.command}</code>
+                        </div>
+                        <p className="mt-1">
+                          Tools: {s.tools.length ? s.tools.join(", ") : "none found"}.{" "}
+                          {powers.length ? `Its code can ${powers.join(", ")}.` : "Its code does not reach the network, start programs or write files."}
+                        </p>
+                        {s.dynamic.length > 0 && <p className="mt-1 text-warn">It uses {s.dynamic.join(", ")}, which the checks cannot follow.</p>}
+                        {s.environment.length > 0 && (
+                          <p className="mt-1">
+                            Claude Code will ask you for <span className="font-mono">{s.environment.join(", ")}</span> when you enable the plugin, and keeps it as a secret. No value is written in the plugin.
+                          </p>
+                        )}
+                        {s.environment_dynamic && <p className="mt-1 text-warn">It also reads environment variables by a name that is not written in the code.</p>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
             <section>
               <h3 className="mb-1 font-semibold">What is inside ({plural(preview.files.length, "file")})</h3>
               <ul className="font-mono text-xs">

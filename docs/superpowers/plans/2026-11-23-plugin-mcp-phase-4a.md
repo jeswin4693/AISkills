@@ -42,3 +42,11 @@
 
 ### Task 5: check it against the real tool
 A plugin with a real library server is composed, written to a folder and given to `claude plugin validate --strict`; the whole backend suite, typecheck and UI unit tests run; the result is written into the docs as it was (what ran and what did not).
+
+## Result (2026-11-23)
+
+Tasks 1 to 5 done in order. 56 new backend tests (1,358 passed, 2 skipped, the two symlink skips), 4 new UI unit tests (82), typecheck clean. `claude plugin validate --strict` (2.1.325) was used to
+settle the format before coding, and accepts a plugin composed from two real library servers (exit 0). A check of my own work during Task 5 found a loophole in the first `.mcp.json` check (an entry
+could pass `PYTHONPATH` as an option and still be "described"); the check now accepts only variables the server's code reads, with a test. Changed on purpose: two check labels
+(`the plugin contains a skill, an agent or an MCP server`, `no hooks, undescribed MCP servers, settings or executables`) and the unsupported-kind message. **Not done:** a real `claude plugin install`,
+the new page section in a browser, an independent review, hooks (4b).

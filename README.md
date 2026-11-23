@@ -46,7 +46,10 @@ exported, and installed as one file in `~/.claude/agents`. The Library has an Ag
 in one step. It is **composed, not described**: no conversation and no model. On the **Plugins** page you pick skills and agents from your library, and the app writes the plugin
 folder (manifest, a local marketplace file, `skills/`, `agents/`, a README) and works out, by code, what it can do on your machine before you keep it. A damaged or failing
 component is refused, reserved names are refused, and the version moves only when the content does. A plugin built this way passes Claude Code's own
-`claude plugin validate --strict`. Not yet: hooks and MCP servers inside a plugin (Phase 4).
+`claude plugin validate --strict`. **Phase 4a (2026-11-23) lets a plugin carry MCP servers** from your MCP library: the composer writes `servers/<name>/`, a `.mcp.json` that starts each, and one secret
+`userConfig` option for every environment variable a server reads (Claude Code asks for it when the plugin is enabled; no value is ever written to a file). What each server can do is read from its code and said plainly,
+a plugin from outside that starts anything it does not ship is warned about with the command shown, and the risk diff calls a new server or a changed start command riskier. Claude Code's own validator accepts
+such a plugin. Not yet: hooks (Phase 4b), and a real `claude plugin install` of one (it changes your settings, so you run it).
 
 **Phase 3, the MCP Builder (Python), is built too** ([docs/mcp-builder.md](docs/mcp-builder.md)): pick **MCP server** in the Builder and describe a few tools in plain words. The model drafts the tools; **code**
 writes `server.py` around them (the imports, the signatures, the tool annotations, `mcp.run()`), pins the official `mcp` SDK, writes a README with the exact `claude mcp add` command, and checks it by reading it:
@@ -60,7 +63,7 @@ builder writes may now import only an allow-list of safe standard-library module
 **What is next, in this order:**
 
 1. **Phase 3b, the MCP builder in TypeScript** (and the Streamable HTTP transport): the names of the TypeScript SDK still have to be settled with a real install, as the Python ones were.
-2. **Phase 4, plugins that carry more:** hooks, MCP servers and settings inside a plugin, and a risk diff that sees every kind.
+2. **Phase 4b, plugins that carry hooks:** a catalogue of hooks (never free text), always flagged as riskier (MCP servers inside a plugin are built: Phase 4a).
 3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
    and a behavioural canary scan (the risk diff and rescan are already built).
 4. **The remaining web pages:** the repository graph, suggestions and Settings.
@@ -178,10 +181,10 @@ DRAFT, never "ok" ([docs/mcp-builder.md](docs/mcp-builder.md)). The app never ad
 
 ## Compose a plugin
 
-Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills and agents to include and press **Preview the plugin**. You see its files,
-**what it can do on your machine** (every tool its parts grant and every script it ships, worked out by code) and every check. **Keep this plugin** stores it in the
+Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills, agents and MCP servers to include and press **Preview the plugin**. You see its files,
+**what it can do on your machine** (every tool its parts grant, every script it ships and every program an MCP server starts, worked out by code) and every check. **Keep this plugin** stores it in the
 library's Plugins tab, where you can export it as a zip or install it from a folder. Its README has the two commands that add it to Claude Code:
-`claude plugin marketplace add "<folder>"` and `claude plugin install <name>@<name>-local`. The app never writes Claude's settings: adding it is your command
+`claude plugin marketplace add "<folder>"` and `claude plugin install <name>@<name>-local` (and, for MCP servers, the `pip install -r` lines and the `--config` option names). The app never writes Claude's settings: adding it is your command
 ([docs/plugin-builder.md](docs/plugin-builder.md)).
 
 ## Check any skill folder

@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
 **Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
-([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder), Phase 2 (the Plugin Builder) and Phase 3 (the MCP Builder, Python), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md), [phase 3](superpowers/plans/2026-11-20-mcp-builder-phase-3.md); what each did and did not do is under "Phase 0/1/2/3: what was built" below, in [agent-builder.md](agent-builder.md), [plugin-builder.md](plugin-builder.md) and [mcp-builder.md](mcp-builder.md)). Nothing else here is built.** Next slice: Phase 4 (plugin v2), or the TypeScript half of Phase 3.
+([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder), Phase 2 (the Plugin Builder) and Phase 3 (the MCP Builder, Python), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md), [phase 3](superpowers/plans/2026-11-20-mcp-builder-phase-3.md); what each did and did not do is under "Phase 0/1/2/3: what was built" below, in [agent-builder.md](agent-builder.md), [plugin-builder.md](plugin-builder.md) and [mcp-builder.md](mcp-builder.md)). Phase 4a (MCP servers inside plugins, [plan](superpowers/plans/2026-11-23-plugin-mcp-phase-4a.md)) was built on 2026-11-23. Nothing else here is built.** Next slice: Phase 4b (the hook catalogue), or the TypeScript half of Phase 3.
 
 ## What
 
@@ -45,7 +45,7 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> render -> CHECKS ->
 | 1 | **Agent Builder** | M |
 | 2 | Plugin Builder v1 (skills and agents) | M |
 | 3 | MCP Builder: Python first (**built**), then TypeScript (not built) | XL, then M |
-| 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind | L |
+| 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind. **4a (MCP servers and `userConfig` in a plugin, and the risk diff for them) is built; 4b (the hook catalogue) is not** | L, in slices |
 
 Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, XL more), including tests, docs and a live check.
 
@@ -122,6 +122,19 @@ kind: the save message names what was built ("This MCP server is a DRAFT"), and 
 found and fixed two defects a mock model could not (missing imports, and a tool that returned simulated data). **Not done, on purpose:** TypeScript, HTTP transport, resources and prompts, OAuth,
 packages beyond the standard library, file writes and commands, `claude mcp add` run for you, a live Claude Code run, `eval` for servers, `--kind` on the command line, an MCP flow in the real browser.
 
+## Phase 4a: what was built (2026-11-23)
+
+MCP servers inside plugins, in [plugin-builder.md](plugin-builder.md). A plugin can hold MCP servers from the MCP library (`ComponentRef("mcp", name)`, `"kind": "mcp"` in the API): the composer writes
+`servers/<name>/`, a root `.mcp.json` that starts each (`python ${CLAUDE_PLUGIN_ROOT}/servers/<name>/server.py`), and one `sensitive`, `required` `userConfig` option per environment variable the server's code
+reads, passed as `${user_config.KEY}` (never a value). `validate/plugin.py` reads a plugin's servers with the MCP kind's own checks and checks that `.mcp.json` starts only what is shipped, in the composed form
+(anything else is warned about with the command shown; an undeclared option fails; a `userConfig` key Claude Code refuses fails the manifest). `library/plugin.py` computes what each server can do (`analyze_server`)
+and says it in plain sentences. `library/risk.py` calls a new server, a changed start command, a new `.mcp.json` entry and a newly passed variable riskier. The composer page lists MCP servers and shows "Programs this plugin starts".
+
+**Checked against the real tool (2026-11-23, Claude Code 2.1.325):** `claude plugin validate --strict` reads `.mcp.json`, refuses a `userConfig` key with a dash, dot, space or leading digit, and fails an undeclared
+`${user_config.X}`; a plugin composed from two real library servers (one reading a key) passes with exit 0. **Read from the docs by a research agent, not tried:** a plugin's MCP servers start when it is enabled with no
+per-server approval, outside the sandbox; `claude plugin install --config key=value` exists (checked in `--help`); the docs do not say a stdio server inherits Claude Code's environment, so every variable is passed explicitly.
+**Not done, on purpose:** hooks (4b), a real `claude plugin install`, a managed Python environment (the command is plain `python`), TypeScript or remote servers, and a browser run of the new page section.
+
 ## Decisions (approved)
 
 Order as above. "Agent Builder" here means **definition files**, not a runtime agent loop (the Task Conductor's native loop in
@@ -154,8 +167,12 @@ Read from the official docs by a research agent on 2026-11-19, **not tested agai
   `.mcp.json` beside it. A pinned `version` stops updates until the string changes. A marketplace is `.claude-plugin/marketplace.json`
   (`name`, `owner`, `plugins`); the entry name must equal the manifest name. `claude plugin validate <path> --strict` exists and checks
   the manifest.
+- **Plugin MCP servers and `userConfig` (checked 2026-11-23 with the real validator and `--help`; the rest from the docs):** a root `.mcp.json` is loaded with no manifest key (an inline `mcpServers` in
+  `plugin.json` is merged and wins on a name clash); `${CLAUDE_PLUGIN_ROOT}` is the plugin's installed folder and `${CLAUDE_PLUGIN_DATA}` a folder kept across updates; `userConfig` fields are
+  `type` (string, number, boolean, directory, file), `title`, `description`, `required`, `default`, `sensitive` and more (unknown keys are an error), sensitive values go to the platform's credential
+  store, and `${user_config.KEY}` is substituted in MCP config and exec-form hook `args` only (a value reaches an MCP server only if mapped in `env`).
 - **Hooks:** 33 events are listed, five hook types (`command`, `http`, `mcp_tool`, `prompt`, `agent`); exit code 2 blocks on some events
-  and not others.
+  and not others. In a plugin they are in `hooks/hooks.json` under a top-level `"hooks"` key (same shape as `settings.json`; the exact entry fields were not read for 4b yet).
 - **MCP:** `.mcp.json` has `mcpServers`; server names are letters, digits, hyphens and underscores. **The Python SDK is settled by a real install
   (2026-11-20):** the official `mcp` package is 2.3.0, `FastMCP` is gone in 2.x and the class is `MCPServer` (`from mcp.server.mcpserver import MCPServer`),
   tool annotations are `read_only_hint`, `destructive_hint`, `idempotent_hint`, `open_world_hint` and `title` (all default `None`), and a server started

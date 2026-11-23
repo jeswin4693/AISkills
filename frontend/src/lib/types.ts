@@ -225,9 +225,9 @@ export interface KindInfo {
   slots: SlotInfo[];
 }
 
-/** One skill or agent in a plugin. */
+/** One skill, agent or MCP server in a plugin. */
 export interface PluginComponentRef {
-  kind: "skill" | "agent";
+  kind: "skill" | "agent" | "mcp";
   name: string;
   version?: number;
 }
@@ -239,6 +239,19 @@ export interface PluginRequest {
   components: PluginComponentRef[];
 }
 
+/** An MCP server a plugin starts, read from its code by syntax (never run). */
+export interface PluginServer {
+  name: string;
+  tools: string[];
+  /** network, write_files, read_files, run_commands */
+  capabilities: string[];
+  /** The environment variables it reads by a name written in the code: each becomes an option Claude Code asks for. */
+  environment: string[];
+  environment_dynamic: boolean;
+  dynamic: string[];
+  command: string;
+}
+
 /** What a plugin can do on the machine, worked out by code from its files. */
 export interface PluginCapabilities {
   tools: string[];
@@ -248,6 +261,7 @@ export interface PluginCapabilities {
   hooks: string[];
   mcp_servers: string[];
   notes: string[];
+  servers: PluginServer[];
 }
 
 export interface PluginPreview {

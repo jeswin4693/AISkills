@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { canPreview, isPicked, keepRequest, nameHint, pluginRequest, togglePick, type ComponentPick } from "./plugin";
+import { canPreview, isPicked, keepRequest, nameHint, partLabel, pluginRequest, serverPowers, togglePick, type ComponentPick } from "./plugin";
 
 const skill: ComponentPick = { kind: "skill", name: "demo-skill" };
 const agent: ComponentPick = { kind: "agent", name: "demo-agent" };
+const server: ComponentPick = { kind: "mcp", name: "word-tools" };
+
+describe("an MCP server as a part of a plugin", () => {
+  it("is told apart from a skill or an agent of the same name, requested as mcp and pinned like the others", () => {
+    const sameName: ComponentPick = { kind: "mcp", name: "demo-skill" };
+    expect(isPicked([skill], sameName)).toBe(false);
+    expect(togglePick([skill, server], server)).toEqual([skill]);
+    const form = { name: "my-plugin", description: "Word tools.", author: "" };
+    const request = pluginRequest(form, [server]);
+    expect(request.components).toEqual([{ kind: "mcp", name: "word-tools" }]);
+    expect(canPreview(form, [server])).toBe(true); // a server alone is enough for a plugin
+    expect(keepRequest(request, [{ kind: "mcp", name: "word-tools", version: "v3" }]).components).toEqual([{ kind: "mcp", name: "word-tools", version: 3 }]);
+  });
+
+  it("is called an MCP server, and what its code can do is said in plain words, with an unknown one kept as it is", () => {
+    expect(partLabel("mcp")).toBe("MCP server");
+    expect(partLabel("agent")).toBe("agent");
+    expect(serverPowers(["network", "run_commands", "teleport"])).toEqual(["reach the network", "start other programs", "teleport"]);
+    expect(serverPowers([])).toEqual([]);
+  });
+});
 
 describe("choosing the parts of a plugin", () => {
   it("adds a part, then takes it out again, without changing the list it was given", () => {

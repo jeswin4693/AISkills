@@ -1,10 +1,21 @@
 import type { PluginRequest } from "./types";
 
-/** One skill or agent chosen for a plugin. */
+/** One skill, agent or MCP server chosen for a plugin. */
 export interface ComponentPick {
-  kind: "skill" | "agent";
+  kind: "skill" | "agent" | "mcp";
   name: string;
 }
+
+/** What each thing an MCP server's code can do is called on the page (the same words the server's notes use). */
+const SERVER_POWERS: Record<string, string> = {
+  network: "reach the network", write_files: "write or delete files", read_files: "read files", run_commands: "start other programs",
+};
+
+/** A server's powers in plain words; one the page does not know is shown as it is, never dropped. */
+export const serverPowers = (capabilities: string[]): string[] => capabilities.map((c) => SERVER_POWERS[c] ?? c);
+
+/** The name of each kind of part, as a person says it. */
+export const partLabel = (kind: ComponentPick["kind"]): string => (kind === "mcp" ? "MCP server" : kind);
 
 export interface PluginForm {
   name: string;

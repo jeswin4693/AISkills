@@ -6,13 +6,17 @@ folder. Nothing here runs anything. A plugin is only as safe as what it contains
   existed, must not carry a failing one in);
 - lists what the code it ships can do (the shared script checks look at a top-level `scripts/` folder only, and a plugin keeps its
   code under `skills/<name>/`, in any folder);
-- warns about what a v1 plugin should not carry (hooks, MCP servers, settings, executables), because they run on the machine;
+- reads the MCP servers a plugin ships (`servers/<name>/`) with the MCP kind's own checks, and checks that `.mcp.json` starts only
+  those, in the one form the composer writes; anything else it starts is shown and warned about, never trusted;
+- warns about what a plugin should not carry without describing it (hooks, other MCP servers, settings, executables), because they
+  run on the machine;
 - refuses a marketplace entry that points anywhere but this folder.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 
@@ -24,14 +28,23 @@ MARKETPLACE = ".claude-plugin/marketplace.json"
 RESERVED_PREFIXES = ("claude-", "anthropic-")  # Claude Code refuses plugin names that start like this
 MANIFEST_CHECK = "plugin.json exists and is a valid plugin manifest"
 MARKETPLACE_CHECK = "the marketplace entry matches the manifest"
-CONTENTS_CHECK = "the plugin contains a skill or an agent"
+CONTENTS_CHECK = "the plugin contains a skill, an agent or an MCP server"
 SCRIPTS_CHECK = "scripts shipped inside the plugin"
-EXTRAS_CHECK = "no hooks, MCP servers, settings or executables beyond skills and agents"
+EXTRAS_CHECK = "no hooks, undescribed MCP servers, settings or executables"
+MCP_CONFIG_CHECK = ".mcp.json starts only the MCP servers shipped inside the plugin"
 CODE_SUFFIXES = {
     ".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".rb", ".php", ".pl", ".lua", ".java",
     ".go", ".rs", ".c", ".cc", ".cpp", ".cs", ".kt",
 }
-EXTRA_FILES = {"hooks.json", ".mcp.json", ".lsp.json", "settings.json", "settings.local.json"}  # what a v1 plugin should not carry
+EXTRA_FILES = {"hooks.json", ".mcp.json", ".lsp.json", "settings.json", "settings.local.json"}  # what a plugin should not carry undescribed
+MCP_CONFIG = ".mcp.json"
+SERVERS_DIR = "servers"  # not "mcp/": no folder is ever called like the SDK package
+PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"  # Claude Code replaces it with the folder the plugin is installed in
+START_COMMAND = "python"
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")  # a userConfig key (a dashed one is refused by `claude plugin validate`) and an environment variable name
+_OPTION_REF = re.compile(r"^\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}\Z")
+_SHOWN_ARGS = 3
+_SHOWN_CHARS = 40
 EXTRA_MANIFEST_KEYS = ("hooks", "mcpServers", "lspServers")
 
 
@@ -43,6 +56,27 @@ def name_problem(name: object) -> str:
         if name.startswith(prefix):
             return f"names that start with '{prefix}' are reserved, so Claude Code refuses them"
     return ""
+
+
+def is_identifier(text: object) -> bool:
+    """A name Claude Code accepts as a `userConfig` key, and a plain environment variable name."""
+    return isinstance(text, str) and bool(_IDENTIFIER.match(text))
+
+
+def user_config_key(server: str, variable: str) -> str:
+    """The `userConfig` option that carries one environment variable to one server. The server's name comes first, so two servers
+    that read the same variable ask for it separately and never share one value; a hyphen becomes an underscore because a key
+    with a hyphen in it is refused."""
+    return f"{server.replace('-', '_')}_{variable.lower()}"
+
+
+def server_entry(name: str, variables: Mapping[str, str] | None = None) -> dict:
+    """The `.mcp.json` entry that starts the server shipped as `servers/<name>/server.py`: `variables` maps each environment variable
+    to the option that carries it. Values are never written, only references like `${user_config.KEY}`."""
+    entry: dict = {"command": START_COMMAND, "args": [f"{PLUGIN_ROOT}/{SERVERS_DIR}/{name}/server.py"]}
+    if variables:
+        entry["env"] = {variable: f"${{user_config.{key}}}" for variable, key in variables.items()}
+    return entry
 
 
 def _json(files: Mapping[str, bytes], path: str) -> tuple[object, str]:
@@ -74,16 +108,27 @@ def shipped_code(files: Mapping[str, bytes]) -> dict[str, bytes]:
 
 
 def components(files: Mapping[str, bytes]) -> list[tuple[str, str, dict[str, bytes]]]:
-    """(kind, name, that component's own files) for each skill and agent inside a plugin folder."""
+    """(kind, name, that component's own files) for each skill, agent and MCP server inside a plugin folder."""
     skills: dict[str, dict[str, bytes]] = {}
+    servers: dict[str, dict[str, bytes]] = {}
     agents: list[tuple[str, str, dict[str, bytes]]] = []
     for rel, data in files.items():
         parts = PurePosixPath(rel).parts
         if len(parts) >= 3 and parts[0] == "skills":
             skills.setdefault(parts[1], {})["/".join(parts[2:])] = data
+        elif len(parts) >= 3 and parts[0] == SERVERS_DIR:
+            servers.setdefault(parts[1], {})["/".join(parts[2:])] = data
         elif len(parts) == 2 and parts[0] == "agents" and rel.endswith(".md"):
             agents.append(("agent", PurePosixPath(rel).stem, {"AGENT.md": data}))
-    return [("skill", name, sub) for name, sub in sorted(skills.items())] + sorted(agents, key=lambda a: a[1])
+    return (
+        [("skill", name, sub) for name, sub in sorted(skills.items())] + sorted(agents, key=lambda a: a[1])
+        + [("mcp", name, sub) for name, sub in sorted(servers.items())]
+    )
+
+
+def server_names(files: Mapping[str, bytes]) -> list[str]:
+    """The MCP servers the plugin ships: a folder under `servers/` that holds a `server.py`."""
+    return [name for kind, name, sub in components(files) if kind == "mcp" and "server.py" in sub]
 
 
 def _component_rows(files: Mapping[str, bytes]) -> list[CheckResult]:
@@ -102,8 +147,11 @@ def _component_rows(files: Mapping[str, bytes]) -> list[CheckResult]:
     return rows
 
 
-def _extras_row(files: Mapping[str, bytes], manifest: dict) -> CheckResult:
-    found = sorted(rel for rel in files if PurePosixPath(rel).name in EXTRA_FILES or PurePosixPath(rel).parts[0] == "bin")
+def _extras_row(files: Mapping[str, bytes], manifest: dict, described_config: bool = False) -> CheckResult:
+    found = sorted(
+        rel for rel in files
+        if (PurePosixPath(rel).name in EXTRA_FILES or PurePosixPath(rel).parts[0] == "bin") and not (described_config and rel == MCP_CONFIG)
+    )
     keys = [k for k in EXTRA_MANIFEST_KEYS if k in manifest]
     if not found and not keys:
         return CheckResult(EXTRAS_CHECK, PASSED, "none")
@@ -115,9 +163,17 @@ def _extras_row(files: Mapping[str, bytes], manifest: dict) -> CheckResult:
     return CheckResult(EXTRAS_CHECK, WARNING, "; ".join(parts) + ". These run or load on your machine when the plugin is used: read them before installing.")
 
 
+def _in_server(rel: str, servers: set[str]) -> bool:
+    parts = PurePosixPath(rel).parts
+    return len(parts) >= 3 and parts[0] == SERVERS_DIR and parts[1] in servers
+
+
 def _script_row(files: Mapping[str, bytes]) -> CheckResult:
-    scripts = shipped_code(files)
+    servers = set(server_names(files))
+    scripts = {rel: data for rel, data in shipped_code(files).items() if not _in_server(rel, servers)}  # a server is read as a server, above
     if not scripts:
+        if servers:
+            return CheckResult(SCRIPTS_CHECK, PASSED, "no scripts besides its MCP servers, which are read as servers (see their rows)")
         return CheckResult(SCRIPTS_CHECK, PASSED, "this plugin ships no code")
     caps: set[str] = set()
     unanalysed: list[str] = []
@@ -141,6 +197,79 @@ def _script_row(files: Mapping[str, bytes]) -> CheckResult:
     return CheckResult(SCRIPTS_CHECK, WARNING, "; ".join(parts) + ". Read them before installing.")
 
 
+def _shown(entry: object) -> str:
+    """What an entry would start, for a person to read: the command and its first arguments, each cut short. A value in `env` is
+    never shown, only the names."""
+    if not isinstance(entry, dict):
+        return json.dumps(entry)[:_SHOWN_CHARS]
+    if "command" not in entry:
+        return "an entry with " + (", ".join(sorted(str(k) for k in entry)[:4]) or "no keys")
+    raw_args = entry.get("args")
+    args = raw_args if isinstance(raw_args, list) else []
+    words = [entry["command"], *args[:_SHOWN_ARGS]]
+    shown = " ".join(str(w)[:_SHOWN_CHARS] for w in words)
+    return shown + (" ..." if len(args) > _SHOWN_ARGS else "")
+
+
+def _entry_problem(name: str, entry: object, servers: set[str], declared: set[str], undeclared: list[str]) -> str:
+    """Why this `.mcp.json` entry is not the one the composer writes for a server shipped here ("" when it is). Fills `undeclared` with
+    the options it uses that the manifest does not declare."""
+    if not isinstance(entry, dict):
+        return "is not an object"
+    if name not in servers:
+        return f"starts {_shown(entry)}, which is not a server shipped in this plugin"
+    extra = sorted(set(entry) - {"command", "args", "env"})
+    if extra:
+        return f"has {', '.join(map(str, extra))}, which SkillForge does not read, so what it does is not known (it starts {_shown(entry)})"
+    start = server_entry(name)
+    if entry.get("command") != start["command"] or entry.get("args") != start["args"]:
+        return f"starts {_shown(entry)} instead of the shipped servers/{name}/server.py"
+    env = entry.get("env", {})
+    if not isinstance(env, dict):
+        return "has an env that is not an object"
+    literal = []
+    for variable, value in env.items():
+        ref = _OPTION_REF.match(value) if isinstance(value, str) else None
+        if ref is None:
+            literal.append(str(variable)[:_SHOWN_CHARS])
+        elif ref.group(1) not in declared:
+            undeclared.append(ref.group(1))
+    if literal:
+        return "gives " + ", ".join(literal) + " a value written in the file (only ${user_config.X} references are expected, so no key is kept here)"
+    return ""
+
+
+def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckResult | None, bool]:
+    """(the row, whether `.mcp.json` is the described one). It is described when every entry starts a server shipped in this plugin,
+    in the one form the composer writes."""
+    servers = server_names(files)
+    if MCP_CONFIG not in files:
+        if servers:
+            return CheckResult(MCP_CONFIG_CHECK, WARNING, f"the plugin ships {', '.join(servers)} but has no {MCP_CONFIG}, so Claude Code will not start it"), False
+        return None, False
+    data, why = _json(files, MCP_CONFIG)
+    if why:
+        return CheckResult(MCP_CONFIG_CHECK, FAILED, why), False
+    entries = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(entries, dict) or not entries:
+        return CheckResult(MCP_CONFIG_CHECK, WARNING, f'{MCP_CONFIG} has no "mcpServers" entries in the form SkillForge reads, so what it starts is not described: read it'), False
+    options = manifest.get("userConfig")
+    declared = set(options) if isinstance(options, dict) else set()
+    undeclared: list[str] = []
+    problems = []
+    for name, entry in entries.items():
+        problem = _entry_problem(str(name), entry, set(servers), declared, undeclared)
+        if problem:
+            problems.append(f"'{str(name)[:_SHOWN_CHARS]}' {problem}")
+    if undeclared:
+        names = ", ".join(sorted(set(undeclared)))
+        detail = f'{MCP_CONFIG} uses ${{user_config.X}} for {names}, which plugin.json does not declare under "userConfig": it cannot resolve on install'
+        return CheckResult(MCP_CONFIG_CHECK, FAILED, detail), False
+    if problems:
+        return CheckResult(MCP_CONFIG_CHECK, WARNING, "; ".join(problems[:5]) + ". It runs on your machine when the plugin is enabled: read it before installing."), False
+    return CheckResult(MCP_CONFIG_CHECK, PASSED, "starts " + ", ".join(sorted(map(str, entries)))), True
+
+
 def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[CheckResult]:
     if MANIFEST not in files:
         return [CheckResult(MANIFEST_CHECK, FAILED, f"there is no {MANIFEST} in the folder")]
@@ -153,6 +282,13 @@ def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[Ch
     for key in ("version", "description"):
         if key in manifest and not isinstance(manifest[key], str):
             problems.append(f"{key} must be text")
+    options = manifest.get("userConfig")
+    if options is not None and not isinstance(options, dict):
+        problems.append("userConfig must be an object of options")
+    elif isinstance(options, dict):
+        bad = [str(k)[:_SHOWN_CHARS] for k in options if not is_identifier(k)]
+        if bad:
+            problems.append("userConfig keys may hold only letters, digits and underscores, and cannot start with a digit (Claude Code refuses others): " + ", ".join(bad[:3]))
     out = [CheckResult(MANIFEST_CHECK, FAILED, "; ".join(problems)) if problems else CheckResult(MANIFEST_CHECK, PASSED)]
     if MARKETPLACE in files:
         market, why = _json(files, MARKETPLACE)
@@ -171,8 +307,15 @@ def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[Ch
                 out.append(CheckResult(MARKETPLACE_CHECK, PASSED))
     has_skill = any(PurePosixPath(rel).match("skills/*/SKILL.md") for rel in files)
     has_agent = any(PurePosixPath(rel).parent.as_posix() == "agents" and rel.endswith(".md") for rel in files)
-    out.append(CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent else CheckResult(CONTENTS_CHECK, FAILED, "there is no skills/<name>/SKILL.md and no agents/<name>.md in it"))
+    has_server = bool(server_names(files))
+    out.append(
+        CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent or has_server
+        else CheckResult(CONTENTS_CHECK, FAILED, "there is no skills/<name>/SKILL.md, agents/<name>.md or servers/<name>/server.py in it")
+    )
     out += _component_rows(files)
-    out.append(_extras_row(files, manifest))
+    config_row, described = _mcp_config_row(files, manifest)
+    if config_row is not None:
+        out.append(config_row)
+    out.append(_extras_row(files, manifest, described))
     out.append(_script_row(files))
     return out

@@ -384,7 +384,7 @@ def test_a_folder_name_that_differs_from_the_agent_name_warns():
 
 N_PLUGIN = "plugin.json exists and is a valid plugin manifest"
 N_MARKET = "the marketplace entry matches the manifest"
-N_NOTHING = "the plugin contains a skill or an agent"
+N_NOTHING = "the plugin contains a skill, an agent or an MCP server"
 N_PSCRIPTS = "scripts shipped inside the plugin"
 
 

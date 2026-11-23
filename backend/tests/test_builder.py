@@ -79,7 +79,7 @@ def test_the_migration_creates_exactly_what_the_models_describe_and_is_safe_to_r
     db.migrate()
     db.migrate()
     with db.engine.connect() as c:
-        assert set(inspect(c).get_table_names()) == {"alembic_version", "build_sessions", "jobs", "model_calls"}
+        assert set(inspect(c).get_table_names()) == {"alembic_version", "build_sessions", "jobs", "model_calls", "suggest_runs"}
         assert compare_metadata(MigrationContext.configure(c), Base.metadata) == []
     db.close()
 

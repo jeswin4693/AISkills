@@ -5,6 +5,7 @@ import { withKindParam } from "@/lib/kind";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { kindNoun, parseTests, tokenLine, traceability, usageText } from "@/lib/builder";
+import { plural } from "@/lib/format";
 import type { BuildSession, ImportResult } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 import { useKinds } from "@/lib/useKinds";
@@ -160,6 +161,13 @@ export function ResultCard({ session, onSession }: { session: BuildSession; onSe
         </div>
         {tokenLine(r.tokens) && <p className="mt-2 text-sm">{tokenLine(r.tokens)}</p>}
         {usageText(session.usage) && <p className="mt-2 text-xs text-muted">Model use while building: {usageText(session.usage)}</p>}
+        {r.evidence && (
+          <p className="mt-2 text-sm">
+            <Badge tone="info">evidence</Badge> It cites {plural(r.evidence.places, "place")} in <strong>{r.evidence.repo}</strong> (<code className="font-mono">evidence.json</code>): the facts the graph had when
+            it was built. Once it is saved, its page in the library can recheck them whenever the code changes.
+            {r.evidence.skipped.length > 0 && <> Not recorded, because they are not in the graph: {r.evidence.skipped.join(", ")}.</>}
+          </p>
+        )}
         <p className="mt-2 text-xs text-muted">
           Made with {session.model_calls} model call{session.model_calls === 1 ? "" : "s"}. The checks are structural: they show the skill is consistent, not that
           its instructions are good. Read it before you rely on it.

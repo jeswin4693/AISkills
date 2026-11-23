@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { CheckBadges, CheckList } from "@/components/CheckList";
+import { EvidencePanel } from "@/components/EvidencePanel";
 import { FileViewer } from "@/components/FileViewer";
 import { InstallDialog } from "@/components/InstallDialog";
 import { useAuth } from "@/lib/useAuth";
@@ -32,18 +33,20 @@ function VersionDetails({
   setNotice: (n: Notice | null) => void;
 }) {
   const [withoutSpec, setWithoutSpec] = useState(false);
+  const [withoutEvidence, setWithoutEvidence] = useState(false);
   const [busy, setBusy] = useState<"export" | "restore" | null>(null);
   const [installing, setInstalling] = useState(false);
   const { hosted } = useAuth();
   const [confirmRestore, setConfirmRestore] = useState(false);
   const hasScripts = Object.keys(v.files).some((p) => p.startsWith("scripts/"));
   const hasSpec = "spec.json" in v.files;
+  const hasEvidence = "evidence.json" in v.files;
 
   async function exportZip() {
     setBusy("export");
     setNotice(null);
     try {
-      const { blob, filename } = await api.exportZip(v.name, v.version, withoutSpec, kind);
+      const { blob, filename } = await api.exportZip(v.name, v.version, withoutSpec, kind, withoutEvidence);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -124,7 +127,15 @@ function VersionDetails({
         </label>
       )}
 
+      {hasEvidence && (
+        <label className="mt-2 flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" checked={withoutEvidence} onChange={(e) => setWithoutEvidence(e.target.checked)} />
+          Leave evidence.json out of the export (it names the files and functions of the repository it cites)
+        </label>
+      )}
+
       <div className="mt-5 space-y-6">
+        {hasEvidence && <EvidencePanel name={v.name} version={v.version} kind={kind} />}
         <section>
           <h3 className="mb-2 font-semibold">Files</h3>
           <FileViewer id={`${v.name}/${v.version}`} paths={Object.keys(v.files)} hashes={v.files} load={(p) => api.file(v.name, v.version, p, kind)} />

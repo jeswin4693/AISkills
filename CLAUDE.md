@@ -25,8 +25,10 @@ Phase 4b is built too (a plugin can carry hooks, only from the catalogue in `ski
 Phase 3b is built too (the MCP builder for Node: its own kind `mcp-node`, a TypeScript `server.ts` run by `node --permission` in the sandbox and read by `validate/mcp_node.py`; image built once with `python -m skillforge sandbox-build-mcp-node`; [docs/mcp-builder-node.md](docs/mcp-builder-node.md); two independent reviews are fixed and tested; not in plugins yet).
 Slice V is built too (a skill can cite code: `evidence.json` holds the files and functions it names with the graph's facts, `library cite|recheck|refresh` say what changed in them, deterministic, no model;
 [docs/evidence.md](docs/evidence.md); a recheck checks that cited facts still hold, not that the skill's advice is right; evidence names a private repository's code, so export can leave it out and a plugin never ships it).
-Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built) and the other UI pages
-(the repository graph, suggestions, evidence) and Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
+Slice W is built too (the web **Repository** page: read a folder into the graph, grounded ideas as a polled run, a Builder session seeded with the idea's cited places that ends with `evidence.json`, and a recheck on the skill's page;
+every route that reads a folder is off in the hosted version; [docs/repository-page.md](docs/repository-page.md)).
+Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built), a Settings page (H5)
+and Node servers in plugins ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Commands (run from `backend/`)
 

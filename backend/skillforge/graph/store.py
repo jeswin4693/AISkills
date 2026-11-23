@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -61,6 +63,18 @@ def load_records(path: Path) -> dict[str, FileRecord]:
 def save_records(path: Path, records: dict[str, FileRecord]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema": SCHEMA_VERSION, "files": {p: asdict(r) for p, r in records.items()}}
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-    tmp.replace(path)
+    # Each write has its own temporary file: two requests reading the same repository at once (the web page can do that) must not
+    # share one. The cache only makes the next read faster, so a replace that cannot be done is given up on, not raised.
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=path.stem + ".", suffix=".tmp")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(json.dumps(payload, separators=(",", ":")))
+        for attempt in range(6):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:  # Windows: another reader or writer has the file open for a moment
+                time.sleep(0.02 * (attempt + 1))
+    finally:
+        tmp.unlink(missing_ok=True)

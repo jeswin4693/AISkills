@@ -191,6 +191,8 @@ export interface BuildResultInfo {
   checks: Check[];
   /** An estimate (about 4 characters per token). Absent on sessions saved before it existed. */
   tokens?: { always: number; when_used: number; on_demand: number } | null;
+  /** The places of a repository this build cites, recorded in evidence.json. Absent when the build did not start from a repository. */
+  evidence?: { repo: string; places: number; skipped: string[] };
 }
 
 /** What the model was asked for a session (docs/ai-engine.md). Counts and timings only; tokens are null when the provider gave none. */
@@ -345,6 +347,8 @@ export interface BuildSession {
   usage?: SessionUsage;
   notes: string[];
   saved: { name: string; version: string } | null;
+  /** Set when the build started from a repository (the Repository page). Absent from older servers. */
+  seed?: BuildSeed | null;
   created_at: string;
   updated_at: string;
   job: JobInfo | null;
@@ -373,4 +377,152 @@ export interface TestCase {
   input_description: string;
   expected_result: string;
   covers: string[];
+}
+
+// ---- a repository, ideas for it, and evidence (docs/evidence.md) ---------------------------------------------
+
+export interface CoreSymbol {
+  id: string;
+  kind: string;
+  name: string;
+  file: string;
+  line: number;
+  fan_in: number;
+  fan_out: number;
+  size: number;
+}
+
+export interface RiskyFile {
+  path: string;
+  importers: number;
+  commits: number;
+  score: number;
+}
+
+/** What the graph says about a folder. Computed from parsed code; no model took part. */
+export interface RepoAnalysis {
+  name: string;
+  focus: string | null;
+  stats: {
+    files: number;
+    test_files: number;
+    lines: number;
+    languages: Record<string, number>;
+    language_levels: Record<string, string>;
+    symbols: Record<string, number>;
+    edges: Record<string, number>;
+    call_sites: Record<string, number>;
+    unresolved_imports: number;
+    parse_problems: number;
+    commits_read: number | null;
+    co_change_pairs: number;
+  };
+  notes: string[];
+  hotspots: { core_symbols: CoreSymbol[]; risky_files: RiskyFile[]; note: string };
+  dead_code: { internal: number; exported: number; note: string };
+}
+
+export type IdeaCategory = "refactor" | "test" | "cleanup" | "risk" | "skill" | "automation";
+
+/** One suggestion that survived grounding: everything it cites exists in the graph. */
+export interface Idea {
+  title: string;
+  category: IdeaCategory;
+  rationale: string;
+  evidence: string[];
+  next_step: string;
+  confidence: "high" | "medium" | "low";
+  skill_requirement: string;
+  evidence_nodes: string[];
+  ignored_evidence: string[];
+  unverified_numbers: string[];
+}
+
+export interface SuggestResult {
+  repo: string;
+  provider: string;
+  model: string;
+  attempts: number;
+  facts: { id: string; kind: string; summary: string; nodes: string[] }[];
+  suggestions: Idea[];
+  dropped: { title: string; reason: string }[];
+  notes: string[];
+}
+
+export type RunStatus = "working" | "done" | "failed";
+
+export interface SuggestRun {
+  id: string;
+  status: RunStatus;
+  repo: string;
+  focus: string | null;
+  with_ideas: boolean;
+  result: SuggestResult | null;
+  error: string;
+  retryable: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SuggestRunSummary extends Omit<SuggestRun, "result"> {
+  ideas: number;
+}
+
+/** The repository a build started from. The folder's name only: the path stays on the server. */
+export interface BuildSeed {
+  repo: string;
+  focus: string | null;
+  places: number;
+}
+
+export interface EvidenceRef {
+  id: string;
+  kind: "file" | "symbol";
+  file: string;
+  lang: string;
+  taken_at: string | null;
+  commit: string | null;
+  dirty: boolean;
+  symbol_kind: string;
+  callers_total: number;
+  callees_total: number;
+  members_total: number;
+  symbols_total: number;
+  importers_total: number;
+  measured: boolean;
+}
+
+/** The code a stored version cites, with the facts recorded for each place. `evidence` is null for a version that cites none. */
+export interface EvidenceDoc {
+  name: string;
+  version: string;
+  evidence: { repo: string; commit: string | null; dirty: boolean; focus: string | null; taken_at: string; refs: EvidenceRef[] } | null;
+}
+
+export type Verdict = "missing" | "moved" | "changed" | "edited" | "holds";
+
+export interface RecheckFinding {
+  ref: string;
+  kind: "file" | "symbol";
+  status: Verdict;
+  details: string[];
+  candidates: string[];
+  not_measured: string[];
+  recorded: string;
+}
+
+export interface RecheckReport {
+  skill: string;
+  version: string;
+  repo: string;
+  taken_at: string;
+  recorded_commit: string | null;
+  current_commit: string | null;
+  recorded_dirty: boolean;
+  current_dirty: boolean;
+  ok: boolean;
+  counts: Partial<Record<Verdict, number>>;
+  findings: RecheckFinding[];
+  notes: string[];
+  limits: string;
 }

@@ -87,6 +87,20 @@ one question round, approve, build, save took about 15 seconds and produced `cou
 0 failed, saved as v1. The same flow is covered offline with a mock model, including on real background threads.
 Building *with scripts* over HTTP has only been run with a fake sandbox runner, not live.
 
+## A repository (slice W)
+
+The routes behind the web **Repository** page ([repository-page.md](repository-page.md)). Each reads a folder on the machine the server runs on, so **each is off in the hosted
+version (403)**. The path a person sends is never sent back, in a result or in an error: pages are shown the folder's name. Network paths (`\\server\share`) are refused.
+
+| Route | |
+|---|---|
+| `POST /api/repos/analyze` | `{"path": "<absolute folder>", "focus": "src"}` returns `{name, focus, stats, notes, hotspots, dead_code}`: the graph's facts (no model, nothing is run). 400 for a relative path, a missing folder or a file. |
+| `POST /api/suggestions` | `{"path", "focus", "with_ideas": true}` starts a run (201): the model is asked in the background, as a row in `suggest_runs`. The folder is checked before any model is asked, and a second request for the same folder and focus while that run is still working returns that run. |
+| `GET /api/suggestions` | The runs, newest first, without their results: `{id, status, repo (the folder's name), focus, ideas, error, retryable, created_at, updated_at}`. |
+| `GET /api/suggestions/{id}` | One run: `status` (`working`, `done`, `failed`) and, when done, `result`: the suggest report (`suggestions` each with `evidence_nodes`, `skill_requirement`, `unverified_numbers`; `dropped`; `notes`). 404 for an unknown id. Poll it while `working`. |
+| `POST /api/suggestions/{id}/retry` | Runs a failed run again (a missing key, an unreachable model). 409 for any other state. |
+| `POST /api/builds` | now also takes **`from_run` and `idea`** (a finished suggestion run and the idea's position in it: the server uses that run's own folder and the idea's cited places) or, for scripts, `repo` (absolute folder), `focus` and `evidence_nodes` (at most 60 places); not both. A half-given seed, an idea that is not a buildable skill or automation, a run that is not finished, a folder that is not there, or a kind other than skill or agent is a 400; an unknown run is a 404. The session then shows `seed: {repo, focus, places}` and, when it ends, the result `evidence: {repo, places, skipped}`; the built folder carries `evidence.json`. |
+
 ## Why a local server is still locked down
 
 A web page on another site can ask your browser to talk to `localhost`. Two defences, both in

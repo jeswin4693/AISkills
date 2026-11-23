@@ -10,6 +10,7 @@ import { Loading } from "./ui";
 
 const NAV = [
   { href: "/builder", label: "Builder", hint: "Describe what you want and build it" },
+  { href: "/repository", label: "Repository", hint: "Read a repository and get ideas grounded in its code" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
   { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
 ];

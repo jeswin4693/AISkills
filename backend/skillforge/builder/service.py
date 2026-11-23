@@ -32,30 +32,17 @@ from ..kinds import UnknownKind, get_kind
 from ..library import ImportReport, Library, LibraryError, import_skill
 from ..providers import LLMProvider, ProviderError
 from ..validate.static import read_dir
+from .errors import BadRequest, BuilderError, SessionNotFound, WrongState
 from .jobs import JobRunner
 from .provider import env_provider
+from .repository import check_seed, record_evidence, seed_view
+from .suggestions import SuggestRuns
 from .usage import DbUsageRecorder, usage_summary
 
 MAX_ROUNDS = 3
 MAX_EVENTS = 50
 _ID = re.compile(r"^[0-9a-f]{32}\Z")
 log = logging.getLogger(__name__)
-
-
-class BuilderError(Exception):
-    """Something the person can act on."""
-
-
-class SessionNotFound(BuilderError):
-    pass
-
-
-class WrongState(BuilderError):
-    """The session is not at the step this action belongs to (or someone else just moved it)."""
-
-
-class BadRequest(BuilderError):
-    pass
 
 
 class Builder:
@@ -79,6 +66,11 @@ class Builder:
         db.migrate()
         db.recover_interrupted()
         return cls(db, library, data_dir() / "builds")
+
+    @property
+    def suggestions(self) -> SuggestRuns:
+        """Suggestion runs for a repository, sharing this builder's database, job runner and model."""
+        return SuggestRuns(self.db, self.runner, self.provider_factory)
 
     def close(self) -> None:
         self.runner.shutdown()
@@ -105,7 +97,7 @@ class Builder:
                 "spec": row.spec, "result": row.result, "error": row.error, "retryable": row.retryable,
                 "model_calls": row.model_calls, "notes": row.notes, "usage": usage_summary(self.db, sid),
                 "saved": {"name": row.saved_name, "version": row.saved_version} if row.saved_version else None,
-                "created_at": row.created_at, "updated_at": row.updated_at,
+                "seed": seed_view(row.seed), "created_at": row.created_at, "updated_at": row.updated_at,
                 "job": None if job is None else {
                     "kind": job.kind, "status": job.status, "started_at": job.started_at,
                     "finished_at": job.finished_at, "events": job.events[-MAX_EVENTS:],
@@ -155,7 +147,9 @@ class Builder:
         s.flush()
         return job.id
 
-    def start(self, description: str, with_scripts: bool = False, kind: str = "skill") -> dict:
+    def start(self, description: str, with_scripts: bool = False, kind: str = "skill", seed: dict | None = None) -> dict:
+        """Begin a session. `seed` is {"repo", "focus", "nodes"}: a repository and the places in it the idea cited, so the built thing
+        carries evidence of them (docs/evidence.md). A half-given or unusable seed is refused before anything starts."""
         try:
             spec = get_kind(kind)
             if not spec.conversational:
@@ -163,12 +157,13 @@ class Builder:
             words = check_description(description)
         except (UnknownKind, BuildError) as exc:
             raise BadRequest(str(exc)) from exc
+        kept_seed = check_seed(kind, (seed or {}).get("repo"), (seed or {}).get("focus"), (seed or {}).get("nodes"))
         sid, stamp = uuid.uuid4().hex, now_text()
         with self.db.session() as s:
             s.add(BuildSession(
                 id=sid, created_at=stamp, updated_at=stamp, status="working", description=words, words=words,
                 round=1, with_scripts=with_scripts, questions=[], error="", retryable=False, model_calls=0,
-                notes=[], saved_name="", saved_version="", kind=kind,
+                notes=[], saved_name="", saved_version="", kind=kind, seed=kept_seed,
             ))
             job_id = self._new_job(s, sid, "understand")
         self.runner.submit(self._execute, job_id)
@@ -319,7 +314,7 @@ class Builder:
     def _build(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
             row = self._row(s, sid)
-            spec, kind_key = row.spec, row.kind
+            spec, kind_key, seed = row.spec, row.kind, row.seed
             with_scripts, calls, notes = row.with_scripts, row.model_calls, list(row.notes)
         kind = get_kind(kind_key)
         provider = self._provider(sid, job_id)
@@ -329,6 +324,12 @@ class Builder:
             spec, provider, out_root=out_root, with_scripts=with_scripts, script_runner=self.script_runner,
             sandbox_note=self.sandbox_note(), calls=calls, notes=notes, progress=progress,
         )
+        if seed:  # evidence of the code the idea cited, from the repository as it is now; a repository that is gone is a note, not a failure
+            try:
+                record_evidence(seed, out_root / outcome.summary["folder"], outcome.summary, outcome.notes)
+            except Exception as exc:  # noqa: BLE001 - the thing is built and checked; evidence is an addition, so whatever goes wrong with it is a note
+                log.exception("recording evidence for session %s failed", sid)
+                outcome.notes.append(f"Evidence was not recorded: unexpected error ({type(exc).__name__}). The {kind_key} itself is built.")
         with self.db.session() as s:
             row = self._row(s, sid)
             row.result, row.model_calls, row.notes = outcome.summary, outcome.model_calls, outcome.notes

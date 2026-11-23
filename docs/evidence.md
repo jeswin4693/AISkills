@@ -167,8 +167,9 @@ dirty flag, a wrongly typed value accepted, an oversized file written, U+FEFF ac
 * **The graph is as deep as the language.** Calls and imports are resolved for full and standard levels only; elsewhere "not measured".
   A call the graph cannot resolve (dynamic calls, reflection) is invisible here, as everywhere in this project.
 * **A candidate is a guess.** "Moved" means one place has the same body structure or name; renamed *and* rewritten code is "missing".
-* **Evidence is attached from the command line.** The web Builder has no repository input, so it records none; there is no web page
-  for evidence yet.
+* **Evidence is recorded from the command line or from the web Repository page** ([repository-page.md](repository-page.md)): a skill or agent built from an idea there
+  carries the idea's cited places. A plain Builder session records none (it has no repository). The skill's library page lists the cited code and can recheck it;
+  citing more places and refreshing are command line only.
 * **Uncommitted changes make a commit id incomplete**; the report says so but cannot separate what is committed from what is not.
 * A place is cited by what the graph knew; `refresh` accepts today's facts, so it is for after a person has read the skill against
   the changed code, not a way to silence the report.

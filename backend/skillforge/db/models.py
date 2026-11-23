@@ -42,6 +42,9 @@ class BuildSession(Base):
     saved_version: Mapped[str] = mapped_column(String(16), default="")
     kind: Mapped[str] = mapped_column(String(16), default="skill", server_default="skill")  # a key of skillforge.kinds
     parent_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # a plugin's child build; no foreign key: SQLite cannot add one
+    # A repository the build was started from: {"repo": absolute folder, "focus": str | None, "nodes": [graph nodes the idea cited]}.
+    # The folder is used when the build ends, to record evidence; the pages are only ever shown its name.
+    seed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Job(Base):
@@ -58,6 +61,24 @@ class Job(Base):
     finished_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
     events: Mapped[list] = mapped_column(JSON, default=list)  # [{"at", "message"}] progress the UI can show
     error: Mapped[str] = mapped_column(Text, default="")
+
+
+class SuggestRun(Base):
+    """One run of the suggestions for a repository, polled like a build. The result is the report as plain data."""
+
+    __tablename__ = "suggest_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), index=True)  # working, done, failed
+    repo: Mapped[str] = mapped_column(Text)  # the absolute folder; never sent back to the pages
+    repo_name: Mapped[str] = mapped_column(String(200))
+    focus: Mapped[str | None] = mapped_column(Text, nullable=True)
+    with_ideas: Mapped[bool] = mapped_column(Boolean, default=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ModelCall(Base):

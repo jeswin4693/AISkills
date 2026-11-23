@@ -1,6 +1,6 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, EvidenceDoc, FileText, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
 
 import { SIGNED_OUT_EVENT } from "./auth";
@@ -122,11 +122,36 @@ export const api = {
   install: (name: string, req: InstallRequest, kind?: string) =>
     post<InstallResult>(withKind(`/api/library/${encodeURIComponent(name)}/install`, kind), req),
 
+  // ---- a repository: read on this computer (the hosted version refuses all of these) ----
+  analyzeRepo: (path: string, focus?: string) => post<RepoAnalysis>("/api/repos/analyze", { path, focus: focus || null }),
+  startSuggest: (path: string, focus: string | undefined, withIdeas: boolean) =>
+    post<SuggestRun>("/api/suggestions", { path, focus: focus || null, with_ideas: withIdeas }),
+  suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),
+  suggestRuns: () => get<SuggestRunSummary[]>("/api/suggestions"),
+  retrySuggest: (id: string) => post<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}/retry`, {}),
+
+  // ---- evidence: the code a stored skill cites, and what changed in it ----
+  evidence: (name: string, version?: number, kind?: string) =>
+    get<EvidenceDoc>(withKind(`/api/library/${encodeURIComponent(name)}/evidence${version === undefined ? "" : `?version=${version}`}`, kind)),
+  recheck: (name: string, req: { repo: string; version?: number; focus?: string }, kind?: string) =>
+    post<RecheckReport>(withKind(`/api/library/${encodeURIComponent(name)}/recheck`, kind), req),
+
   // ---- the builder: a session you poll; each action returns the session as it is right after the action ----
   builds: () => get<BuildSummary[]>("/api/builds"),
   build: (id: string) => get<BuildSession>(`/api/builds/${encodeURIComponent(id)}`),
-  startBuild: (description: string, withScripts: boolean, kind = "skill") =>
-    post<BuildSession>("/api/builds", kind === "skill" ? { description, with_scripts: withScripts } : { description, with_scripts: withScripts, kind }),
+  /**
+   * `seed` starts the build from an idea about a repository, so the built skill carries evidence of the places the idea cited. Give the
+   * run and the idea's position: the server then takes that run's own folder and the idea's own places, so a build cannot be about a
+   * different repository than its idea was made for. (`repo` + `evidenceNodes` is for scripts that have no run.)
+   */
+  startBuild: (
+    description: string, withScripts: boolean, kind = "skill",
+    seed?: { run: string; idea: number } | { repo: string; focus?: string; evidenceNodes: string[] },
+  ) =>
+    post<BuildSession>("/api/builds", {
+      description, with_scripts: withScripts, ...(kind === "skill" ? {} : { kind }),
+      ...(!seed ? {} : "run" in seed ? { from_run: seed.run, idea: seed.idea } : { repo: seed.repo, focus: seed.focus || null, evidence_nodes: seed.evidenceNodes }),
+    }),
   answer: (id: string, answers: Record<string, string>) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/answers`, { answers }),
   approve: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/approve`, {}),
   retry: (id: string) => post<BuildSession>(`/api/builds/${encodeURIComponent(id)}/retry`, {}),
@@ -146,8 +171,9 @@ export const api = {
   },
 
   /** The zip as a Blob, with the file name the API suggested. */
-  async exportZip(name: string, version: number, withoutSpec: boolean, kind?: string): Promise<{ blob: Blob; filename: string }> {
+  async exportZip(name: string, version: number, withoutSpec: boolean, kind?: string, withoutEvidence = false): Promise<{ blob: Blob; filename: string }> {
     const q = new URLSearchParams({ version: String(version), without_spec: String(withoutSpec) });
+    if (withoutEvidence) q.set("without_evidence", "true");
     if (kind && kind !== "skill") q.set("kind", kind);
     const res = await send(`/api/library/${encodeURIComponent(name)}/export?${q}`);
     if (!res.ok) {

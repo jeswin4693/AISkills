@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,12 +13,32 @@ from .views import import_view
 
 MAX_DESCRIPTION = 10_000
 MAX_ANSWER = 5_000
+HOSTED_SEED_OFF = (
+    "Starting from a repository is turned off in the hosted version: the evidence would be read from a folder on the server, "
+    "not on your computer. Build without a repository, or use the local app."
+)
 
 
 class StartBody(BaseModel):
     description: str = Field(max_length=MAX_DESCRIPTION)
     with_scripts: bool = False
     kind: str = Field(default="skill", max_length=64)  # a registered kind; the builder refuses any other
+    # Start from an idea about a repository: its folder, and the places in it the idea cited. The built skill or agent then carries
+    # evidence of those places (docs/evidence.md). Off in the hosted version: the folder would be the server's.
+    repo: str | None = Field(default=None, max_length=4096)
+    focus: str | None = Field(default=None, max_length=400)
+    evidence_nodes: list[str] = Field(default_factory=list, max_length=60)
+    # Or, better: build from one idea of a stored suggestion run. The server then takes that run's folder and the idea's own cited
+    # places, so a build cannot be about another repository than its idea was made for. Not together with repo / evidence_nodes.
+    from_run: str | None = Field(default=None, max_length=64)
+    idea: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("evidence_nodes")
+    @classmethod
+    def short_nodes(cls, nodes: list[str]) -> list[str]:
+        if any(len(n) > 400 for n in nodes):
+            raise ValueError("a cited place is longer than 400 characters")
+        return nodes
 
 
 class AnswersBody(BaseModel):
@@ -76,7 +96,20 @@ def builds_router() -> APIRouter:
     @r.post("/builds", status_code=201)
     def start(body: StartBody, request: Request) -> dict:
         """Begin a session. The first reading of the words runs in the background: poll the session."""
-        return builder(request).start(body.description, body.with_scripts, body.kind)
+        seed = None
+        from_run = body.from_run is not None or body.idea is not None
+        if body.repo or body.evidence_nodes or body.focus or from_run:
+            if request.app.state.hosted is not None:
+                raise HTTPException(403, HOSTED_SEED_OFF)
+            if from_run:
+                if body.from_run is None:
+                    raise HTTPException(400, "Give from_run with idea: the suggestion run the idea belongs to.")
+                if body.repo or body.evidence_nodes or body.focus:
+                    raise HTTPException(400, "Give either from_run and idea, or repo and evidence_nodes, not both.")
+                seed = builder(request).suggestions.seed_for(body.from_run, body.idea)
+            else:
+                seed = {"repo": body.repo, "focus": body.focus, "nodes": body.evidence_nodes}
+        return builder(request).start(body.description, body.with_scripts, body.kind, seed)
 
     @r.get("/builds/{sid}")
     def get(sid: str, request: Request) -> dict:

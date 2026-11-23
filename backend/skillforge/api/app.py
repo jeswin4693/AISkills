@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..builder import Builder, BuilderError, SessionNotFound, WrongState
+from ..builder.repository import check_repo
 from ..evidence import EvidenceError, read_evidence
 from ..graph import languages
 from ..graph.build import build_graph
@@ -34,6 +35,7 @@ from ..sandbox import probe_sandbox
 from .builds import builds_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .plugins import plugins_router
+from .repos import repos_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
 from .views import import_view as _import_report
@@ -266,10 +268,7 @@ def create_app(
         """What changed in the code a skill cites, against a repository on this machine. Reads the repository, changes nothing."""
         if hosted is not None:  # this would read a folder on the server, which is not where anyone's repository is
             raise HTTPException(403, "Rechecking against a folder is turned off in the hosted version: it reads a folder on the server. Use the command line on your own computer: library recheck.")
-        if not Path(body.repo).is_absolute():
-            raise HTTPException(400, "Give repo as an absolute path of a repository on this computer.")
-        if not Path(body.repo).is_dir():
-            raise HTTPException(400, f"Not a directory: {body.repo}")
+        check_repo(body.repo)  # an absolute folder on this computer: a message never repeats the path
 
         def work() -> dict:
             focus = body.focus if body.focus is not None else evidence_focus(lib, name, body.version)
@@ -309,6 +308,7 @@ def create_app(
 
     api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
+    api.include_router(repos_router())
     api.include_router(plugins_router())
     app.include_router(api)
     return app

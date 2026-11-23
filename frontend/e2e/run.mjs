@@ -551,6 +551,104 @@ try {
     assert.ok(paths.includes(".mcp.json") && paths.includes("servers/word-tools/server.py"), paths);
   });
 
+  console.log("The repository");
+  const repoDir = path.join(scratch, "shop-api"); // a small repository the page reads; edited below to see the recheck notice what changed
+  fs.mkdirSync(repoDir, { recursive: true });
+  const writeRepo = (name, text) => fs.writeFileSync(path.join(repoDir, name), text);
+  writeRepo("core.py", "def shared():\n    return 1\n");
+  writeRepo("a.py", "from core import shared\n\ndef use_a():\n    return shared()\n");
+  writeRepo("b.py", "from core import shared\n\ndef use_b():\n    return shared()\n");
+  const folderBox = () => page.getByLabel("Folder of the repository", { exact: true });
+  await step("the menu leads to the Repository page, which waits for a folder", async () => {
+    await page.goto(UI + "/builder");
+    await page.getByRole("link", { name: "Repository" }).click();
+    await page.getByRole("heading", { name: "Repository", level: 1 }).waitFor();
+    assert.ok(await page.getByRole("button", { name: "Read the repository" }).isDisabled());
+    await shot(page, "30-repository-empty");
+  });
+  await step("a folder name without its full path is refused before anything is sent", async () => {
+    await folderBox().fill("shop-api");
+    await page.getByText(/Give the full path of the folder/).waitFor();
+    assert.ok(await page.getByRole("button", { name: "Read the repository" }).isDisabled());
+  });
+  await step("a folder that does not exist gives a plain answer", async () => {
+    await folderBox().fill(path.join(scratch, "nowhere"));
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByText(/Not a directory/).first().waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "an error about a folder must not repeat its path");
+  });
+  await step("a network path is refused before anything is sent", async () => {
+    await folderBox().fill("//server/share/repo");
+    await page.getByText(/Network paths are not read/).waitFor();
+    assert.ok(await page.getByRole("button", { name: "Read the repository" }).isDisabled());
+  });
+  await step("reading a repository shows what the graph says, never the path, and the page remembers the folder", async () => {
+    await folderBox().fill(repoDir);
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "shop-api", level: 2 }).waitFor();
+    await page.getByText(/3 files/).first().waitFor();
+    await page.getByText("python", { exact: true }).waitFor();
+    await page.getByText("full", { exact: true }).waitFor();
+    await page.getByText(/Most depended on/).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the page must not show the folder's path");
+    await shot(page, "31-repository-read");
+    await page.reload();
+    await page.waitForFunction((p) => document.querySelector("input")?.value === p, repoDir);
+  });
+  await step("asking for ideas shows ideas that cite real places, and the ones that are not skills are only for reading", async () => {
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "shop-api", level: 2 }).waitFor();
+    await page.getByRole("button", { name: "Ask for ideas" }).click();
+    await page.getByText(/Asking the model for ideas/).waitFor();
+    await page.getByRole("heading", { name: "Count TODO comments for a folder" }).waitFor();
+    await page.getByText("Skill idea", { exact: true }).waitFor();
+    await page.getByText("core.py::shared", { exact: true }).waitFor();
+    await page.getByRole("heading", { name: "Cover core.py with a test" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /^Build this/ }).count(), 1, "only the skill idea can start a build");
+    await shot(page, "32-ideas");
+  });
+  await step("'Build this as a skill' starts a session that remembers where the idea came from, and builds with evidence", async () => {
+    await page.getByText("What the skill will be asked to do (you can change it)").click(); // the model's wording is the person's to change
+    const box = page.getByLabel(/This is the model's wording/);
+    assert.ok((await box.inputValue()).startsWith("A skill that counts TODO and FIXME comments"));
+    await box.fill((await box.inputValue()) + " Extra words from the person.");
+    await page.getByRole("button", { name: "Build this as a skill" }).click();
+    await page.waitForURL(/\/builder\/[0-9a-f]{32}$/);
+    await page.getByText(/Started from an idea about/).waitFor();
+    await page.getByText(/Extra words from the person\./).first().waitFor(); // the build was asked what the person wrote, not the original
+    await page.getByText("Check the requirement").waitFor(); // the idea carried the whole requirement: nothing was left to ask
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the session must not show the folder's path");
+    await page.getByRole("button", { name: "Approve and build" }).click();
+    await page.getByRole("heading", { name: "todo-counter-e2e", level: 1 }).waitFor({ timeout: 30000 });
+    await page.getByText(/It cites 1 place in/).waitFor();
+    await page.getByText("evidence.json").first().waitFor();
+    await shot(page, "33-built-with-evidence");
+  });
+  await step("the skill's page lists the code it cites, and a recheck against the same folder says everything holds", async () => {
+    await page.getByRole("button", { name: "Save to the library" }).click();
+    await page.getByText(/Saved to the library as 'todo-counter-e2e' v\d+/).waitFor();
+    await page.getByRole("link", { name: "Open it in the library" }).click();
+    await page.getByRole("heading", { name: "Code it cites" }).waitFor();
+    await page.getByText("core.py::shared").first().waitFor();
+    await page.getByText(/1 place in/).waitFor();
+    await page.getByRole("button", { name: "Recheck" }).click();
+    await page.getByText("Nothing the skill cites is gone, moved or changed").waitFor();
+    await page.getByText("Holds 1").waitFor();
+    await shot(page, "34-recheck-holds");
+  });
+  await step("after the code changes, the recheck names what changed; after it is deleted, it says missing", async () => {
+    writeRepo("c.py", "from core import shared\n\ndef use_c():\n    return shared()\n");
+    await page.getByRole("button", { name: "Recheck" }).click();
+    await page.getByText("Something the skill cites is gone, moved or changed").waitFor();
+    await page.getByText(/c\.py::use_c/).first().waitFor();
+    await page.getByText("Changed 1").waitFor();
+    await shot(page, "35-recheck-changed");
+    writeRepo("core.py", "def other():\n    return 1\n");
+    await page.getByRole("button", { name: "Recheck" }).click();
+    await page.getByText("Missing 1").waitFor();
+    await page.getByText(/not that the skill's advice is right/).waitFor(); // every report says what it does not check
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });

@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder and Library), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: the TypeScript half of the MCP builder, plugins that carry hooks and MCP servers, and the web pages for the graph, suggestions and settings.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins and Repository), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins, the behavioural canary scan, and a Settings page.
 See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
 your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
@@ -75,7 +75,7 @@ real Claude Code accepted that command and called a tool of the generated server
 (structure, resolved callers and callees, a file's symbols and importers, the commit and whether the tree had uncommitted changes). `library recheck NAME --repo PATH` later says, with names, what is **missing**, **moved** (one candidate, never applied for you),
 **changed** (a new caller, a changed structure) or only **edited**; `library refresh` records today's facts after you have read the skill against the changed code. It is deterministic (no model, nothing is run) and checks that cited facts still hold,
 **not that the skill's advice is right**. A skill built from a suggestion with `build --from-suggestions ... --repo PATH` carries the idea's cited places from the start. A real build with the configured model did that end to end, and a recheck on a changed clone of this repository
-named the renamed function, the new caller and the changed structure (and exposed a flaw that is now fixed: a commit id alone hid uncommitted changes). **One independent review** found four wrong "holds" (a removed decorator, a class whose bases or methods changed, a file whose function bodies were all rewritten, a caller swapped inside a long list), escape sequences from a hostile file reaching the terminal and a privacy claim that was false for `install`; they are fixed test-first and the report now says what a place records and what it does not check. Evidence names a private repository's code, so `export --without-evidence` leaves it out, `install` keeps it in the library and a plugin never ships it. Not yet: a web page for it, and the Builder page records none (it has no repository input).
+named the renamed function, the new caller and the changed structure (and exposed a flaw that is now fixed: a commit id alone hid uncommitted changes). **One independent review** found four wrong "holds" (a removed decorator, a class whose bases or methods changed, a file whose function bodies were all rewritten, a caller swapped inside a long list), escape sequences from a hostile file reaching the terminal and a privacy claim that was false for `install`; they are fixed test-first and the report now says what a place records and what it does not check. Evidence names a private repository's code, so `export --without-evidence` leaves it out, `install` keeps it in the library and a plugin never ships it. The web Repository page records it too (below), and a skill's library page lists the code it cites and can recheck it. Not yet: citing more places or refreshing from a page.
 
 **What is next, in this order:**
 
@@ -83,7 +83,7 @@ named the renamed function, the new caller and the changed structure (and expose
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
    ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
-4. **The remaining web pages:** the repository graph, suggestions and Settings (and a page for evidence).
+4. **The Repository page is built** (slice W, below). Left of the web pages: Settings, and a drawn graph (the page shows numbers and lists).
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
@@ -259,6 +259,15 @@ python -m skillforge library export my-skill --out my-skill.zip              # a
 python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>
 ```
 
+## The Repository page (slice W)
+
+Until now the main pipeline worked only from the command line. On the **Repository** page you type the full path of a folder on your computer and the page
+reads it into the code graph (no model, nothing is run), shows what the graph says, and can ask a model for **ideas that must cite code that really exists**.
+A skill or automation idea has a **Build this skill** button (its wording is the model's, and you can change it first): it starts a Builder session that remembers the
+repository, and when the build ends the skill carries `evidence.json` for the places the idea cited. Saved, its library page lists that code and can **recheck** it.
+Everything that reads a folder is off in the hosted version, and the page is shown the folder's name, never its path. Details, the API and what a real run with the
+configured model showed (including a skill idea the builder refused as "an agent", which is why the wording is editable): [docs/repository-page.md](docs/repository-page.md).
+
 ## Run the local API (the web UI talks to it)
 
 ```powershell
@@ -281,7 +290,7 @@ cd backend;  python -m skillforge serve     # terminal 1: the API
 cd frontend; npm run dev                    # terminal 2: the UI, at http://127.0.0.1:3000
 ```
 
-The **Builder** is the front door: describe a skill, an agent or an MCP server in a sentence (a picker at the top chooses which), answer only
+The **Repository** page reads a folder into a graph, asks for grounded ideas and starts a build from one. The **Builder** is the front door: describe a skill, an agent or an MCP server in a sentence (a picker at the top chooses which), answer only
 what is missing, approve the requirement (each line shown beside the words of yours that back it), watch it build, see which
 tests cover each way you said you would know it works, and save it. The **Plugins** page combines skills and agents you
 already have into one plugin, with no model. The **Library** manages what you keep, with a tab for skills, agents and

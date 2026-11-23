@@ -25,6 +25,8 @@ from skillforge.builder import Builder, JobRunner
 from skillforge.db import Database
 from skillforge.library import Library
 from skillforge.providers import MockProvider, ProviderError
+from skillforge.suggest.models import Suggestion, SuggestionSet
+from skillforge.suggest.prompt import IDEAS_SYSTEM
 
 DELAY = float(os.environ.get("E2E_MODEL_DELAY", "0.8"))  # long enough for the page to be seen "working"
 FLAG = Path(os.environ["E2E_MODEL_FLAG"])
@@ -89,12 +91,33 @@ def design(prompt: str) -> SkillDraft:
     )
 
 
+IDEA_TEXT = (
+    "A skill that counts TODO and FIXME comments in a folder and gives a report of counts per file. It must never edit any file. "
+    "It works when it lists every file with its counts. If the folder cannot be read it stops and says so."
+)
+
+
+def suggestions(system) -> SuggestionSet:
+    """Two passes, like the real ones: a review of the code, then ideas for skills. Everything cited exists in the test repository."""
+    if system == IDEAS_SYSTEM:
+        return SuggestionSet(suggestions=[Suggestion(
+            title="Count TODO comments for a folder", category="skill", rationale="shared() in core.py is called from two files, so a change to it reaches both.",
+            evidence=["core.py::shared"], next_step="Describe the folder to read.", confidence="high", skill_requirement=IDEA_TEXT,
+        )])
+    return SuggestionSet(suggestions=[Suggestion(
+        title="Cover core.py with a test", category="test", rationale="core.py is imported by two files and has no test.",
+        evidence=["core.py"], next_step="Write one test for shared().", confidence="medium", skill_requirement="",
+    )])
+
+
 def respond(schema, prompt, system):
     time.sleep(DELAY)
     if schema is Extraction:
         return extraction(prompt)
     if schema is SkillDraft:
         return design(prompt)
+    if schema is SuggestionSet:
+        return suggestions(system)
     raise ProviderError(f"The fake model has no answer for {schema.__name__}.")
 
 

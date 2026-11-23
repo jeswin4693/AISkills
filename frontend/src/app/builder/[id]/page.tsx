@@ -71,6 +71,13 @@ export default function SessionPage() {
         <Card className="p-4">
           <p className="text-xs font-medium tracking-wide text-muted uppercase">You asked for</p>
           <blockquote className="mt-1 border-l-2 border-border pl-3 break-words whitespace-pre-line">{session.description}</blockquote>
+          {session.seed && (
+            <p className="mt-2 text-sm text-muted">
+              Started from an idea about <strong className="text-text">{session.seed.repo}</strong>
+              {session.seed.focus ? ` (only ${session.seed.focus})` : ""}. The {noun} will record the {session.seed.places} place{session.seed.places === 1 ? "" : "s"} the idea cited as
+              evidence, so you can recheck it when the code changes.
+            </p>
+          )}
         </Card>
 
         {error && (

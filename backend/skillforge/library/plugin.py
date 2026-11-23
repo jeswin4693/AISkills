@@ -7,15 +7,21 @@ scripts it ships and what those can do, the programs its MCP servers start and w
 
 An MCP server is shipped as `servers/<name>/` and started by a root `.mcp.json`; every environment variable its code reads becomes a
 `userConfig` option (sensitive, required) that the entry passes as a `${user_config.KEY}` reference. A value is never written.
+
+A hook is never typed and never written by a model: it is chosen from the catalogue (`skillforge/hookcatalog`), shipped as the
+catalogue's own script in `hooks/<id>.py` and listed in `hooks/hooks.json` in exec form. The only thing a person can add is a typed
+option that the catalogue checks against a strict pattern.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from ..hookcatalog.catalogue import HOOKS_FILE, CatalogueError, HookEntry, get_entry, hook_group, script_bytes
 from ..results import FAILED, CheckResult
 from ..validate import validate_files
 from ..validate.mcp import analyze_server
@@ -27,7 +33,7 @@ from .package import MAX_ENTRIES, LibraryError
 from .risk import _front_matter
 from .store import Library, content_hash
 
-COMPONENT_KINDS = ("skill", "agent", "mcp")
+COMPONENT_KINDS = ("skill", "agent", "mcp", "hook")
 SERVER_POWERS = {
     "network": "reach the network", "write_files": "write or delete files", "read_files": "read files", "run_commands": "start other programs",
 }
@@ -49,9 +55,10 @@ class PluginError(LibraryError):
 
 @dataclass(frozen=True)
 class ComponentRef:
-    kind: str  # "skill", "agent" or "mcp"
+    kind: str  # "skill", "agent", "mcp" or "hook" (a hook is named by its id in the catalogue)
     name: str
-    version: int | None = None  # None: the latest
+    version: int | None = None  # None: the latest. A hook has none: the catalogue's script is the one used
+    options: Mapping[str, Sequence[str]] | None = None  # a hook's typed options; no other kind has any
 
 
 @dataclass
@@ -64,6 +71,7 @@ class Capabilities:
     mcp_servers: list[str] = field(default_factory=list)  # the components that declare MCP servers in their front matter
     notes: list[str] = field(default_factory=list)  # the same, in plain sentences
     servers: list[dict] = field(default_factory=list)  # each MCP server it starts: name, tools, capabilities, environment, environment_dynamic, dynamic, command
+    hook_entries: list[dict] = field(default_factory=list)  # each catalogue hook it carries: id, title, summary, event, matcher, effect, sees, options, powers, command
 
 
 @dataclass
@@ -128,7 +136,57 @@ def _server_notes(server: dict) -> list[str]:
     return [first, second]
 
 
-def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> Capabilities:
+def _hook_summary(entry: HookEntry, options: Mapping[str, Sequence[str]] | None) -> dict:
+    """What one catalogue hook is, in the words the preview and the README use."""
+    return {
+        "id": entry.id, "title": entry.title, "summary": entry.summary, "event": entry.event, "matcher": entry.matcher, "effect": entry.effect,
+        "sees": entry.sees, "options": {key: list(values) for key, values in (options or {}).items() if values}, "powers": sorted(entry.powers),
+        "command": f"python {entry.shipped_path}", "revision": entry.revision,
+    }
+
+
+def _tools_in_words(matcher: str) -> str:
+    tools = [t for t in matcher.split("|") if t]
+    if not tools:
+        return "any tool"
+    return tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " or " + tools[-1]
+
+
+def _hook_notes(hooks: list[dict]) -> list[str]:
+    """Plain sentences, one per hook, and one caution. A hook is a program that runs on the machine, so it is never called read-only."""
+    notes: list[str] = []
+    labels = {opt.key: opt.label for hook in hooks for opt in get_entry(hook["id"]).options}
+    for hook in hooks:
+        when = (
+            f"is about to use {_tools_in_words(hook['matcher'])}" if hook["event"] == "PreToolUse"
+            else f"has used {_tools_in_words(hook['matcher'])}" if hook["event"] == "PostToolUse" else f"reaches the event {hook['event']}"
+        )
+        text = (
+            f"The hook '{hook['id']}' runs a program on this machine, with your permissions and outside any sandbox, every time Claude Code {when}. "
+            f"{hook['summary']} It is handed {hook['sees']}. "
+            + ("It can stop what Claude is about to do. " if hook["effect"] == "blocks" else "It only looks; it cannot stop anything. ")
+            + ("By reading its script it can write files, and it does not reach the network or start programs." if hook["powers"]
+               else "By reading its script it does not reach the network, start programs or write files.")
+        )
+        for key, values in hook["options"].items():
+            text += f" {labels.get(key, key)} (your choice): {', '.join(values)}."
+        notes.append(text)
+    if hooks:
+        notes.append(
+            "A hook is a policy aid, not a security boundary: it matches names and text. If a hook cannot read what Claude Code sends it, it does not block, "
+            "and says so as a non-blocking error. Hooks start with `python`, which must be on your PATH."
+        )
+    return notes
+
+
+def _hooks_file(selected: list[tuple[HookEntry, Mapping[str, Sequence[str]] | None]]) -> dict:
+    hooks: dict[str, list[dict]] = {}
+    for entry, options in selected:
+        hooks.setdefault(entry.event, []).append(hook_group(entry, options))
+    return {"hooks": hooks}
+
+
+def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]], hook_entries: list[dict] | None = None) -> Capabilities:
     """What the plugin can do, by reading the files. A tool is named by what comes before a bracket (`Bash(git *)` is Bash); a tool
     SkillForge cannot describe is named, never called read-only; hooks, MCP servers and a bypassed approval in a component's front
     matter are listed; code in ANY folder of a skill counts as shipped code, not only `scripts/`; and an MCP server the plugin ships is
@@ -191,6 +249,7 @@ def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> C
     notes += [f"The {who} skips permission prompts (permissionMode: bypassPermissions)." for who in bypass]
     for server in shipped_servers:
         notes += _server_notes(server)
+    notes += _hook_notes(hook_entries or [])
     if all_scripts:
         n = len(all_scripts)
         used = ", ".join(sorted(c.replace("_", " ") for c in all_caps)) or "nothing risky by syntax"
@@ -199,7 +258,7 @@ def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> C
         notes.append("These could not be analysed, so read them: " + ", ".join(unanalysed) + ".")
     if not notes:
         notes.append("It can only read and search files.")
-    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), hooks, servers, notes, shipped_servers)
+    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), hooks, servers, notes, shipped_servers, hook_entries or [])
 
 
 def _server_config(servers: list[dict]) -> tuple[dict, dict]:
@@ -237,6 +296,15 @@ def _readme(name: str, description: str, version: str, plan: list[dict], caps: C
         "```", f'claude plugin marketplace add "<path to this folder>"', f"claude plugin install {name}@{market}", "```", "",
         "SkillForge never writes Claude's settings: adding the plugin is your command.", "",
     ]
+    if caps.hook_entries:
+        lines += [
+            "## Hooks", "", "A hook runs on your machine every time its event happens, with your permissions. Each one here is a fixed script from "
+            "SkillForge's catalogue, shipped unchanged in `hooks/`; none was written by a model. They start with `python`, which must be on your PATH.", "",
+        ]
+        for hook in caps.hook_entries:
+            chosen = "".join(f" {key}: {', '.join(values)}." for key, values in hook["options"].items())
+            lines.append(f"- hook `{hook['id']}`: runs on {hook['event']}" + (f", tools {hook['matcher']}" if hook["matcher"] else ", every tool") + f". {hook['summary']}{chosen}")
+        lines.append("")
     if caps.servers:
         options = [(s["name"], v, user_config_key(s["name"], v)) for s in caps.servers for v in s["environment"]]
         lines += ["## Before the MCP servers can start", "", "Each server runs with `python` and needs its package, once, from this folder:", "", "```"]
@@ -274,12 +342,27 @@ def compose_plugin(
     read: list[tuple[ComponentRef, dict[str, bytes]]] = []
     plan: list[dict] = []
     files: dict[str, bytes] = {}
+    chosen_hooks: list[tuple[HookEntry, Mapping[str, Sequence[str]] | None]] = []
     for ref in components:
         if ref.kind not in COMPONENT_KINDS:
-            raise PluginError(f"A plugin can hold a skill, an agent or an MCP server, not '{ref.kind}'.")
+            raise PluginError(f"A plugin can hold a skill, an agent or an MCP server, or a hook, not '{ref.kind}'.")
         if (ref.kind, ref.name) in seen:
             raise PluginError(f"The {ref.kind} '{ref.name}' is listed twice.")
         seen.add((ref.kind, ref.name))
+        if ref.options and ref.kind != "hook":
+            raise PluginError(f"The {ref.kind} '{ref.name}' has options, but only a hook can have them.")
+        if ref.kind == "hook":
+            if ref.version is not None:
+                raise PluginError(f"The hook '{ref.name}' has no version to choose: it comes from the catalogue.")
+            try:
+                entry = get_entry(ref.name)
+                hook_group(entry, ref.options)  # refuses a bad option
+            except CatalogueError as exc:
+                raise PluginError(str(exc)) from None
+            chosen_hooks.append((entry, ref.options))
+            files[entry.shipped_path] = script_bytes(entry)
+            plan.append({"kind": "hook", "name": entry.id, "version": f"r{entry.revision}"})
+            continue
         found, component_files = library.for_kind(ref.kind).read(ref.name, ref.version)  # hash-verified, then gated
         plan.append({"kind": ref.kind, "name": ref.name, "version": found.tag})
         read.append((ref, component_files))
@@ -293,7 +376,9 @@ def compose_plugin(
                     files[f"{SERVERS_DIR}/{ref.name}/{_inside(rel)}"] = data
         else:
             files[f"agents/{ref.name}.md"] = component_files["AGENT.md"]
-    caps = _capabilities(read)
+    caps = _capabilities(read, [_hook_summary(entry, options) for entry, options in chosen_hooks])
+    if chosen_hooks:
+        files[HOOKS_FILE] = _json(_hooks_file(chosen_hooks))
     entries, options = _server_config(caps.servers)
     owner = author.strip() or DEFAULT_AUTHOR
     manifest: dict = {"name": name, "version": version, "description": description.strip(), "author": {"name": owner}}

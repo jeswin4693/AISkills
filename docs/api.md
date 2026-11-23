@@ -101,6 +101,15 @@ version (403)**. The path a person sends is never sent back, in a result or in a
 | `POST /api/suggestions/{id}/retry` | Runs a failed run again (a missing key, an unreachable model). 409 for any other state. |
 | `POST /api/builds` | now also takes **`from_run` and `idea`** (a finished suggestion run and the idea's position in it: the server uses that run's own folder and the idea's cited places) or, for scripts, `repo` (absolute folder), `focus` and `evidence_nodes` (at most 60 places); not both. A half-given seed, an idea that is not a buildable skill or automation, a run that is not finished, a folder that is not there, or a kind other than skill or agent is a 400; an unknown run is a 404. The session then shows `seed: {repo, focus, places}` and, when it ends, the result `evidence: {repo, places, skipped}`; the built folder carries `evidence.json`. |
 
+## Settings (slice X)
+
+The routes behind the web **Settings** page ([settings.md](settings.md)). **Both are off in the hosted version (403)**: a save would be written on the server.
+
+| Route | |
+|---|---|
+| `GET /api/settings` | `{file, file_exists, groups, settings, status}`. Each setting has `name, group, label, help, kind, provider, choices, set, source (file, environment, unset), editable` and, **except for a key**, `value`. A key is never sent: not its value, not its end, not its length. |
+| `POST /api/settings` | `{"changes": {"LLM_MODEL": "a-model", "GOOGLE_API_KEY": "...", "LLM_FALLBACKS": null}}`: a text sets, `null` or an empty text removes; all or nothing; applied to the running server at once. 200 = the new state. 400 `{detail, problems: [{name, message}]}` for an unknown name, a name set in the environment, an unsafe or wrong value or a body of the wrong shape (never repeating a value); 413 over 20 KB. |
+
 ## Why a local server is still locked down
 
 A web page on another site can ask your browser to talk to `localhost`. Two defences, both in

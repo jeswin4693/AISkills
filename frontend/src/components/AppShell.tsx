@@ -13,6 +13,7 @@ const NAV = [
   { href: "/repository", label: "Repository", hint: "Read a repository and get ideas grounded in its code" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
   { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
+  { href: "/settings", label: "Settings", hint: "Choose your model and add its key" },
 ];
 
 function Shell({ children }: { children: ReactNode }) {
@@ -31,7 +32,7 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
           {open && (
             <nav aria-label="Main">
-              <ul className="flex gap-1 md:flex-col">
+              <ul className="flex flex-wrap gap-1 md:flex-col">
                 {NAV.map((item) => {
                   const here = path === item.href || path.startsWith(item.href + "/");
                   return (

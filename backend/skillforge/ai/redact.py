@@ -17,6 +17,9 @@ _SHAPES = (
     re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),  # OpenAI and compatible
     re.compile(r"gsk_[A-Za-z0-9]{20,}"),  # Groq
     re.compile(r"\bbearer\s+[A-Za-z0-9._\-]{16,}", re.IGNORECASE),
+    # a key a provider has masked while quoting it back ("sk-proj-****...abcd"): the start and the end are still part of the key
+    re.compile(r"[A-Za-z0-9_\-]{2,}\*{3,}[.A-Za-z0-9_\-]*"),
+    re.compile(r"\*{4,}[A-Za-z0-9_\-]{2,}"),
 )
 
 

@@ -21,7 +21,7 @@ in the environment or `.env`.
 | H2 | **Database + build sessions**: tables for build sessions and jobs; the chat builder as an API (a round of questions, your answers, approval, then a background job with progress). See [database.md](database.md) and the builder part of [api.md](api.md). | yes (mock in tests; checked live with Gemini) · **Built** |
 | H3 | **UI shell + Library page**: the first screen on top of H1, so something real can be clicked early. See [ui.md](ui.md). | no · **Built** |
 | H4 | **Builder page**: describe, answer, approve, live progress, the result with traceability, save. See [ui.md](ui.md). | yes (fake model in the browser test) · **Built** |
-| H5 | Suggest and graph pages, Settings (shows only *whether* a key is set, never its value), Testing Lab and Quality Report views. | partly |
+| H5 | Suggest and graph pages, Settings (shows only *whether* a key is set, never its value), Testing Lab and Quality Report views. | partly: the Repository page (suggestions, slice W) and **Settings (slice X, [settings.md](settings.md))** are built; a drawn graph, the Testing Lab and the Quality Report are not |
 
 Agent Builder stays last and is not blocked by any of this.
 
@@ -38,5 +38,5 @@ Agent Builder stays last and is not blocked by any of this.
 
 ## Open questions (will be asked when reached, not before)
 
-- H5: should the Settings page be allowed to *write* a key into the git-ignored `.env`, or only show how to?
+- H5: should the Settings page be allowed to *write* a key into the git-ignored `.env`, or only show how to? **Answered in slice X: it writes (the page is no easier than editing the file if it only shows how), with a fixed list of names, safe characters only, a key never sent back, an atomic write, and off in the hosted version ([settings.md](settings.md)). Say so if you want it to only show how.**
 - Later: one command that starts API and UI together, and what "installable" should mean for other people.

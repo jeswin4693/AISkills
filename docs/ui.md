@@ -1,7 +1,7 @@
 # Web UI
 
 Steps H3 and H4 of [ui-and-database-plan.md](ui-and-database-plan.md): a browser front end for the local API
-([api.md](api.md)). **Built so far: the app shell, the Library (H3), the Builder (H4) and the Repository page (slice W, [repository-page.md](repository-page.md)).** Settings is next (H5).
+([api.md](api.md)). **Built so far: the app shell, the Library (H3), the Builder (H4), the Repository page (slice W, [repository-page.md](repository-page.md)) and the Settings page (slice X, [settings.md](settings.md)).**
 
 How to run it: [../frontend/README.md](../frontend/README.md).
 
@@ -15,6 +15,7 @@ How to run it: [../frontend/README.md](../frontend/README.md).
 | **MCP servers** | **Builder**: pick **MCP server**, describe the tools, answer only what is missing, approve, build, save ([mcp-builder.md](mcp-builder.md)). The result card says whether each test case ran in the sandbox, failed or did not run, and a server that never ran is a DRAFT. **Library**: an **MCP servers** tab like the skills and agents tabs (export, install into a folder, compare, re-check). The pages say "MCP server" where they said "skill". Not clicked through in a real browser. |
 | **Plugins** (`/composer`) | Name a plugin, tick skills, agents and MCP servers from your library and hooks from the catalogue (each hook has a "runs on your machine" badge, says whether it can block, and has a box for each option, marked at once when a value would be refused), press **Preview the plugin** to see its files, what it can do on your machine (tools, scripts, and a "Programs this plugin starts" section for each MCP server: its tools, what its code can do, the secret options Claude Code will ask for) and every check, then **Keep this plugin**. No model is used. It then appears in the Library under Plugins. |
 | **Repository** (`/repository`) | Type the full path of a folder on this computer (remembered in the browser only; the page shows the folder's name, never the path), **Read the repository** (languages and how deeply each is read, how much of the call graph is proven, the most depended-on functions, dead-code candidates; no model) and **Ask for ideas** (a model, in the background; each idea cites places that exist in the graph, and says that this does not make the advice right). A skill or automation idea has **Build this skill**, with its wording editable first; it starts a build session that ends with evidence for the cited places. Earlier runs are listed. Off in the hosted version. |
+| **Settings** (`/settings`) | The model in use, **Test my models**, the provider and model, one key box per provider (never filled in: it says only "Saved" or "Not set", and a paste is dropped from the page once saved), backup models, and a folded "More options" (a model for one kind of work, four limits, the cache). Save writes `.env` and applies at once. A setting from the computer's environment is shown read-only. In the hosted version the page says it is managed by whoever runs the server ([settings.md](settings.md)). |
 | **A skill** (`/library/<name>`) | Every version, newest first. Pick one to read its files (the API verifies the whole version against its hashes first) and the checks it passed at import. **Export** a `.zip` (optionally without `spec.json`, which holds the requester's own words), **Install** it (to `~/.claude/skills` or a folder you type, with a backup-and-replace step when it exists), **Restore** an older version (asks first; it adds a new version and deletes nothing), open the changes since the version before, or **Re-check this skill** (today's checks on each of its versions). A version that cites code also shows **Code it cites** (each place with the facts recorded) and **Recheck**, which compares them with a folder you name and lists what is missing, moved, changed or edited (off in the hosted version); the export can leave `evidence.json` out. |
 | **Compare** (`/library/<name>/diff`) | Two version pickers; above the files, the **risk summary** for that pair; then, per file, added / removed / changed with the changed lines coloured and also announced as "added line" / "removed line" for screen readers. |
 | **Status panel** (every page) | Whether the API is up, whether a Linux sandbox is available, and which model is set up (never a key). When the API is down it says so and gives the command to start it. |
@@ -81,7 +82,7 @@ Choices worth knowing:
 
 ## Limits
 
-- **Suggestions, the graph, Settings, the Testing Lab and the Quality Report views are not built yet** (H5).
+- **A drawn graph, the Testing Lab and the Quality Report views are not built yet** (the rest of H5). The Repository page shows numbers and lists.
 - **The Builder's automated browser test uses a fake model**, so it is repeatable and needs no key. The real thing was
   checked by hand with `node e2e/live.mjs` (real API, real model from your `.env`, real Edge): on 2026-11-19, with
   Gemini (`gemini-3.5-flash-lite`), one sentence, one round of five questions, approval, build and save took about

@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from dotenv import load_dotenv
-
 from ..ai import AIService, Tier, service_from_env
 from ..providers import LLMProvider, ProviderError
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from ..settings import default_settings
 
 
 def env_provider() -> LLMProvider:
-    load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
-    return service_from_env()
+    # real environment variables win over the file; a changed .env is seen now, with no restart. One copy, taken under the lock that
+    # every save holds, so a lookup never sees half of a save.
+    return service_from_env(default_settings().snapshot())
 
 
 def provider_status(factory=env_provider) -> dict:

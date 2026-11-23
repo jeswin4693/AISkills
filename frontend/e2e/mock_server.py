@@ -19,12 +19,14 @@ from pathlib import Path
 
 import uvicorn
 
+from skillforge.ai.doctor import Ping
 from skillforge.api import create_app
 from skillforge.build.models import Extraction, IOField, SkillDraft, SkillTest, Slot, Step
 from skillforge.builder import Builder, JobRunner
 from skillforge.db import Database
 from skillforge.library import Library
 from skillforge.providers import MockProvider, ProviderError
+from skillforge.settings import EnvSettings
 from skillforge.suggest.models import Suggestion, SuggestionSet
 from skillforge.suggest.prompt import IDEAS_SYSTEM
 
@@ -112,6 +114,8 @@ def suggestions(system) -> SuggestionSet:
 
 def respond(schema, prompt, system):
     time.sleep(DELAY)
+    if schema is Ping:  # the Settings page's "Test my models"
+        return Ping(reply="ok")
     if schema is Extraction:
         return extraction(prompt)
     if schema is SkillDraft:
@@ -135,7 +139,9 @@ def main() -> None:
         database, library, DATA / "builds", provider_factory=provider, runner=JobRunner(),
         sandbox_note=lambda: "unavailable. (the browser test does not use the sandbox)",
     )
-    uvicorn.run(create_app(library, builder=builder), host="127.0.0.1", port=PORT, log_level="warning")
+    # the Settings page writes this throwaway file, into this server's own empty environment: never the real .env
+    settings = EnvSettings(DATA / "e2e.env", {})
+    uvicorn.run(create_app(library, builder=builder, env_settings=settings), host="127.0.0.1", port=PORT, log_level="warning")
 
 
 if __name__ == "__main__":

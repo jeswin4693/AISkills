@@ -649,10 +649,72 @@ try {
     await page.getByText(/not that the skill's advice is right/).waitFor(); // every report says what it does not check
   });
 
+  console.log("The settings");
+  const envFile = path.join(scratch, "data", "e2e.env"); // the throwaway file the test server's Settings page writes (never the real .env)
+  const KEY = "AIzaSyE2E-SECRET_0123456789abcdef";
+  const field = (name) => page.locator(`[data-setting="${name}"]`);
+  await step("the menu leads to Settings, which shows the model in use and has nothing to save yet", async () => {
+    await page.goto(UI + "/builder");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+    await page.getByText(/In use:/).first().waitFor();
+    await page.getByText("Nothing changed.").waitFor();
+    assert.ok(await page.getByRole("button", { name: "Save changes" }).isDisabled());
+    await shot(page, "36-settings");
+  });
+  await step("saving a model and a key writes the file, empties the key box, and the key is never shown or sent back", async () => {
+    await field("LLM_MODEL").locator("input").fill("gemini-e2e-model");
+    await field("GOOGLE_API_KEY").locator("input").fill(KEY);
+    await page.getByText("2 settings will be saved.").waitFor();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Saved. It is used from now on, with no restart.").waitFor();
+    assert.equal(await field("GOOGLE_API_KEY").locator("input").inputValue(), "", "a saved key must leave the page");
+    await field("GOOGLE_API_KEY").getByText("Saved", { exact: true }).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(KEY));
+    const written = fs.readFileSync(envFile, "utf8");
+    assert.ok(written.includes(`GOOGLE_API_KEY=${KEY}`) && written.includes("LLM_MODEL=gemini-e2e-model"), "the file holds both");
+    const served = await (await fetch(API + "/api/settings")).text();
+    assert.ok(!served.includes(KEY) && !served.includes(KEY.slice(-8)), "the API must never send the key back");
+    await shot(page, "37-settings-saved");
+  });
+  await step("after a reload the model is shown, the key box is empty and the key is marked saved", async () => {
+    await page.reload();
+    await page.getByRole("heading", { name: "Settings", level: 1 }).waitFor();
+    await page.waitForFunction(() => document.querySelector('[data-setting="LLM_MODEL"] input')?.value === "gemini-e2e-model");
+    assert.equal(await field("GOOGLE_API_KEY").locator("input").inputValue(), "");
+    await field("GOOGLE_API_KEY").getByText("Saved", { exact: true }).waitFor();
+  });
+  await step("a value that is refused names the setting, saves nothing and does not repeat the value", async () => {
+    const bad = "has a space in it";
+    await field("GOOGLE_API_KEY").locator("input").fill(bad);
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Nothing was saved").waitFor();
+    await field("GOOGLE_API_KEY").getByText(/Only letters, digits/).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(bad), "a refusal must not repeat the value");
+    assert.ok(fs.readFileSync(envFile, "utf8").includes(`GOOGLE_API_KEY=${KEY}`), "the file is unchanged");
+    await page.getByRole("button", { name: "Discard changes" }).click();
+    await page.getByText("Nothing changed.").waitFor();
+  });
+  await step("a saved key can be removed, and a key typed just before pressing Remove is dropped, not saved", async () => {
+    await field("GOOGLE_API_KEY").locator("input").fill("typed-then-removed-key");
+    await field("GOOGLE_API_KEY").getByRole("button", { name: "Remove it" }).click();
+    await field("GOOGLE_API_KEY").getByText("Will be removed").waitFor();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByText("Saved. It is used from now on, with no restart.").waitFor();
+    await field("GOOGLE_API_KEY").getByText("Not set", { exact: true }).waitFor();
+    const after = fs.readFileSync(envFile, "utf8");
+    assert.ok(!after.includes("GOOGLE_API_KEY=") && !after.includes("typed-then-removed-key"), "a removed key must not be replaced by what was typed");
+  });
+  await step("'Test my models' tests what is saved and shows how each model answered", async () => {
+    await page.getByRole("button", { name: "Test my models" }).click();
+    await page.getByText("Works", { exact: true }).waitFor();
+    await shot(page, "38-settings-tested");
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });
-    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2", "/composer"]) {
+    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2", "/composer", "/settings"]) {
       await page.goto(UI + url);
       await page.getByRole("heading", { level: 1 }).first().waitFor();
       await page.waitForTimeout(400);

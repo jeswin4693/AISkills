@@ -32,10 +32,12 @@ from ..library import (
 )
 from ..library.evidence import evidence_focus, recheck_version
 from ..sandbox import probe_sandbox
+from ..settings import EnvSettings, default_settings
 from .builds import builds_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .plugins import plugins_router
 from .repos import repos_router
+from .settings import settings_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
 from .views import import_view as _import_report
@@ -100,12 +102,14 @@ def _label(request: Request) -> str:
 
 def create_app(
     library: Library | None = None, origins: list[str] | None = None, builder: Builder | None = None,
-    hosted: Hosted | None = None,
+    hosted: Hosted | None = None, env_settings: EnvSettings | None = None,
 ) -> FastAPI:
     """`builder` is made on first use when not given, so the library endpoints never need the database.
 
     `hosted` turns on the hosted version (docs/hosting.md): a sign-in in front of the API, no install into server folders, no
-    interactive docs. Without it everything is as it always was: local only, no sign-in."""
+    interactive docs. Without it everything is as it always was: local only, no sign-in.
+
+    `env_settings` is the `.env` the Settings page reads and writes; tests hand in their own so none touches the real file."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -121,6 +125,7 @@ def create_app(
     app.state.library = library or (builder.library if builder else Library())
     app.state.builder = builder
     app.state.builder_lock = threading.Lock()
+    app.state.env_settings = env_settings or default_settings()
     trusted = allowed_origins(origins)
     app.add_middleware(
         CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
@@ -309,6 +314,7 @@ def create_app(
     api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
     api.include_router(repos_router())
+    api.include_router(settings_router())
     api.include_router(plugins_router())
     app.include_router(api)
     return app

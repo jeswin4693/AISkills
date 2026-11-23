@@ -1,6 +1,7 @@
 import type {
   AuthStatus, BuildSession, BuildSummary, DiffResult, EvidenceDoc, FileText, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
+  ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
+  SuggestRunSummary, VersionInfo,
 } from "./types";
 
 import { SIGNED_OUT_EVENT } from "./auth";
@@ -83,6 +84,18 @@ export const api = {
 
   sandbox: () => get<SandboxStatus>("/api/sandbox"),
   provider: () => get<ProviderStatus>("/api/provider"),
+
+  // ---- settings: what is set (never a key) and a save into the .env file; the hosted version refuses both ----
+  settings: () => get<SettingsView>("/api/settings"),
+  /** 200 is the new state; 400 says which settings were refused and why (never repeating a value). Anything else is an error. */
+  async saveSettings(changes: Record<string, string | null>): Promise<SaveSettingsResult> {
+    const res = await send("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ changes }) });
+    const body = await json<SettingsView & { detail?: string; problems?: { name: string; message: string }[] }>(res, [400]);
+    if (res.status === 400) return { ok: false, detail: detailOf(body, "Some settings were refused."), problems: body.problems ?? [] };
+    return { ok: true, view: body };
+  },
+  /** One tiny call to each model that is set up: it uses a little quota, so only when asked. */
+  checkModels: () => post<ModelCheckReport>("/api/provider/check", {}),
 
   // ---- the hosted version's sign-in (the local version never asks) ----
   authStatus: () => get<AuthStatus>("/api/auth/status"),

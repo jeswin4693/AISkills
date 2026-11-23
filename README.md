@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins and Repository), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins, the behavioural canary scan, and a Settings page.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins, Repository and Settings), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins and the behavioural canary scan.
 See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
 your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
@@ -83,7 +83,7 @@ named the renamed function, the new caller and the changed structure (and expose
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
    ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
-4. **The Repository page is built** (slice W, below). Left of the web pages: Settings, and a drawn graph (the page shows numbers and lists).
+4. **The Repository page and the Settings page are built** (slices W and X, below). Left of the web pages: a drawn graph (the Repository page shows numbers and lists), and reading a repository from a GitHub link.
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
@@ -267,6 +267,11 @@ A skill or automation idea has a **Build this skill** button (its wording is the
 repository, and when the build ends the skill carries `evidence.json` for the places the idea cited. Saved, its library page lists that code and can **recheck** it.
 Everything that reads a folder is off in the hosted version, and the page is shown the folder's name, never its path. Details, the API and what a real run with the
 configured model showed (including a skill idea the builder refused as "an agent", which is why the wording is editable): [docs/repository-page.md](docs/repository-page.md).
+
+## The Settings page (slice X)
+
+Until now the model and its key were set by editing the `.env` file by hand, and the server read it once. On the **Settings** page you choose the provider and the model, paste a key, add backup models and test them with **Test my models** (one tiny question to each model, so it uses a little quota). It is saved into `.env` on this computer and **used at once, with no restart**.
+A key is **never shown again and never sent back** by the API (the page learns only "Saved" or "Not set"). Only a fixed list of settings can be changed, a value may hold only safe characters, a refusal says which setting and why without repeating the value, and a setting that comes from your computer's environment is shown read-only. Off in the hosted version. Details and limits (a key in `.env` is plain text on disk): [docs/settings.md](docs/settings.md).
 
 ## Run the local API (the web UI talks to it)
 

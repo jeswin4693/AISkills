@@ -147,6 +147,68 @@ export interface ProviderStatus {
   fallbacks?: { provider: string; model: string }[];
 }
 
+// ---- settings (docs/settings.md) -----------------------------------------------------------------------
+
+export interface SettingItem {
+  name: string;
+  group: string;
+  label: string;
+  help: string;
+  kind: "secret" | "choice" | "text" | "url" | "number" | "flag";
+  /** For a key (and the custom address): the provider it belongs to. */
+  provider: string;
+  choices: string[];
+  set: boolean;
+  /** Where the value comes from. "environment" cannot be changed here: a real environment variable wins over .env. */
+  source: "file" | "environment" | "unset";
+  editable: boolean;
+  /** Absent for a key: the server never sends one, not even its end or its length. */
+  value?: string;
+}
+
+export interface SettingGroup {
+  key: string;
+  label: string;
+  help: string;
+  advanced: boolean;
+}
+
+export interface SettingsView {
+  file: string;
+  file_exists: boolean;
+  /** False when the file exists but cannot be read as text (for example it is not UTF-8): nothing in it is being used. */
+  file_readable: boolean;
+  groups: SettingGroup[];
+  settings: SettingItem[];
+  status: ProviderStatus;
+}
+
+export interface SettingProblem {
+  /** Empty when the problem is about the request as a whole. Never holds the value that was refused. */
+  name: string;
+  message: string;
+}
+
+export type SaveSettingsResult = { ok: true; view: SettingsView } | { ok: false; detail: string; problems: SettingProblem[] };
+
+export interface ModelCheck {
+  provider: string;
+  model: string;
+  roles: string[];
+  ok: boolean;
+  kind: string;
+  detail: string;
+  latency_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
+export interface ModelCheckReport {
+  configured: boolean;
+  detail: string;
+  checks: ModelCheck[];
+}
+
 // ---- the builder (docs/api.md, "The skill builder") ----------------------------------------------------
 
 export type BuildStatus = "working" | "awaiting_answers" | "awaiting_approval" | "done" | "failed";

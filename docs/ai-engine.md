@@ -35,6 +35,7 @@ live with Gemini, but it has gaps the new builders would hit first:
 Temperature or seed control, a Settings page, a "test the key" button, fixing `.env` edits needing a restart (the first
 `load_dotenv` wins), session-level budgets across jobs, the tier benchmark (A4: it spends quota and needs the new
 builders' sample requirements first), and any new Python library (`anthropic` is already pinned).
+(Later: the Settings page, the "test the key" button and the `.env` re-read were built in slice X: [settings.md](settings.md).)
 
 ## Design
 

@@ -133,8 +133,7 @@ and says it in plain sentences. `library/risk.py` calls a new server, a changed 
 **Checked against the real tool (2026-11-23, Claude Code 2.1.325):** `claude plugin validate --strict` reads `.mcp.json`, refuses a `userConfig` key with a dash, dot, space or leading digit, and fails an undeclared
 `${user_config.X}`; a plugin composed from two real library servers (one reading a key) passes with exit 0. **Read from the docs by a research agent, not tried:** a plugin's MCP servers start when it is enabled with no
 per-server approval, outside the sandbox; `claude plugin install --config key=value` exists (checked in `--help`); the docs do not say a stdio server inherits Claude Code's environment, so every variable is passed explicitly.
-**Not done, on purpose:** hooks (4b, built after: see below), a real `claude plugin install`, a managed Python environment (the command is plain `python`), TypeScript or remote servers, and a browser run of the new page section
-(still not done for the MCP picker; the composer page as a whole was driven in a real browser in 4b).
+**Not done, on purpose:** a managed Python environment (the command is plain `python`), TypeScript or remote servers. (Hooks were built after in 4b; a real install, the MCP picker in a browser and an independent review were done afterwards and are in "Phase 4 after the review" below.)
 
 ## Phase 4b: what was built (2026-11-23)
 
@@ -149,7 +148,31 @@ a Hooks card and a "Hooks this plugin runs" preview section on the composer page
 changed), in a scratch folder with a dummy `.env`, `block-secret-files` blocked a `Read` of `.env` and `block-force-push` blocked `git push --force`, each with its own reason shown to the model (the debug log: `Hook PreToolUse:Read error: status code 2`), an
 ordinary `Read` of `notes.txt` went through, and `log-tool-calls` ran afterwards and wrote its line to the plugin data folder. That settles what the docs left open: the exec form with `python` and `${CLAUDE_PLUGIN_ROOT}` works on Windows, exit 2 blocks and its
 stderr is the reason, `tool_input.file_path` is the field, and a plugin's hooks run without an approval prompt in a non-interactive session. The real-browser suite passes 42 of 42 (3 new composer behaviours). **Not done, on purpose:** hook types other than
-`command`, hooks inside a skill's or agent's front matter (still only listed), `SessionStart` context injection (it feeds text to the model), a real `claude plugin install`, and a managed Python.
+`command`, hooks inside a skill's or agent's front matter (they are now listed with their commands, not built), `SessionStart` context injection (it feeds text to the model), and a managed Python.
+
+## Phase 4 after the review and the real runs (2026-11-23)
+
+After 4a and 4b were built and pushed, I ran what had been left unverified, and two fresh agents reviewed the slices (told to attack, not to confirm). What that changed:
+
+**Real Claude Code (2.1.325, Windows) found two things the tests could not.**
+- **A guard that cannot start fails open.** With `python` missing from the PATH, a `Read` of `.env` went through and the session said nothing. Every blocking catalogue hook now carries `"onFailure": "block"` (checked: a missing Python and a script that exits 1 then block, with the reason shown), the two guards block themselves
+  (exit 2) when they cannot read the event, the validator requires the key on guards and refuses it on the logger, and the risk diff calls dropping it riskier. The guards' scripts are revision 2.
+- **An option value is stored in `.credentials.json`** in the Claude folder (private to you, not a vault). The notes, README, page and docs said "kept as a secret"; they now say where.
+- Confirmed: the `PowerShell` and `NotebookEdit` tool names and `notebook_path`; a real `claude plugin marketplace add` + `install --config` (in an isolated `CLAUDE_CONFIG_DIR`, so your settings were untouched) of a plugin with two MCP servers, both **Connected** in `claude mcp list`;
+  and the option's value reaching the server's environment (a server that refuses to start without it connected with the right value and failed with a wrong one). The MCP picker was driven in a real browser (43 behaviours in all).
+
+**The independent reviews** found 13 problems in 4a (2 Critical) and 12 in 4b (3 Critical), each reproduced by running code. All that I could reproduce are fixed and tested (the new tests were run on the code from before the fixes: about 110 of 150 failed there):
+- *Critical, both slices:* a file whose name differs from a special file only in capitals (`.MCP.JSON`, `hooks/Hooks.json`), or with a trailing dot, space or colon (`server.py.`), is the same file on Windows and macOS but was never inspected, so a plugin could be reported fully described while running something else (now refused);
+  a module planted beside a hook script (`hooks/json.py`, `json.pyw`) was imported instead of the standard library and could blind a guard (now: `python -I`, plus a warning for any other file in `hooks/`); the force-push guard missed line continuations, subshells, quoted `;`, `bash -c`, `powershell -Command`,
+  Windows paths and `git.cmd` (now a real lexer, and a command too long to read is blocked).
+- *Important:* the risk diff said nothing about an entry that arrived together with its server, a changed `userConfig` option (`sensitive` to false, a default added), an inline manifest `mcpServers`, a re-pointed environment value or hooks and commands declared in the manifest or a skill's front matter, and could not tell two hooks apart (now compared by whole object);
+  an option could be wired to another server's variable and still count as "the composed form"; `g = os.environ.get` hid a variable from the analyser; extra keys beside `mcpServers` and the unshown tail of a long command hid things; a deeply nested JSON file crashed validation and a few bytes of Python could make the analyser build 8 million characters;
+  `block-secret-files` was reached by `.env/.`, `C:.env` and 8.3 names; the catalogue's hash lived only in a test (now a constant in each entry, checked when a script is shipped).
+- *Minor:* a server name starting with a digit, loader variables (`PYTHONPATH`) as options, secrets and URLs in reports, the click order changing the plugin and its version, a pip instruction for a server that ships no requirements file, option text kept in the page after a hook is unticked, and other places a plugin can run code
+  (`commands/`, `monitors/`, `workflows/`, the `!` syntax, front-matter hooks), which came from a docs lookup.
+
+**Still open, said plainly:** an interactive Claude Code session; macOS and Linux; the guards' known blind spots (shell commands and `Grep`/`Glob` for secrets; aliases, scripts, encoded commands, the Monitor tool and background shells for pushes); what Claude Code does with a `userConfig` option that has a default or is not required (the checks refuse such options for servers);
+whether a key beside `mcpServers` in `.mcp.json` is read; older Claude Code (before 2.1.295) ignores `onFailure`.
 
 ## Decisions (approved)
 

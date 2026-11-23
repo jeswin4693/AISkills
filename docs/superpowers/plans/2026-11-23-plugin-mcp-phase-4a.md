@@ -50,3 +50,7 @@ settle the format before coding, and accepts a plugin composed from two real lib
 could pass `PYTHONPATH` as an option and still be "described"); the check now accepts only variables the server's code reads, with a test. Changed on purpose: two check labels
 (`the plugin contains a skill, an agent or an MCP server`, `no hooks, undescribed MCP servers, settings or executables`) and the unsupported-kind message. **Not done:** a real `claude plugin install`,
 the new page section in a browser, an independent review, hooks (4b).
+
+## After the independent review and the real runs (2026-11-23)
+
+A real `claude plugin marketplace add` and `install --config` (in an isolated `CLAUDE_CONFIG_DIR`) started both MCP servers, and the option's value reached the server; the picker was driven in a real browser (43 behaviours). An independent reviewer found 13 problems (2 Critical); every one I could reproduce is fixed with a test that failed before (`tests/test_plugin_review_2.py`). Details and what is still open: `docs/component-factory.md` ("Phase 4 after the review") and `docs/plugin-builder.md` ("Limits").

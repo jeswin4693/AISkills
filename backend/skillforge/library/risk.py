@@ -326,15 +326,22 @@ def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list
 def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
     """Inside a plugin: each skill and agent that is in both versions is compared with the rules of its own kind, and a component
     that came or went is said. The plugin's manifest and README are not instructions an agent follows, so they are not diffed."""
-    from ..validate.plugin import components, shipped_code  # here: `validate.plugin` needs nothing from the library
+    from ..validate.plugin import MCP_CONFIG, components, shipped_code, shown_command  # here: `validate.plugin` needs nothing from the library
 
     def keyed(files: Mapping[str, bytes]) -> dict[tuple[str, str], dict[str, bytes]]:
         return {(kind, name): sub for kind, name, sub in components(files)}
 
+    def label(kind: str) -> str:
+        return "MCP server" if kind == "mcp" else kind
+
     def where(kind: str, name: str, path: str = "") -> str:
+        if kind == "mcp":
+            return f"servers/{name}/{path or 'server.py'}"
         return f"skills/{name}/{path or 'SKILL.md'}" if kind == "skill" else f"agents/{name}.md"
 
     def power(kind: str, sub: Mapping[str, bytes]) -> list[str]:
+        if kind == "mcp":
+            return ["a program that starts on your machine"]
         definition, field_name = ("SKILL.md", "allowed-tools") if kind == "skill" else ("AGENT.md", "tools")
         meta = _front_matter(sub, definition)[0]
         reasons: list[str] = []
@@ -353,19 +360,53 @@ def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
     before, after = keyed(old), keyed(new)
     for kind, name in sorted(after.keys() - before.keys()):
         reasons = power(kind, after[(kind, name)])
-        detail = f"The {kind} '{name}' is now in the plugin" + (f" and asks for {', '.join(reasons)}." if reasons else "; it asks for nothing beyond reading.")
+        if kind == "mcp":
+            detail = f"The MCP server '{name}' is now in the plugin: a program that starts on your machine, with your permissions and outside any sandbox, whenever Claude Code loads the plugin."
+        else:
+            detail = f"The {kind} '{name}' is now in the plugin" + (f" and asks for {', '.join(reasons)}." if reasons else "; it asks for nothing beyond reading.")
         out.append(RiskChange(RISKIER if reasons else LOOK, "component_added", detail, where(kind, name)))
     for kind, name in sorted(before.keys() - after.keys()):
-        out.append(RiskChange(SAFER, "component_removed", f"The {kind} '{name}' is no longer in the plugin.", where(kind, name)))
+        out.append(RiskChange(SAFER, "component_removed", f"The {label(kind)} '{name}' is no longer in the plugin.", where(kind, name)))
     for kind, name in sorted(before.keys() & after.keys()):
         old_c, new_c = before[(kind, name)], after[(kind, name)]
         if old_c == new_c:
             continue
         for change in risk_diff(old_c, new_c, kind=kind).changes:
-            out.append(RiskChange(change.direction, change.kind, f"{kind} '{name}': {change.detail}", where(kind, name, change.path)))
+            out.append(RiskChange(change.direction, change.kind, f"{label(kind)} '{name}': {change.detail}", where(kind, name, change.path)))
         gained = [word for word in power(kind, new_c) if word in ("hooks", "MCP servers") and word not in power(kind, old_c)]
         if gained:
             out.append(RiskChange(RISKIER, "capability", f"The {kind} '{name}' now declares {' and '.join(gained)}: they run on your machine.", where(kind, name)))
+
+    # what `.mcp.json` starts. A server that came or went with the plugin is said above, so it is not said twice here.
+    said = {name for kind, name in after.keys() ^ before.keys() if kind == "mcp"}
+
+    def entries(files: Mapping[str, bytes]) -> dict[str, dict]:
+        try:
+            data = json.loads(files[MCP_CONFIG].decode("utf-8"))
+        except (KeyError, UnicodeDecodeError, ValueError):
+            return {}
+        found = data.get("mcpServers") if isinstance(data, dict) else None
+        return {str(k): v for k, v in found.items() if isinstance(v, dict)} if isinstance(found, dict) else {}
+
+    def variables(entry: Mapping) -> set[str]:
+        env = entry.get("env")
+        return {str(k) for k in env} if isinstance(env, dict) else set()  # the names only: a value is never shown
+
+    started_before, started_after = entries(old), entries(new)
+    for name in sorted(started_after.keys() - started_before.keys() - said):
+        out.append(RiskChange(RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}': {shown_command(started_after[name])}. It runs on your machine when the plugin is enabled.", MCP_CONFIG))
+    for name in sorted(started_before.keys() - started_after.keys() - said):
+        out.append(RiskChange(SAFER, "server_start", f"{MCP_CONFIG} no longer starts '{name}'.", MCP_CONFIG))
+    for name in sorted(started_before.keys() & started_after.keys()):
+        was, now = started_before[name], started_after[name]
+        if (was.get("command"), was.get("args")) != (now.get("command"), now.get("args")):
+            out.append(RiskChange(
+                RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}' as {shown_command(now)} instead of {shown_command(was)}.", MCP_CONFIG,
+            ))
+        for variable in sorted(variables(now) - variables(was)):
+            out.append(RiskChange(RISKIER, "environment", f"{MCP_CONFIG} now gives '{name}' the environment variable {variable}: whatever value is set is reachable by the server.", MCP_CONFIG))
+        for variable in sorted(variables(was) - variables(now)):
+            out.append(RiskChange(SAFER, "environment", f"{MCP_CONFIG} no longer gives '{name}' the environment variable {variable}.", MCP_CONFIG))
 
 
 def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "", newer: str = "", kind: str = "skill") -> RiskDiff:

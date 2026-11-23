@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from pathlib import PurePosixPath
 
 from ..results import FAILED, PASSED, WARNING, CheckResult
+from .mcp import analyze_server
 from .static import JS_LANGS, MAX_NAME, PY_SUFFIXES, SLUG, script_capabilities, validate_files
 
 MANIFEST = ".claude-plugin/plugin.json"
@@ -197,7 +198,7 @@ def _script_row(files: Mapping[str, bytes]) -> CheckResult:
     return CheckResult(SCRIPTS_CHECK, WARNING, "; ".join(parts) + ". Read them before installing.")
 
 
-def _shown(entry: object) -> str:
+def shown_command(entry: object) -> str:
     """What an entry would start, for a person to read: the command and its first arguments, each cut short. A value in `env` is
     never shown, only the names."""
     if not isinstance(entry, dict):
@@ -211,19 +212,32 @@ def _shown(entry: object) -> str:
     return shown + (" ..." if len(args) > _SHOWN_ARGS else "")
 
 
-def _entry_problem(name: str, entry: object, servers: set[str], declared: set[str], undeclared: list[str]) -> str:
+def _server_reads(files: Mapping[str, bytes]) -> dict[str, set[str]]:
+    """Each shipped server and the environment variables its code reads by a name written in it (none when it cannot be read)."""
+    reads: dict[str, set[str]] = {}
+    for kind, name, sub in components(files):
+        if kind == "mcp" and "server.py" in sub:
+            try:
+                reads[name] = set(analyze_server(sub["server.py"].decode("utf-8")).env_names)
+            except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError):
+                reads[name] = set()
+    return reads
+
+
+def _entry_problem(name: str, entry: object, servers: Mapping[str, set[str]], declared: set[str], undeclared: list[str]) -> str:
     """Why this `.mcp.json` entry is not the one the composer writes for a server shipped here ("" when it is). Fills `undeclared` with
-    the options it uses that the manifest does not declare."""
+    the options it uses that the manifest does not declare. `servers` maps each shipped server to the variables its code reads: an entry
+    may pass only those, so an option cannot be used to set something the server never asked for (`PYTHONPATH`, `LD_PRELOAD`)."""
     if not isinstance(entry, dict):
         return "is not an object"
     if name not in servers:
-        return f"starts {_shown(entry)}, which is not a server shipped in this plugin"
+        return f"starts {shown_command(entry)}, which is not a server shipped in this plugin"
     extra = sorted(set(entry) - {"command", "args", "env"})
     if extra:
-        return f"has {', '.join(map(str, extra))}, which SkillForge does not read, so what it does is not known (it starts {_shown(entry)})"
+        return f"has {', '.join(map(str, extra))}, which SkillForge does not read, so what it does is not known (it starts {shown_command(entry)})"
     start = server_entry(name)
     if entry.get("command") != start["command"] or entry.get("args") != start["args"]:
-        return f"starts {_shown(entry)} instead of the shipped servers/{name}/server.py"
+        return f"starts {shown_command(entry)} instead of the shipped servers/{name}/server.py"
     env = entry.get("env", {})
     if not isinstance(env, dict):
         return "has an env that is not an object"
@@ -236,13 +250,16 @@ def _entry_problem(name: str, entry: object, servers: set[str], declared: set[st
             undeclared.append(ref.group(1))
     if literal:
         return "gives " + ", ".join(literal) + " a value written in the file (only ${user_config.X} references are expected, so no key is kept here)"
+    unread = sorted(str(v)[:_SHOWN_CHARS] for v in env if v not in servers[name])
+    if unread:
+        return "passes " + ", ".join(unread) + ", which the server's code does not read"
     return ""
 
 
 def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckResult | None, bool]:
     """(the row, whether `.mcp.json` is the described one). It is described when every entry starts a server shipped in this plugin,
     in the one form the composer writes."""
-    servers = server_names(files)
+    servers = _server_reads(files)
     if MCP_CONFIG not in files:
         if servers:
             return CheckResult(MCP_CONFIG_CHECK, WARNING, f"the plugin ships {', '.join(servers)} but has no {MCP_CONFIG}, so Claude Code will not start it"), False
@@ -258,7 +275,7 @@ def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckRe
     undeclared: list[str] = []
     problems = []
     for name, entry in entries.items():
-        problem = _entry_problem(str(name), entry, set(servers), declared, undeclared)
+        problem = _entry_problem(str(name), entry, servers, declared, undeclared)
         if problem:
             problems.append(f"'{str(name)[:_SHOWN_CHARS]}' {problem}")
     if undeclared:

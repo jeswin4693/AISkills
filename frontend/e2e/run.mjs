@@ -521,6 +521,36 @@ try {
     await page.getByRole("heading", { name: "Hooks this plugin runs" }).waitFor({ state: "detached" });
   });
 
+  await step("an MCP server from the library goes into a plugin: the preview names the program it starts and the secret option Claude Code will ask for", async () => {
+    const server = [
+      '"""Word tools."""', "from mcp.server.mcpserver import MCPServer", "from mcp.types import ToolAnnotations", "", 'mcp = MCPServer("word-tools")', "", "",
+      "@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))", "def count_words(text: str) -> str:", '    """Count the words in a text."""', "    return str(len(text.split()))", "", "",
+      "@mcp.tool()", "def shout(text: str) -> str:", '    """Return the text in capital letters, then the key."""', "    import os", '    return text.upper() + os.environ.get("WEATHER_API_KEY", "")', "", "",
+      'if __name__ == "__main__":', "    mcp.run()", "",
+    ].join("\n");
+    const imported = await fetch(API + "/api/library/import?kind=mcp", {
+      method: "POST", headers: { "Content-Type": "application/zip" }, body: makeZip({ "word-tools/server.py": server, "word-tools/requirements.txt": "mcp==2.3.0\n" }),
+    });
+    assert.equal(imported.status, 200, await imported.text());
+    await page.goto(UI + "/composer");
+    await page.getByRole("heading", { name: "Compose a plugin", level: 1 }).waitFor();
+    await page.getByLabel("Name", { exact: true }).fill("e2e-plugin-mcp");
+    await page.getByLabel("What is it for?").fill("Word tools for Claude.");
+    await page.getByRole("checkbox", { name: /word-tools/ }).check();
+    await page.getByRole("button", { name: "Preview the plugin" }).click();
+    await page.getByRole("heading", { name: "Programs this plugin starts" }).waitFor();
+    await page.getByText("count_words, shout", { exact: false }).first().waitFor();
+    await page.getByText("WEATHER_API_KEY", { exact: true }).waitFor(); // the variable the server reads, named in the option sentence
+    await page.getByText(/outside any sandbox/).first().waitFor();
+    await page.getByText(".mcp.json", { exact: false }).first().waitFor();
+    await shot(page, "22-composer-mcp");
+    await page.getByRole("button", { name: "Keep this plugin" }).click();
+    await page.getByText(/Kept 'e2e-plugin-mcp' as v1/).waitFor();
+    const stored = await (await fetch(API + "/api/library/e2e-plugin-mcp?kind=plugin")).json();
+    const paths = JSON.stringify(stored.versions[0]);
+    assert.ok(paths.includes(".mcp.json") && paths.includes("servers/word-tools/server.py"), paths);
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });

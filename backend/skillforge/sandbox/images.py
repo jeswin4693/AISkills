@@ -7,6 +7,8 @@ writable, executable area to build into, which the strict sandbox refuses on pur
 
 from __future__ import annotations
 
+from ..mcpnode import CLIENT_SDK, NODE_VERSION, SDK_VERSION, SERVER_SDK, ZOD_VERSION
+
 # language -> (image, interpreter command that takes the script path as its last argument)
 RUNNERS: dict[str, tuple[str, tuple[str, ...]]] = {
     "python": ("python:3.13-slim", ("python",)),
@@ -26,9 +28,22 @@ MCP_IMAGE = f"skillforge-mcp:{MCP_SDK_VERSION}"
 MCP_DOCKERFILE = f"FROM python:3.13-slim\nRUN pip install --no-cache-dir mcp=={MCP_SDK_VERSION}\n"
 
 
-def mcp_build_command(status) -> list[str]:
+def mcp_build_command(status, image: str = MCP_IMAGE) -> list[str]:
     """The exact `docker build`, reaching docker the way `status` says. The Dockerfile is sent on standard input: no files, no context."""
-    return [*status.prefix, "build", "-t", MCP_IMAGE, "-"]
+    return [*status.prefix, "build", "-t", image, "-"]
+
+
+# The image that runs a generated Node MCP server, built once the same way (`python -m skillforge sandbox-build-mcp-node`). The SDK, the client the
+# harness uses and zod are installed in `/opt/sdk` and linked at `/node_modules`, so they are found from a server mounted at `/skill` (Node looks in
+# every parent folder). No install scripts run. (`npm install --prefix /` fails: npm cannot use the root folder as a project.)
+MCP_NODE_IMAGE = f"skillforge-mcp-node:{SDK_VERSION}"
+NODE_SDK_DIR = "/opt/sdk"
+MCP_NODE_DOCKERFILE = (
+    f"FROM node:{NODE_VERSION}-slim\n"
+    f"WORKDIR {NODE_SDK_DIR}\n"
+    f"RUN npm init -y > /dev/null && npm install --ignore-scripts --no-audit --no-fund --save-exact "
+    f"{SERVER_SDK}@{SDK_VERSION} {CLIENT_SDK}@{SDK_VERSION} zod@{ZOD_VERSION} && ln -s {NODE_SDK_DIR}/node_modules /node_modules\n"
+)
 
 
 def runnable_languages() -> list[str]:

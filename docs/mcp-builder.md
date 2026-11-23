@@ -1,6 +1,6 @@
 # The MCP Builder (Component Factory, Phase 3)
 
-Describe a small tool server in plain words and get a checked **Python MCP server** folder: a `server.py` that code assembles from a design, a
+Describe a small tool server in plain words and get a checked **Python MCP server** folder (for TypeScript see [mcp-builder-node.md](mcp-builder-node.md)): a `server.py` that code assembles from a design, a
 pinned `requirements.txt`, the test cases, a README with the exact command that adds it to Claude Code, and a report. The server is **started in
 the sandbox and called over the real MCP protocol** before the build can say "ok". Plan: [superpowers/plans/2026-11-20-mcp-builder-phase-3.md](superpowers/plans/2026-11-20-mcp-builder-phase-3.md).
 
@@ -138,6 +138,6 @@ an `expect: error` case passes on any crash (a stub that always raises still fai
 - **Not run against a live Claude Code:** `claude mcp add` was not run (it changes your settings). The server was run over the protocol by our harness, not by Claude Code.
 - **A server from outside cannot be proven safe by reading it.** The library reader is best-effort; read what you add.
 - **Network tools stay DRAFT:** their cases cannot run in a box with no network. The real call is only read, not exercised.
-- **Python only; tools only.** No TypeScript, no HTTP transport, no resources or prompts, no OAuth, no packages beyond the standard library, no file writes, no commands.
+- **Python only here; tools only.** The Node (TypeScript) half is its own kind, in [mcp-builder-node.md](mcp-builder-node.md). No HTTP transport, no resources or prompts, no OAuth, no packages beyond the standard library, no file writes, no commands.
 - **Test cases are as good as the model's expectations.** A case passes when the reply matches what the case says; a wrong expectation that the server happens to meet proves nothing.
 - Passing the checks is not proof the server does what you meant: they read the file and run its cases.

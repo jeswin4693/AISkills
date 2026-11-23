@@ -29,7 +29,7 @@ def built_server(env: Env) -> str:
 
 def test_the_kind_is_registered_with_its_own_library_and_a_definition_check():
     kind = get_kind("mcp")
-    assert isinstance(kind, McpKind) and list(KINDS) == ["skill", "agent", "plugin", "mcp"]
+    assert isinstance(kind, McpKind) and list(KINDS) == ["skill", "agent", "plugin", "mcp", "mcp-node"]
     assert (kind.label, kind.library_dir, kind.definition_file, kind.install_targets, kind.conversational) == ("MCP server", "library-mcp", "server.py", ("folder",), True)
     assert [s.key for s in kind.slots] == ["goal", "inputs", "outputs", "constraints", "acceptance_criteria", "failure_behavior"]
     assert set(KINDS) <= set(DEFINITION_CHECKS)

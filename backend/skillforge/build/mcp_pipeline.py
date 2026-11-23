@@ -75,13 +75,8 @@ def _returns_text(source: str) -> dict[str, bool]:
     return out
 
 
-def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str]) -> list[CheckResult]:
-    """Everything code can say about a design and its rendered files. Failures are structural or unsafe; wording is a warning."""
-    out: list[CheckResult] = []
-
-    def row(name: str, problems: list[str], ok_detail: str = "", status: str = FAILED) -> None:
-        out.append(CheckResult(name, status, "; ".join(problems)) if problems else CheckResult(name, PASSED, ok_detail))
-
+def check_names(defn, row: Callable, valid_name: Callable[[str], bool]) -> None:
+    """The rows about the server's name, its description and the names of its tools and parameters. `row` records one check."""
     row("the server name is a valid name", [] if SLUG.match(defn.name) and len(defn.name) <= MAX_NAME else
         [f"'{defn.name}' is not lowercase letters, digits and hyphens of at most {MAX_NAME} characters"])
     description = " ".join(defn.description.split())
@@ -90,13 +85,65 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
     row("there are between 1 and %d tools" % MAX_TOOLS, [] if 1 <= len(defn.tools) <= MAX_TOOLS else [f"{len(defn.tools)} tools"], f"{len(defn.tools)} tools")
 
     names = [t.name for t in defn.tools]
-    problems = [f"tool '{n}' is not a valid name" for n in names if not _valid_ident(n)]
+    problems = [f"tool '{n}' is not a valid name" for n in names if not valid_name(n)]
     problems += [f"tool '{n}' appears more than once" for n in sorted({n for n in names if names.count(n) > 1})]
     for tool in defn.tools:
         pnames = [p.name for p in tool.params]
-        problems += [f"parameter '{p}' of {tool.name} is not a valid name" for p in pnames if not _valid_ident(p)]
+        problems += [f"parameter '{p}' of {tool.name} is not a valid name" for p in pnames if not valid_name(p)]
         problems += [f"parameter '{p}' of {tool.name} appears more than once" for p in sorted({p for p in pnames if pnames.count(p) > 1})]
     row("tool and parameter names are valid and unique", problems)
+
+
+
+def check_cases_and_words(defn, spec: RequirementSpec, files: dict[str, str], row: Callable) -> None:
+    """The rows about the test cases, the acceptance criteria and the person's own words in README.md. The same for every language."""
+    by_name = {t.name: t for t in defn.tools}
+    ids, covered = set(defn.acceptance_criteria), {c for case in defn.cases for c in case.covers}
+    case_problems = [f"case '{c.name}' calls '{c.tool}', which the server does not have" for c in defn.cases if c.tool not in by_name]
+    case_problems += [f"{len(defn.cases)} cases (at most {MAX_CASES})"] if len(defn.cases) > MAX_CASES else []
+    row("test cases name a tool the server has", case_problems, f"{len(defn.cases)} cases")
+    arg_problems: list[str] = []
+    for case in defn.cases:
+        tool = by_name.get(case.tool)
+        if tool is None:
+            continue
+        try:
+            arguments = json.loads(case.arguments_json)
+        except ValueError:
+            arg_problems.append(f"case '{case.name}': the arguments are not valid JSON")
+            continue
+        if not isinstance(arguments, dict):
+            arg_problems.append(f"case '{case.name}': the arguments are not a JSON object")
+            continue
+        want = {p.name: p.type for p in tool.params}
+        if set(arguments) != set(want):
+            arg_problems.append(f"case '{case.name}': the arguments are {sorted(arguments)} but {case.tool} takes {sorted(want)}")
+        arg_problems += [f"case '{case.name}': {k} should be {want[k]}" for k, v in arguments.items() if k in want and not _types_match(v, want[k])]
+        if case.expect in ("contains", "equals") and not case.expected_text:
+            arg_problems.append(f"case '{case.name}' expects {case.expect} but gives no text")
+    row("test case arguments match the tool's parameters and each case says what to expect", arg_problems)
+    row("every acceptance criterion is covered by a test case", [f"{i} has no test case" for i in sorted(ids - covered)], f"{len(ids)} criteria")
+    row("test case ids all refer to a real acceptance criterion", [f"unknown id {i}" for i in sorted(covered - ids)], status=WARNING)
+    kinds = {c.kind for c in defn.cases}
+    row("there is a positive and a negative test case", [f"no {k} test case" for k in ("positive", "negative") if k not in kinds])
+
+    text = norm(files.get("README.md", ""))
+    missing = [line for group in person_lines(spec).values() for line in group if norm(line) not in text]
+    row("the person's rules, criteria and failure behaviour are in README.md word for word", [f'missing: "{m}"' for m in missing])
+    prose = " ".join(t.description for t in defn.tools)
+    found_vague = sorted({m.group(0).lower() for m in VAGUE.finditer(prose)})
+    row("no vague wording in the tool descriptions", [f"vague: {', '.join(found_vague)}"] if found_vague else [], status=WARNING)
+
+
+def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str]) -> list[CheckResult]:
+    """Everything code can say about a design and its rendered files. Failures are structural or unsafe; wording is a warning."""
+    out: list[CheckResult] = []
+
+    def row(name: str, problems: list[str], ok_detail: str = "", status: str = FAILED) -> None:
+        out.append(CheckResult(name, status, "; ".join(problems)) if problems else CheckResult(name, PASSED, ok_detail))
+
+    names = [t.name for t in defn.tools]
+    check_names(defn, row, _valid_ident)
 
     server = files.get("server.py", "")
     facts = None
@@ -146,42 +193,7 @@ def check_mcp(defn: McpDefinition, spec: RequirementSpec, files: dict[str, str])
     leaks = sorted({f"{path}: {label}" for path, text in files.items() for label, pattern in SECRET_PATTERNS if pattern.search(text)})
     row("no key or token in any file", [f"{'; '.join(leaks)}. Never type a key: name the environment variable it is read from"] if leaks else [], "none found")
 
-    by_name = {t.name: t for t in defn.tools}
-    ids, covered = set(defn.acceptance_criteria), {c for case in defn.cases for c in case.covers}
-    case_problems = [f"case '{c.name}' calls '{c.tool}', which the server does not have" for c in defn.cases if c.tool not in by_name]
-    case_problems += [f"{len(defn.cases)} cases (at most {MAX_CASES})"] if len(defn.cases) > MAX_CASES else []
-    row("test cases name a tool the server has", case_problems, f"{len(defn.cases)} cases")
-    arg_problems: list[str] = []
-    for case in defn.cases:
-        tool = by_name.get(case.tool)
-        if tool is None:
-            continue
-        try:
-            arguments = json.loads(case.arguments_json)
-        except ValueError:
-            arg_problems.append(f"case '{case.name}': the arguments are not valid JSON")
-            continue
-        if not isinstance(arguments, dict):
-            arg_problems.append(f"case '{case.name}': the arguments are not a JSON object")
-            continue
-        want = {p.name: p.type for p in tool.params}
-        if set(arguments) != set(want):
-            arg_problems.append(f"case '{case.name}': the arguments are {sorted(arguments)} but {case.tool} takes {sorted(want)}")
-        arg_problems += [f"case '{case.name}': {k} should be {want[k]}" for k, v in arguments.items() if k in want and not _types_match(v, want[k])]
-        if case.expect in ("contains", "equals") and not case.expected_text:
-            arg_problems.append(f"case '{case.name}' expects {case.expect} but gives no text")
-    row("test case arguments match the tool's parameters and each case says what to expect", arg_problems)
-    row("every acceptance criterion is covered by a test case", [f"{i} has no test case" for i in sorted(ids - covered)], f"{len(ids)} criteria")
-    row("test case ids all refer to a real acceptance criterion", [f"unknown id {i}" for i in sorted(covered - ids)], status=WARNING)
-    kinds = {c.kind for c in defn.cases}
-    row("there is a positive and a negative test case", [f"no {k} test case" for k in ("positive", "negative") if k not in kinds])
-
-    text = norm(files.get("README.md", ""))
-    missing = [line for group in person_lines(spec).values() for line in group if norm(line) not in text]
-    row("the person's rules, criteria and failure behaviour are in README.md word for word", [f'missing: "{m}"' for m in missing])
-    prose = " ".join(t.description for t in defn.tools)
-    found_vague = sorted({m.group(0).lower() for m in VAGUE.finditer(prose)})
-    row("no vague wording in the tool descriptions", [f"vague: {', '.join(found_vague)}"] if found_vague else [], status=WARNING)
+    check_cases_and_words(defn, spec, files, row)
     return out
 
 

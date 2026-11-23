@@ -80,6 +80,19 @@ asyncio.run(main())
 ''' % {"cases": CASES_FILE}
 
 
+@dataclass(frozen=True)
+class Flavour:
+    """What differs between a Python server and a Node one: the harness that talks to it, the image it runs in and how to find the tools that need a network."""
+
+    harness_file: str
+    harness: str
+    command: tuple[str, ...]  # how the container starts the harness, given as the program and its arguments (the harness path is added)
+    image: str
+    build_command: str
+    server_file: str
+    network_tools: Callable[[str], set[str]]
+
+
 @dataclass
 class ProtocolReport:
     checks: list[CheckResult] = field(default_factory=list)
@@ -93,7 +106,9 @@ class SandboxMcpRunner:
 
     def __init__(
         self, limits: Limits | None = None, probe: Callable[[], SandboxStatus] = probe_sandbox, execute: Callable = subprocess.run,
+        flavour: Flavour | None = None,
     ) -> None:
+        self.flavour = flavour or PYTHON
         self.limits = limits or Limits(timeout_s=90, memory="512m", pids=128)
         self._probe = probe
         self._execute = execute
@@ -106,11 +121,14 @@ class SandboxMcpRunner:
 
     def __call__(self, folder: Path) -> RunResult:
         status = self.probe()
-        box = DockerRunner(MCP_IMAGE, self.limits, probe=lambda: status, runner=self._execute)
-        result = box.run(folder, ["python", f"/skill/{HARNESS_FILE}"])
+        box = DockerRunner(self.flavour.image, self.limits, probe=lambda: status, runner=self._execute)
+        result = box.run(folder, [*self.flavour.command, f"/skill/{self.flavour.harness_file}"])
         if result.exit_code == 125 and "Unable to find image" in result.stderr:
-            raise ImageNotPulled(MCP_IMAGE, BUILD_COMMAND)
+            raise ImageNotPulled(self.flavour.image, self.flavour.build_command)
         return result
+
+
+PYTHON = Flavour(HARNESS_FILE, HARNESS, ("python",), MCP_IMAGE, BUILD_COMMAND, "server.py", lambda source: tools_needing_network(source))
 
 
 def _clip(text: str, limit: int = SNIPPET) -> str:
@@ -145,10 +163,11 @@ def grade_case(case: McpCase, row: Mapping) -> CheckResult:
     return CheckResult(name, FAILED, f"expected {wanted}, got {got}")
 
 
-def run_protocol_tests(defn: McpDefinition, files: Mapping[str, str], runner: McpRunner | None = None) -> ProtocolReport:
+def run_protocol_tests(defn: McpDefinition, files: Mapping[str, str], runner: McpRunner | None = None, flavour: Flavour | None = None) -> ProtocolReport:
     """Start the server in the sandbox and call its cases. Nothing runs without a sandbox and the image."""
-    runner = runner or SandboxMcpRunner()
-    needs_network = tools_needing_network(files.get("server.py", ""))
+    flavour = flavour or PYTHON
+    runner = runner or SandboxMcpRunner(flavour=flavour)
+    needs_network = flavour.network_tools(files.get(flavour.server_file, ""))
     runnable = [c for c in defn.cases if c.tool not in needs_network]
     skipped = [c for c in defn.cases if c.tool in needs_network]
     plan = {
@@ -164,7 +183,7 @@ def run_protocol_tests(defn: McpDefinition, files: Mapping[str, str], runner: Mc
             target = folder / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8", newline="\n")
-        (folder / HARNESS_FILE).write_text(HARNESS, encoding="utf-8", newline="\n")
+        (folder / flavour.harness_file).write_text(flavour.harness, encoding="utf-8", newline="\n")
         (folder / CASES_FILE).write_text(json.dumps(plan), encoding="utf-8", newline="\n")
         try:
             raw = runner(folder)

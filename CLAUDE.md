@@ -22,7 +22,8 @@ Phase 4a is built too (a plugin can carry MCP servers from the library: `servers
 [docs/plugin-builder.md](docs/plugin-builder.md)).
 Phase 4b is built too (a plugin can carry hooks, only from the catalogue in `skillforge/hookcatalog/`: fixed scripts, typed options, recognised only when byte-identical;
 [docs/hook-catalogue.md](docs/hook-catalogue.md); real Claude Code ran them, which found that a guard that cannot start failed open, so guards now carry `onFailure: block`; two independent reviews of Phases 4a and 4b are fixed and tested).
-Next: the TypeScript half of Phase 3 (Phase 4 of the Component Factory is built), then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
+Phase 3b is built too (the MCP builder for Node: its own kind `mcp-node`, a TypeScript `server.ts` run by `node --permission` in the sandbox and read by `validate/mcp_node.py`; image built once with `python -m skillforge sandbox-build-mcp-node`; [docs/mcp-builder-node.md](docs/mcp-builder-node.md); not in plugins yet).
+Next: the next differentiator ([docs/differentiators.md](docs/differentiators.md):
 the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
 Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
@@ -36,6 +37,7 @@ python -m skillforge build "<what the skill should do>"
 python -m skillforge validate <skill-folder>
 python -m skillforge eval <skill-folder> [--runs 3]   # run its test cases against a model, with and without the skill (docs/evaluate.md)
 python -m skillforge sandbox-status
+python -m skillforge sandbox-build-mcp-node           # once, needs a network: the image generated Node MCP servers are tested in
 python -m skillforge library <import|list|versions|diff|rescan|rollback|export|install> ...
 python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only (hosted version: docs/hosting.md)
 python -m skillforge models [--test]                  # which models and keys are set up; --test asks each model one tiny question

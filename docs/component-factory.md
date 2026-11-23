@@ -12,7 +12,7 @@ Grow SkillForge from a skill builder into four builders that share one app, one 
 | Skill (exists) | `SKILL.md` and supporting files | 3 to 5 |
 | Agent | a Claude Code subagent file (`<name>.md`: front matter + system prompt) and its definition, spec, tests | 3 to 5 |
 | Plugin | an installable plugin: manifest, skills, agents, later hooks and MCP, plus a local marketplace entry | 0 (assembled from the library) |
-| MCP server | a Python (later TypeScript) server project, tested over the MCP protocol in the sandbox | 4 to 7 |
+| MCP server | a Python or a Node (TypeScript) server project, tested over the MCP protocol in the sandbox | 4 to 7 |
 
 Not rebuilt, not broken: every existing route, test and page keeps working (a new `kind` defaults to `skill`).
 
@@ -44,7 +44,7 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> render -> CHECKS ->
 | 0 | Foundation: kind registry, `SkillKind` adapter, migration 0003, `Library(kind)`, validator `kind`, API and UI picker; small skill improvements (`permissions` to `allowed-tools`, warn on unknown front-matter keys, run `eval` from the web pages) | M |
 | 1 | **Agent Builder** | M |
 | 2 | Plugin Builder v1 (skills and agents) | M |
-| 3 | MCP Builder: Python first (**built**), then TypeScript (not built) | XL, then M |
+| 3 | MCP Builder: Python first (**built**), then TypeScript (**built**, 3b) | XL, then M |
 | 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind. **4a (MCP servers and `userConfig` in a plugin, and the risk diff for them) and 4b (hooks from a catalogue) are built** | L, in slices |
 
 Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, XL more), including tests, docs and a live check.
@@ -121,6 +121,18 @@ kind: the save message names what was built ("This MCP server is a DRAFT"), and 
 **Checked against the real tools (2026-11-20):** the SDK names by a real install; a generated server started and called in a real container; two real builds with the configured model, which
 found and fixed two defects a mock model could not (missing imports, and a tool that returned simulated data). **Not done, on purpose:** TypeScript, HTTP transport, resources and prompts, OAuth,
 packages beyond the standard library, file writes and commands, `claude mcp add` run for you, a live Claude Code run, `eval` for servers, `--kind` on the command line, an MCP flow in the real browser.
+
+## Phase 3b: what was built (2026-11-23)
+
+The MCP Builder for Node (TypeScript), in [mcp-builder-node.md](mcp-builder-node.md), [plan](superpowers/plans/2026-11-23-mcp-node-phase-3b.md). `McpNodeKind` (`mcp-node`, "MCP server (Node)", `library-mcp-node`, definition file `server.ts`, installs into a folder only, conversational): a **separate kind**, so
+the plugin composer (which lists the `mcp` kind) cannot include one. The model drafts function bodies and a list of imports **as data**; code writes `server.ts` for the official TypeScript SDK v2 (`@modelcontextprotocol/server` 2.4.0, zod 4.6.7) with the zod schema, the handler,
+the per-tool annotations and the transport, plus a `package.json` (exact versions, no `scripts`, `"type": "module"`) and the pinned lockfile (`mcpnode/lock.template.json`, only the package name differs). `validate/mcp_node.py` reads any `server.ts` with tree-sitter (programs, code built from text, network, file writes,
+a key in pieces, env vars, install scripts, other code beside it, case aliases of `package.json`, other lockfiles); `build/mcp_node_pipeline.py` holds a body to allow-lists (names, properties, imports, provably-numeric indexes); `build/mcp_node_protocol.py` runs a fixed `.mjs` harness in the locked container from the image
+`skillforge-mcp-node:2.4.0` (`python -m skillforge sandbox-build-mcp-node`), with the server started as `node --permission`. The shared grader (`mcp_protocol.py`) now takes a `Flavour`; the Python behaviour is unchanged (136 protocol and security tests still pass). The risk diff reads a Node server's code and `package.json` (a new install script, dependency, `overrides` or a lockfile that is no longer the pinned one is riskier).
+
+**Checked against the real tools (2026-11-23):** the SDK names by a real install and run; `node server.ts` needs `"type": "module"`; Node's permission model refused a write, a program and an outside read in the real container; real Claude Code 2.1.325 accepted the README's `claude mcp add ... node --permission` command (isolated config folder) and listed the server as Connected, and a real
+session called its tool; two real builds with the configured model (a word-tools server: ok, 60 of 60 checks, 2 model calls; a weather tool with a key: an honest DRAFT, its network cases not run), the second of which showed a model defect no check could see (the tool hard-coded the test's city), now a warning. **Not done, on purpose:** Node servers inside plugins (a plugin cannot run `npm ci`), HTTP transport,
+resources and prompts, a TypeScript type check, the Node flow in a real browser.
 
 ## Phase 4a: what was built (2026-11-23)
 

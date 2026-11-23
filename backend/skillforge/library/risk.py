@@ -212,12 +212,15 @@ def _script_changes(
 
 
 def _server_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], definition: str) -> None:
-    """For an MCP server: the tools it offers Claude and the environment variables it reads, by syntax."""
-    from ..validate.mcp import analyze_server  # imported here: `validate` must not need `library` and `library` need not load it for other kinds
+    """For an MCP server (Python or Node): the tools it offers Claude and the environment variables it reads, by syntax."""
+    if definition.endswith(".ts"):
+        from ..validate.mcp_node import analyze_node_server as analyze  # imported here: `validate` must not need `library` and `library` need not load it for other kinds
+    else:
+        from ..validate.mcp import analyze_server as analyze
 
     def facts(files: Mapping[str, bytes]):
         try:
-            return analyze_server(_text(files[definition]))
+            return analyze(_text(files[definition]))
         except (KeyError, SyntaxError, ValueError, RecursionError):
             return None
 
@@ -243,6 +246,53 @@ def _server_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
         out.append(RiskChange(RISKIER, "dynamic_code", f"{definition} now uses {construct}: the checks cannot follow it, so what it does is not known.", definition))
     for construct in sorted(before.dynamic - after.dynamic):
         out.append(RiskChange(SAFER, "dynamic_code", f"{definition} no longer uses {construct}.", definition))
+
+
+def _package_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
+    """For a Node server: what `npm install` would run and fetch. `scripts` run by themselves when it installs, a dependency is code that runs when
+    imported, and a lockfile that is not the pinned one decides where every package comes from."""
+    from ..mcpnode import LOCK_FILE, PACKAGE_FILE, is_our_lock
+
+    def read(files: Mapping[str, bytes]) -> dict:
+        try:
+            value = json.loads(_text(files[PACKAGE_FILE]))
+            return value if isinstance(value, dict) else {}
+        except (KeyError, ValueError, RecursionError):
+            return {}
+
+    before, after = read(old), read(new)
+    old_scripts, new_scripts = before.get("scripts") or {}, after.get("scripts") or {}
+    if (new_scripts and not isinstance(new_scripts, dict)) or (old_scripts and not isinstance(old_scripts, dict)):
+        if bool(new_scripts) != bool(old_scripts) or new_scripts != old_scripts:  # whatever shape it has, `scripts` in package.json is what npm runs when it installs
+            out.append(RiskChange(RISKIER if new_scripts else SAFER, "install_script", "package.json's scripts changed (it is not a list of named scripts, which npm may still read as scripts).", PACKAGE_FILE))
+    elif isinstance(new_scripts, dict) and isinstance(old_scripts, dict):
+        for name in sorted(new_scripts.keys() - old_scripts.keys()):
+            out.append(RiskChange(RISKIER, "install_script", f"package.json now has a script, {name}: npm runs install scripts by itself when it installs.", PACKAGE_FILE))
+        for name in sorted(old_scripts.keys() & new_scripts.keys()):
+            if old_scripts[name] != new_scripts[name]:
+                out.append(RiskChange(RISKIER, "install_script", f"The script {name} in package.json changed.", PACKAGE_FILE))
+        for name in sorted(old_scripts.keys() - new_scripts.keys()):
+            out.append(RiskChange(SAFER, "install_script", f"package.json no longer has the script {name}.", PACKAGE_FILE))
+    old_deps, new_deps = before.get("dependencies") or {}, after.get("dependencies") or {}
+    if isinstance(new_deps, dict) and isinstance(old_deps, dict):
+        for name in sorted(new_deps.keys() - old_deps.keys()):
+            out.append(RiskChange(RISKIER, "dependency", f"The server now depends on {name} {new_deps[name]}: more code that runs on your machine.", PACKAGE_FILE))
+        for name in sorted(old_deps.keys() - new_deps.keys()):
+            out.append(RiskChange(SAFER, "dependency", f"The server no longer depends on {name}.", PACKAGE_FILE))
+        for name in sorted(old_deps.keys() & new_deps.keys()):
+            if old_deps[name] != new_deps[name]:
+                out.append(RiskChange(RISKIER, "dependency", f"{name} changed from {old_deps[name]} to {new_deps[name]}.", PACKAGE_FILE))
+    for key in sorted((set(after) - set(before)) & {"overrides", "resolutions", "imports", "exports", "bin", "optionalDependencies", "peerDependencies", "devDependencies"}):
+        out.append(RiskChange(RISKIER, "package", f"package.json now has {key}, which changes which packages are used or what Node loads.", PACKAGE_FILE))
+    name = after.get("name") or before.get("name") or ""
+    was_ours = LOCK_FILE in old and is_our_lock(_text(old[LOCK_FILE]), str(before.get("name") or name))
+    is_ours = LOCK_FILE in new and is_our_lock(_text(new[LOCK_FILE]), str(name))
+    if was_ours and not is_ours:
+        out.append(RiskChange(RISKIER, "lockfile", "package-lock.json is no longer the pinned lockfile: it decides which packages are installed and where they come from.", LOCK_FILE))
+    elif is_ours and not was_ours:
+        out.append(RiskChange(SAFER, "lockfile", "package-lock.json is now the pinned lockfile.", LOCK_FILE))
+    elif not is_ours and LOCK_FILE in old and LOCK_FILE in new and old[LOCK_FILE] != new[LOCK_FILE]:
+        out.append(RiskChange(RISKIER, "lockfile", "package-lock.json changed: it decides which packages are installed and where they come from.", LOCK_FILE))
 
 
 def _permission_changes(
@@ -661,8 +711,10 @@ def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "
         _plugin_changes(old, new, changes)
     else:
         _script_changes(old, new, changes, spec.definition_file)
-        if spec.definition_file.endswith(".py"):
+        if spec.definition_file.endswith((".py", ".ts")):
             _server_changes(old, new, changes, spec.definition_file)
+        if spec.definition_file.endswith(".ts"):
+            _package_changes(old, new, changes)
         _permission_changes(old, new, changes, spec.definition_file, spec.tools_field)
         _wording_changes(old, new, changes)
         _address_changes(old, new, changes)

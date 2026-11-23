@@ -130,7 +130,7 @@ def test_a_new_agent_version_that_adds_a_tool_is_reported_riskier_on_import(tmp_
 def test_the_kinds_endpoint_lists_both_kinds_with_their_definition_files(make):
     env = make([])
     kinds = {k["key"]: k for k in env.client.get("/api/kinds").json()}
-    assert list(kinds) == ["skill", "agent", "plugin", "mcp"]
+    assert list(kinds) == ["skill", "agent", "plugin", "mcp", "mcp-node"]
     assert kinds["skill"]["definition_file"] == "SKILL.md" and kinds["agent"]["definition_file"] == "AGENT.md"
     assert [s["key"] for s in kinds["agent"]["slots"]][:2] == ["goal", "inputs"] and kinds["agent"]["slots"][0]["label"] == "What it is for"
     # what the install dialog says, so the page does not hard-code folder names
@@ -140,7 +140,7 @@ def test_the_kinds_endpoint_lists_both_kinds_with_their_definition_files(make):
 
 def test_the_agent_kind_in_the_registry(tmp_path, monkeypatch):
     kind = get_kind("agent")
-    assert isinstance(kind, AgentKind) and list(KINDS) == ["skill", "agent", "plugin", "mcp"]
+    assert isinstance(kind, AgentKind) and list(KINDS) == ["skill", "agent", "plugin", "mcp", "mcp-node"]
     assert (kind.library_dir, kind.definition_file, kind.install_file) == ("library-agent", "AGENT.md", "AGENT.md")
     assert kind.name_of({"AGENT.md": b"---\nname: demo-agent\n---\nbody"}) == "demo-agent"
     assert kind.name_of({"AGENT.md": b"---\nname: ../x\n---\nbody"}) is None and kind.name_of({"SKILL.md": b"---\nname: a\n---\n"}) is None

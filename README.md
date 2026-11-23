@@ -63,11 +63,17 @@ called over the real MCP protocol**, and the build says "ok" only if it really r
 configured model found and fixed two defects (missing imports, and a tool that returned simulated data). **An independent review then found real gaps** (an encoding trick that hid code from the checks,
 code beside `server.py` that Python would import, alternate spellings of running a command, a forged sandbox verdict, and a tool name that could be written into the file as code); they are fixed and tested, and a server the
 builder writes may now import only an allow-list of safe standard-library modules. The checks are still a reading by syntax and **cannot prove a file safe**: read a server you did not build before you add it
-([docs/mcp-builder.md](docs/mcp-builder.md)). Not yet: TypeScript, HTTP, a run against a live Claude Code, and the MCP flow in a real browser.
+([docs/mcp-builder.md](docs/mcp-builder.md)). Not yet: HTTP and the MCP flow in a real browser.
+
+**The MCP builder also writes TypeScript servers** (Phase 3b, its own kind `mcp-node`, [docs/mcp-builder-node.md](docs/mcp-builder-node.md)): the same conversation, but code writes a `server.ts` for the official
+TypeScript SDK v2 (the model drafts function bodies and the imports *as data*, from an allow-list), a `package.json` with exact versions and no scripts, and the pinned lockfile. It is read with tree-sitter by a second
+reader (programs, code built from text, network, file writes, a key in pieces, install scripts, other code beside it), run **in the sandbox under Node's permission model** (`node --permission`, which a real run showed
+refuses file writes through `fs`, starting programs and reads outside the folder, with known gaps such as `node:sqlite`) and called over the real MCP protocol. The README it writes has a `claude mcp add` command that starts the server the same way;
+real Claude Code accepted that command and called a tool of the generated server. It cannot be put in a plugin yet (a plugin cannot run `npm ci`).
 
 **What is next, in this order:**
 
-1. **Phase 3b, the MCP builder in TypeScript** (and the Streamable HTTP transport): the names of the TypeScript SDK still have to be settled with a real install, as the Python ones were.
+1. **Phase 3b, the MCP builder in TypeScript, is built.** What is left of it: Node servers inside plugins and the Streamable HTTP transport.
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
    and a behavioural canary scan (the risk diff and rescan are already built).

@@ -15,7 +15,7 @@ import { Alert, Badge, Button, Card } from "../ui";
 function Traceability({ session }: { session: BuildSession }) {
   const tests = useAsync(async () => parseTests((await api.buildFile(session.id, "tests/cases.json")).text), `tests/${session.id}`);
   const trace = session.spec ? traceability(session.spec.acceptance_criteria, tests.data ?? []) : [];
-  const ran = session.kind === "mcp"; // a server's cases are run over the MCP protocol in the sandbox, when there is one
+  const ran = session.kind === "mcp" || session.kind === "mcp-node"; // a server's cases are run over the MCP protocol in the sandbox, when there is one
   return (
     <section>
       <h3 className="font-semibold">What you asked for, and what covers it</h3>

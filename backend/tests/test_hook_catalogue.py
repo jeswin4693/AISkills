@@ -179,9 +179,9 @@ def test_a_tool_name_that_is_not_plain_text_is_cut_and_cleaned_before_it_is_writ
 
 def test_options_become_separate_arguments_after_the_scripts_path_and_come_back_the_same():
     args = render_args(SECRETS, {"also": ["secrets.json", "*.token", "secrets.json"]})
-    assert args == [f"{PLUGIN_ROOT}/hooks/block-secret-files.py", "--also", "secrets.json", "--also", "*.token"]  # each once, in order, never one string
+    assert args == ["-I", f"{PLUGIN_ROOT}/hooks/block-secret-files.py", "--also", "secrets.json", "--also", "*.token"]  # isolated mode, each option once, in order, never one string
     assert parse_args(SECRETS, args) == {"also": ["secrets.json", "*.token"]}
-    assert render_args(SECRETS, None) == [SECRETS.command_path] and parse_args(SECRETS, [SECRETS.command_path]) == {}
+    assert render_args(SECRETS, None) == ["-I", SECRETS.command_path] and parse_args(SECRETS, ["-I", SECRETS.command_path]) == {}
 
 
 @pytest.mark.parametrize("options,why", [
@@ -201,8 +201,9 @@ def test_a_hook_without_options_refuses_any():
 
 
 @pytest.mark.parametrize("args", [
-    None, "x", [], [1], ["wrong/path.py"], [SECRETS.command_path, "--also"], [SECRETS.command_path, "--bogus", "x"], [SECRETS.command_path, "--also", "a;b"],
-    [SECRETS.command_path, "--also", "a", "--also", "a"], [SECRETS.command_path, "extra"],
+    None, "x", [], [1], ["-I", "wrong/path.py"], ["-I", SECRETS.command_path, "--also"], ["-I", SECRETS.command_path, "--bogus", "x"],
+    ["-I", SECRETS.command_path, "--also", "a;b"], ["-I", SECRETS.command_path, "--also", "a", "--also", "a"], ["-I", SECRETS.command_path, "extra"],
+    [SECRETS.command_path], [SECRETS.command_path, "--also", "a.key"], ["-S", SECRETS.command_path], ["-I", "-I", SECRETS.command_path],  # without -I a planted module beside the script would be imported
 ])
 def test_arguments_that_are_not_exactly_what_the_catalogue_writes_are_not_recognised(args):
     assert parse_args(SECRETS, args) is None
@@ -211,9 +212,9 @@ def test_arguments_that_are_not_exactly_what_the_catalogue_writes_are_not_recogn
 def test_a_hook_is_written_as_one_exec_form_group_and_the_matcher_is_left_out_when_it_is_every_tool():
     assert hook_group(SECRETS, {"also": ["a.key"]}) == {
         "matcher": "Read|Write|Edit|NotebookEdit",
-        "hooks": [{"type": "command", "command": "python", "args": [SECRETS.command_path, "--also", "a.key"], "timeout": 10, "onFailure": "block"}],
+        "hooks": [{"type": "command", "command": "python", "args": ["-I", SECRETS.command_path, "--also", "a.key"], "timeout": 10, "onFailure": "block"}],
     }
-    assert "matcher" not in hook_group(LOG) and hook_group(LOG)["hooks"][0]["args"] == [LOG.command_path]
+    assert "matcher" not in hook_group(LOG) and hook_group(LOG)["hooks"][0]["args"] == ["-I", LOG.command_path]
     assert START_COMMAND == "python" and PLUGIN_ROOT == "${CLAUDE_PLUGIN_ROOT}"  # the catalogue and the validator say the same words
 
 
@@ -241,10 +242,10 @@ def test_the_catalogue_is_found_by_id_and_by_the_path_a_hooks_file_names():
 # ---- the scripts themselves are fixed and cannot do more than their entry says ---------------------------------------------
 
 def test_every_script_is_pinned_so_a_change_has_to_be_made_on_purpose():
-    # When a script changes on purpose: add its old hash to the entry's `earlier` (a plugin made before still counts as described),
-    # bump `revision`, and update hook_catalogue_hashes.json.
-    pinned = json.loads((Path(__file__).parent / "hook_catalogue_hashes.json").read_text(encoding="utf-8"))
-    assert {entry_id: script_hash(script_bytes(e)) for entry_id, e in CATALOGUE.items()} == pinned
+    # The hash is a constant in the entry (`sha256`), not a file. When a script changes on purpose: update that constant, bump `revision`, and
+    # put the old hash in the entry's `earlier` only if that script is still safe to describe (the first guards failed open: they are not listed).
+    on_disk = {entry_id: script_hash((SCRIPTS / e.script).read_bytes()) for entry_id, e in CATALOGUE.items()}
+    assert on_disk == {entry_id: e.sha256 for entry_id, e in CATALOGUE.items()}
 
 
 def test_a_script_is_accepted_when_it_is_the_catalogues_whatever_the_line_endings_and_not_when_it_changed():
@@ -263,7 +264,7 @@ def test_a_script_can_do_only_what_its_entry_declares(entry):
     assert caps == set(entry.powers) and dynamic == set()  # no network, no started programs, no code built from text; writes only where declared
 
 
-STANDARD = {"datetime", "fnmatch", "json", "ntpath", "os", "re", "shlex", "sys"}
+STANDARD = {"datetime", "fnmatch", "json", "ntpath", "os", "posixpath", "re", "shlex", "sys"}
 
 
 @pytest.mark.parametrize("entry", list(CATALOGUE.values()), ids=list(CATALOGUE))

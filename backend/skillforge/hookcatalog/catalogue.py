@@ -5,9 +5,13 @@ So nobody types one and no model writes one: each entry here is a fixed Python s
 event, matcher and timeout, and a small set of typed **options** that are checked against a strict pattern and handed to the script as
 separate command-line arguments (exec form, no shell), so an option can never become code.
 
+A hook is started as `python -I <script> ...`: isolated mode puts neither the script's folder nor any `PYTHON*` variable on Python's
+search path, so a `json.py` planted beside a script is never imported in its place (found by an independent review).
+
 A plugin's `hooks/hooks.json` counts as *described* only when every hook in it is one of these entries with exactly the event,
 matcher, timeout, command and arguments written here, and the script shipped beside it is the catalogue's script (compared by
-SHA-256, line endings ignored). Anything else is shown to the person and warned about, never trusted.
+SHA-256, line endings ignored). The hash an entry carries is a constant in this file, not "whatever the file on disk is": a script
+changed on disk after installation is neither shipped nor accepted. Anything else is shown to the person and warned about, never trusted.
 
 This module imports nothing from the rest of SkillForge so the validator, the composer and the risk diff can all use it.
 """
@@ -25,6 +29,7 @@ PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"  # Claude Code replaces it with the folder
 HOOKS_FILE = "hooks/hooks.json"
 HOOKS_DIR = "hooks"
 START_COMMAND = "python"
+ISOLATED = ("-I",)  # python -I: no script folder and no PYTHON* variables on the search path
 
 
 class CatalogueError(ValueError):
@@ -55,6 +60,7 @@ class HookEntry:
     sees: str  # what Claude Code hands it, in plain words
     timeout: int  # seconds
     script: str  # the file in `scripts/`
+    sha256: str = ""  # the SHA-256 of the current script (line endings ignored): what "the catalogue's script" means, whatever is on disk
     powers: frozenset[str] = frozenset()  # what the script is allowed to do on the machine: a subset of {"write_files"}, proven by a test
     options: tuple[Option, ...] = ()
     fixed_args: tuple[str, ...] = ()  # arguments every use gets, after the script's path
@@ -79,6 +85,11 @@ class HookEntry:
         """How `hooks.json` names the script (`${CLAUDE_PLUGIN_ROOT}` is the plugin's folder)."""
         return f"{PLUGIN_ROOT}/{self.shipped_path}"
 
+    @property
+    def head_args(self) -> list[str]:
+        """The start of every use of this hook: isolated mode, the script, the fixed arguments."""
+        return [*ISOLATED, self.command_path, *self.fixed_args]
+
 
 # A file name or a pattern with * and ?: it cannot start with a dash (it could be read as a flag) and must hold a letter or a digit
 # (a pattern of only wildcards would block every file).
@@ -92,7 +103,8 @@ CATALOGUE: dict[str, HookEntry] = {
             title="Keep secret files out of reach",
             summary=(
                 "Stops Claude's file tools (Read, Write, Edit, NotebookEdit) from using files that usually hold secrets: .env files, private keys, "
-                "certificates and credential files. It does not see shell commands, so `cat .env` is not stopped."
+                "certificates, credential, token and state files. It judges the file's name only. It does not see Grep, Glob or shell commands, "
+                "so `cat .env` or a search that prints it is not stopped."
             ),
             event="PreToolUse",
             matcher="Read|Write|Edit|NotebookEdit",
@@ -100,6 +112,7 @@ CATALOGUE: dict[str, HookEntry] = {
             sees="the name of the tool and the path of the file it is about to use",
             timeout=10,
             script="block_secret_files.py",
+            sha256="2c20aa726b4fbcf0442420b887923583c4ec6de8c7c1503e992c15eb34e4a4a6",
             revision=2,  # revision 1 let an event it could not read through (exit 1); it is deliberately not accepted any more
             options=(
                 Option(
@@ -112,8 +125,9 @@ CATALOGUE: dict[str, HookEntry] = {
             id="block-force-push",
             title="No forced git pushes",
             summary=(
-                "Stops Claude from running a git push that forces (--force, -f, --force-with-lease, or a +branch). It reads the command as text, so "
-                "an alias or a script that pushes is not seen."
+                "Stops Claude from running a git push that forces (--force, -f, --force-with-lease, --mirror, or a +branch), including inside "
+                "`bash -c`, a subshell or `powershell -Command`. It reads the command as text: an alias, a script, a variable or an encoded command "
+                "that pushes is not seen, and the Monitor tool and background shells are not covered."
             ),
             event="PreToolUse",
             matcher="Bash|PowerShell",
@@ -121,6 +135,7 @@ CATALOGUE: dict[str, HookEntry] = {
             sees="the name of the tool and the shell command Claude is about to run",
             timeout=10,
             script="block_force_push.py",
+            sha256="0966f5e4f4f661773b2eabdc81e2b7ab871a78e2004bde474ac1a5619724a455",
             revision=2,  # revision 1 let an event it could not read through (exit 1) and missed an abbreviated --forc; neither is accepted any more
         ),
         HookEntry(
@@ -136,6 +151,7 @@ CATALOGUE: dict[str, HookEntry] = {
             sees="the name of the tool that was just used",
             timeout=10,
             script="log_tool_calls.py",
+            sha256="66df152a16c7ff650c2c7fe0e0d583ba8780a0c2f66e3df6b5d8115f03498d84",
             powers=frozenset({"write_files"}),
         ),
     )
@@ -173,9 +189,9 @@ def _clean(options: Mapping[str, Sequence[str]] | None, entry: HookEntry) -> dic
 
 
 def render_args(entry: HookEntry, options: Mapping[str, Sequence[str]] | None = None) -> list[str]:
-    """The `args` of the hook: the script's path, the fixed arguments, then each option as `flag value`. Never joined into one string."""
+    """The `args` of the hook: `-I`, the script's path, the fixed arguments, then each option as `flag value`. Never joined into one string."""
     clean = _clean(options, entry)
-    args = [entry.command_path, *entry.fixed_args]
+    args = entry.head_args
     for option in entry.options:
         for value in clean.get(option.key, []):
             args += [option.flag, value]
@@ -186,7 +202,7 @@ def parse_args(entry: HookEntry, args: object) -> dict[str, list[str]] | None:
     """The options in `args` when they are exactly what `render_args` writes for this entry, otherwise None."""
     if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
         return None
-    head = [entry.command_path, *entry.fixed_args]
+    head = entry.head_args
     if args[: len(head)] != head:
         return None
     rest = args[len(head):]
@@ -222,19 +238,25 @@ def _normal(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n")
 
 
-def script_bytes(entry: HookEntry) -> bytes:
-    """The catalogue's script for this entry, as it is shipped in a plugin (LF line endings)."""
-    return _normal((SCRIPTS / entry.script).read_bytes())
-
-
 def script_hash(data: bytes) -> str:
     return hashlib.sha256(_normal(data)).hexdigest()
 
 
+def script_bytes(entry: HookEntry) -> bytes:
+    """The catalogue's script for this entry, as it is shipped in a plugin (LF line endings). It must be the script the entry's hash names:
+    a file changed on disk after installation is refused, never shipped."""
+    data = _normal((SCRIPTS / entry.script).read_bytes())
+    if script_hash(data) != entry.sha256:
+        raise CatalogueError(
+            f"The script of the hook '{entry.id}' on disk is not the one its pinned hash names, so it was not used: the installation was changed after it was made."
+        )
+    return data
+
+
 def accepts(entry: HookEntry, data: bytes) -> bool:
-    """Whether `data` is this entry's script, current or an earlier revision that is still accepted."""
+    """Whether `data` is this entry's script: the one its pinned hash names, or an earlier revision still accepted. What is on disk decides nothing."""
     digest = script_hash(data)
-    return digest == script_hash(script_bytes(entry)) or digest in entry.earlier
+    return digest == entry.sha256 or digest in entry.earlier
 
 
 def entry_for_script_path(path: object) -> HookEntry | None:
@@ -242,3 +264,10 @@ def entry_for_script_path(path: object) -> HookEntry | None:
     if not isinstance(path, str):
         return None
     return next((e for e in CATALOGUE.values() if e.command_path == path), None)
+
+
+def entry_for_args(args: object) -> HookEntry | None:
+    """The catalogue entry a hook's `args` start: isolated mode, then the script's path."""
+    if not isinstance(args, list) or len(args) < len(ISOLATED) + 1 or tuple(args[: len(ISOLATED)]) != ISOLATED:
+        return None
+    return entry_for_script_path(args[len(ISOLATED)])

@@ -33,18 +33,18 @@ def test_a_plugin_with_one_hook_has_the_hooks_file_and_the_catalogues_script_unc
     assert plan.files["hooks/block-force-push.py"] == script_bytes(get_entry("block-force-push"))
     assert json.loads(plan.files[HOOKS]) == {"hooks": {"PreToolUse": [{
         "matcher": "Bash|PowerShell",
-        "hooks": [{"type": "command", "command": "python", "args": [f"{ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}],
+        "hooks": [{"type": "command", "command": "python", "args": ["-I", f"{ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}],
     }]}}
     assert plan.components == [{"kind": "hook", "name": "block-force-push", "version": "r2"}]  # revision 2: the first one failed open
     assert json.loads(plan.files[MANIFEST]) == {"name": "my-plugin", "version": "0.1.0", "description": "Safety hooks.", "author": {"name": "Jeswin"}}
 
 
-def test_hooks_on_one_event_stay_separate_groups_in_the_order_given_and_options_are_separate_arguments(tmp_path):
+def test_hooks_on_one_event_stay_separate_groups_in_a_fixed_order_and_options_are_separate_arguments(tmp_path):
     plan = compose(tmp_path, [LOG, SECRETS, FORCE])
     hooks = json.loads(plan.files[HOOKS])["hooks"]
-    assert list(hooks) == ["PostToolUse", "PreToolUse"]  # events in the order they first appear
-    assert [g.get("matcher") for g in hooks["PreToolUse"]] == ["Read|Write|Edit|NotebookEdit", "Bash|PowerShell"]
-    assert hooks["PreToolUse"][0]["hooks"][0]["args"] == [f"{ROOT}/hooks/block-secret-files.py", "--also", "secrets.json", "--also", "*.token"]
+    assert list(hooks) == ["PreToolUse", "PostToolUse"]  # parts are put in order by name, whatever order they were picked in: the same parts make the same plugin
+    assert [g.get("matcher") for g in hooks["PreToolUse"]] == ["Bash|PowerShell", "Read|Write|Edit|NotebookEdit"]
+    assert hooks["PreToolUse"][1]["hooks"][0]["args"] == ["-I", f"{ROOT}/hooks/block-secret-files.py", "--also", "secrets.json", "--also", "*.token"]
     assert "matcher" not in hooks["PostToolUse"][0]  # every tool
     assert sorted(p for p in plan.files if p.startswith("hooks/")) == [
         "hooks/block-force-push.py", "hooks/block-secret-files.py", HOOKS, "hooks/log-tool-calls.py",
@@ -57,7 +57,7 @@ def test_what_a_hook_does_is_said_plainly_and_a_hook_is_never_read_only(tmp_path
     first = caps.hook_entries[0]
     assert (first["event"], first["matcher"], first["effect"], first["options"]) == (
         "PreToolUse", "Read|Write|Edit|NotebookEdit", "blocks", {"also": ["secrets.json", "*.token"]},
-    ) and first["powers"] == [] and first["command"] == "python hooks/block-secret-files.py"
+    ) and first["powers"] == [] and first["command"] == "python -I hooks/block-secret-files.py"
     assert caps.hook_entries[1]["powers"] == ["write_files"] and caps.hook_entries[1]["effect"] == "observes"
     text = " ".join(caps.notes)
     assert "block-secret-files" in text and "outside any sandbox" in text and "every time Claude Code is about to use Read, Write, Edit or NotebookEdit" in text

@@ -88,7 +88,7 @@ def test_what_a_server_can_do_is_computed_by_reading_its_code_and_never_called_r
     caps = compose(library_with_servers(tmp_path, word_tools=KEYED)).capabilities
     assert caps.servers == [{
         "name": NAME, "tools": ["count_words", "shout"], "capabilities": [], "environment": ["WEATHER_API_KEY"],
-        "environment_dynamic": False, "dynamic": [], "command": f"python servers/{NAME}/server.py",
+        "environment_dynamic": False, "dynamic": [], "command": f"python servers/{NAME}/server.py", "requirements": True,
     }]
     text = " ".join(caps.notes)
     assert f"'{NAME}'" in text and "starts on this machine" in text and "outside any sandbox" in text

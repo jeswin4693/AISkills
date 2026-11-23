@@ -43,6 +43,10 @@ _RANK = {"passed": 0, "not run": 0, "warning": 1, "failed": 2}
 _COVERED_ELSEWHERE = {  # reported in detail below, so the generic "a check got worse" line would say it twice
     "no hidden markup (HTML comments, script tags) in Markdown", "no wording that matches known attack patterns",
 }
+_PLUGIN_ROWS = {  # the plugin's own rows, whose detail names what runs
+    ".mcp.json starts only the MCP servers shipped inside the plugin", "hooks/hooks.json runs only catalogue hooks, unchanged",
+    "no hooks, undescribed MCP servers, settings or executables", "scripts shipped inside the plugin",
+}
 _ADDRESS = re.compile(r"https?://([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)", re.I)
 _MAX_LISTED = 6
 NOTE = (
@@ -327,16 +331,32 @@ def _check_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list
             out.append(RiskChange(RISKIER, "check", f"A check got worse ({c.status}): {c.name}. {c.detail}".strip()))
         elif now_rank < was_rank:
             out.append(RiskChange(SAFER, "check", f"A check got better ({c.status}): {c.name}."))
+        elif kind == "plugin" and now_rank > 0 and was is not None and c.detail != was.detail and c.name in _PLUGIN_ROWS:
+            # the row was already a warning and still is, but what it names is different: without this a new command hides behind an old warning
+            out.append(RiskChange(LOOK, "check", f"A warning that was already there changed: {c.name}. Now: {_cut(c.detail, 400)}"))
+
+
+def _canonical(value: object) -> str:
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=True)
+    except (TypeError, ValueError, RecursionError):
+        return repr(type(value))
+
+
+def _json_or_none(files: Mapping[str, bytes], path: str) -> object:
+    try:
+        return json.loads(files[path].decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, ValueError, RecursionError):
+        return None  # a file that cannot be read is the validator's to report, not a reason to crash a comparison
 
 
 def _hooks_in(files: Mapping[str, bytes]) -> dict[str, dict]:
-    """The hooks `hooks/hooks.json` runs, by identity: a catalogue hook by its id, any other by the event and the command it shows."""
+    """The hooks `hooks/hooks.json` runs, by identity: a catalogue hook by its id, any other by the WHOLE hook object (command, arguments,
+    timeout and every other key), so a change anywhere in it makes it a different hook, and two hooks never collapse into one. Where each
+    runs (event and matcher) is kept as a set."""
     from ..validate.plugin import shown_command  # here: `validate.plugin` needs nothing from the library
 
-    try:
-        data = json.loads(files[hook_catalogue.HOOKS_FILE].decode("utf-8"))
-    except (KeyError, UnicodeDecodeError, ValueError):
-        return {}
+    data = _json_or_none(files, hook_catalogue.HOOKS_FILE)
     events = data.get("hooks") if isinstance(data, dict) else None
     found: dict[str, dict] = {}
     for event, groups in (events.items() if isinstance(events, dict) else []):
@@ -348,13 +368,17 @@ def _hooks_in(files: Mapping[str, bytes]) -> dict[str, dict]:
                 if not isinstance(hook, dict):
                     continue
                 args = hook.get("args")
-                entry = hook_catalogue.entry_for_script_path(args[0] if isinstance(args, list) and args else None)
-                shown = shown_command(hook)
-                options = (hook_catalogue.parse_args(entry, args) or {"arguments": [shown]}) if entry else {}
-                found[entry.id if entry else f"{event}: {shown}"] = {
-                    "event": str(event), "matcher": matcher, "shown": shown, "entry": entry, "options": options, "on_failure": hook.get("onFailure"),
-                }
+                entry = hook_catalogue.entry_for_args(args)
+                record = found.setdefault(entry.id if entry else "hook " + _canonical(hook), {
+                    "places": set(), "shown": shown_command(hook), "entry": entry, "hook": hook, "on_failure": hook.get("onFailure"),
+                    "options": (hook_catalogue.parse_args(entry, args) or {"arguments": [shown_command(hook)]}) if entry else {},
+                })
+                record["places"].add((str(event), matcher))
     return found
+
+
+def _places_text(places: set[tuple[str, str]]) -> str:
+    return ", ".join(f"{event} for {matcher or 'every tool'}" for event, matcher in sorted(places))
 
 
 def _options_text(options: Mapping[str, Sequence[str]]) -> str:
@@ -363,22 +387,24 @@ def _options_text(options: Mapping[str, Sequence[str]]) -> str:
 
 def _hook_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
     """What the plugin's hooks now do on the machine: a hook that came is riskier (it runs on every matching event, with the person's
-    permissions), one that went is safer, one that runs more often or whose script is no longer the catalogue's is riskier."""
+    permissions), one that went is safer, one that runs on other events, whose program or other keys changed, or whose script is no longer
+    the catalogue's is riskier."""
+    from ..validate.plugin import safe_text  # here: `validate.plugin` needs nothing from the library
+
     where = hook_catalogue.HOOKS_FILE
     before, after = _hooks_in(old), _hooks_in(new)
     for ident in sorted(after.keys() - before.keys()):
         hook = after[ident]
-        tools = hook["matcher"] or "every tool"
         entry = hook["entry"]
         if entry:
             detail = (
-                f"The hook '{entry.id}' is now in the plugin: it runs on your machine, with your permissions, on {hook['event']} for {tools}. {entry.summary}"
+                f"The hook '{entry.id}' is now in the plugin: it runs on your machine, with your permissions, on {_places_text(hook['places'])}. {entry.summary}"
                 + (" It can stop what Claude is about to do." if entry.effect == "blocks" else " It only looks.")
                 + (" By its script it writes files." if entry.powers else "")
             )
         else:
             detail = (
-                f"{where} now runs {hook['shown']} on {hook['event']} for {tools}: not a catalogue hook, so what it does is not vouched for. "
+                f"{where} now runs {hook['shown']} on {_places_text(hook['places'])}: not a catalogue hook, so what it does is not vouched for. "
                 "It runs on your machine, with your permissions, when the plugin is enabled."
             )
         out.append(RiskChange(RISKIER, "hook_added", detail, where))
@@ -390,12 +416,11 @@ def _hook_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[
         ))
     for ident in sorted(before.keys() & after.keys()):
         was, now = before[ident], after[ident]
-        name = now["entry"].id if now["entry"] else ident
-        if (was["event"], was["matcher"]) != (now["event"], now["matcher"]):
+        name = now["entry"].id if now["entry"] else now["shown"]
+        if was["places"] != now["places"]:
             out.append(RiskChange(
                 RISKIER, "hook_trigger",
-                f"The hook '{name}' now runs on {now['event']} for {now['matcher'] or 'every tool'}, not on {was['event']} for {was['matcher'] or 'every tool'}: it will run on different events.",
-                where,
+                f"The hook '{name}' now runs on {_places_text(now['places'])}, not on {_places_text(was['places'])}: it will run on different events.", where,
             ))
         if was["options"] != now["options"]:
             out.append(RiskChange(
@@ -415,6 +440,13 @@ def _hook_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[
         entry = now["entry"]
         if entry is None:
             continue
+        for key in sorted((set(was["hook"]) | set(now["hook"])) - {"args", "onFailure"}):  # the program, the timeout and any other key of a catalogue hook
+            if was["hook"].get(key) != now["hook"].get(key):
+                out.append(RiskChange(
+                    RISKIER, "hook_other",
+                    f"The hook '{entry.id}' now has {key} {safe_text(_canonical(now['hook'].get(key)), 80)} instead of {safe_text(_canonical(was['hook'].get(key)), 80)}: what Claude Code starts is no longer what the catalogue writes.",
+                    where,
+                ))
         old_script, new_script = old.get(entry.shipped_path), new.get(entry.shipped_path)
         if old_script is None or new_script is None or hook_catalogue.script_hash(old_script) == hook_catalogue.script_hash(new_script):
             continue
@@ -430,19 +462,123 @@ def _hook_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[
             out.append(RiskChange(SAFER, "hook_script", f"The script of the hook '{entry.id}' is the catalogue's script again.", entry.shipped_path))
 
 
-def _plugin_level_code(files: Mapping[str, bytes]) -> dict[str, bytes]:
-    """Code a plugin ships outside its components: not in `skills/` or `servers/` (they are compared by their own kind's rules) and not a
-    catalogue hook's script (compared with the hooks)."""
+def _plugin_level_code(files: Mapping[str, bytes], owned: set[str]) -> dict[str, bytes]:
+    """Code a plugin ships outside its components: not in `skills/` or `servers/` (they are compared by their own kind's rules) and not the
+    script of a catalogue hook that the plugin RUNS (`owned`, compared with the hooks). A catalogue-named file that no catalogue hook runs is
+    just code, and is compared like any other."""
     from ..validate.plugin import SERVERS_DIR, shipped_code  # here: `validate.plugin` needs nothing from the library
 
-    owned = {entry.shipped_path for entry in hook_catalogue.CATALOGUE.values()}
     return {rel: data for rel, data in shipped_code(files).items() if PurePosixPath(rel).parts[0] not in ("skills", SERVERS_DIR) and rel not in owned}
 
 
+def _manifest_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
+    """The plugin manifest is not instructions an agent follows, but two things in it matter: the options it asks a person for (a secret that
+    stops being sensitive, a default that is used without asking) and the keys that start something (inline hooks, MCP and LSP servers,
+    monitors), whose commands are compared."""
+    from ..validate.plugin import EXTRA_MANIFEST_KEYS, MANIFEST, declared_commands  # here: `validate.plugin` needs nothing from the library
+
+    raw_before, raw_after = _json_or_none(old, MANIFEST), _json_or_none(new, MANIFEST)
+    before, after = (raw_before if isinstance(raw_before, dict) else {}), (raw_after if isinstance(raw_after, dict) else {})
+    old_options = before.get("userConfig") if isinstance(before.get("userConfig"), dict) else {}
+    new_options = after.get("userConfig") if isinstance(after.get("userConfig"), dict) else {}
+    for key in sorted(new_options.keys() - old_options.keys()):
+        out.append(RiskChange(LOOK, "option", f"The plugin now asks for the option {_cut(str(key), 60)}, and what is typed there reaches whatever uses it.", MANIFEST))
+    for key in sorted(old_options.keys() - new_options.keys()):
+        out.append(RiskChange(SAFER, "option", f"The plugin no longer asks for the option {_cut(str(key), 60)}.", MANIFEST))
+    for key in sorted(old_options.keys() & new_options.keys()):
+        was = old_options[key] if isinstance(old_options[key], dict) else {}
+        now = new_options[key] if isinstance(new_options[key], dict) else {}
+        label = _cut(str(key), 60)
+        if was.get("sensitive") is True and now.get("sensitive") is not True:
+            out.append(RiskChange(RISKIER, "option", f"The option {label} is no longer sensitive: its value is not kept as a secret any more.", MANIFEST))
+        elif was.get("sensitive") is not True and now.get("sensitive") is True:
+            out.append(RiskChange(SAFER, "option", f"The option {label} is now sensitive: its value is kept as a secret.", MANIFEST))
+        if "default" in now and was.get("default") != now.get("default"):
+            out.append(RiskChange(RISKIER, "option", f"The option {label} now has a default ({_cut(_canonical(now['default']), 60)}): Claude Code may use it without asking.", MANIFEST))
+        elif "default" in was and "default" not in now:
+            out.append(RiskChange(LOOK, "option", f"The option {label} no longer has a default.", MANIFEST))
+        if was.get("required") != now.get("required"):
+            out.append(RiskChange(LOOK, "option", f"The option {label} changed whether it is required: was {was.get('required')!r}, now {now.get('required')!r}.", MANIFEST))
+        if was.get("type") != now.get("type"):
+            out.append(RiskChange(LOOK, "option", f"The option {label} changed type: was {_cut(str(was.get('type')), 30)}, now {_cut(str(now.get('type')), 30)}.", MANIFEST))
+    for key in EXTRA_MANIFEST_KEYS:
+        was_value, now_value, shown = before.get(key), after.get(key), key
+        if key == "experimental":
+            was_value = was_value.get("monitors") if isinstance(was_value, dict) else None
+            now_value = now_value.get("monitors") if isinstance(now_value, dict) else None
+            shown = "experimental.monitors"
+        was_commands, now_commands = declared_commands(was_value), declared_commands(now_value)
+        for command in now_commands:
+            if command not in was_commands:
+                out.append(RiskChange(RISKIER, "manifest", f"The manifest now declares {shown} that starts {command}. It runs on your machine when the plugin is enabled.", MANIFEST))
+        for command in was_commands:
+            if command not in now_commands:
+                out.append(RiskChange(SAFER, "manifest", f"The manifest no longer declares {shown} that starts {command}.", MANIFEST))
+        if not was_commands and not now_commands and was_value != now_value:
+            out.append(RiskChange(RISKIER if now_value is not None else SAFER, "manifest", f"The manifest {'now declares' if now_value is not None else 'no longer declares'} {shown}.", MANIFEST))
+
+
+def _config_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange], came_with_server: set[str]) -> None:
+    """What `.mcp.json` starts. An entry that arrives or leaves together with its server in the composed form is said by the server's own line;
+    any other entry is shown with its command, and every difference in an entry that stayed (its command, any other key such as `cwd`, and what each
+    variable takes its value from) is reported. A value in `env` is never shown, only where it comes from."""
+    from ..validate.plugin import MCP_CONFIG, safe_text, server_entry, shown_command  # here: `validate.plugin` needs nothing from the library
+
+    def entries(files: Mapping[str, bytes]) -> dict[str, dict]:
+        data = _json_or_none(files, MCP_CONFIG)
+        found = data.get("mcpServers") if isinstance(data, dict) else None
+        return {str(k): v for k, v in found.items() if isinstance(v, dict)} if isinstance(found, dict) else {}
+
+    def composed(name: str, entry: Mapping) -> bool:
+        return {k: v for k, v in entry.items() if k != "env"} == server_entry(name)
+
+    def env_of(entry: Mapping) -> dict:
+        env = entry.get("env")
+        return dict(env) if isinstance(env, dict) else {}
+
+    def source(value: object) -> str:
+        match = re.fullmatch(r"\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}", value) if isinstance(value, str) else None
+        return f"the option {match.group(1)}" if match else "a value written in the file"
+
+    started_before, started_after = entries(old), entries(new)
+    for name in sorted(started_after.keys() - started_before.keys()):
+        if name in came_with_server and composed(name, started_after[name]):
+            continue
+        out.append(RiskChange(RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}': {shown_command(started_after[name])}. It runs on your machine when the plugin is enabled.", MCP_CONFIG))
+    for name in sorted(started_before.keys() - started_after.keys()):
+        if name in came_with_server and composed(name, started_before[name]):
+            continue
+        out.append(RiskChange(SAFER, "server_start", f"{MCP_CONFIG} no longer starts '{name}'.", MCP_CONFIG))
+    for name in sorted(started_before.keys() & started_after.keys()):
+        was, now = started_before[name], started_after[name]
+        if (was.get("command"), was.get("args")) != (now.get("command"), now.get("args")):
+            out.append(RiskChange(
+                RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}' as {shown_command(now)} instead of {shown_command(was)}.", MCP_CONFIG,
+            ))
+        for key in sorted((set(was) | set(now)) - {"command", "args", "env"}):
+            if was.get(key) != now.get(key):
+                out.append(RiskChange(
+                    RISKIER, "server_start",
+                    f"{MCP_CONFIG} now has {key} {safe_text(_canonical(now.get(key)), 80)} for '{name}' (it was {safe_text(_canonical(was.get(key)), 80)}): it changes how the server is started.", MCP_CONFIG,
+                ))
+        was_env, now_env = env_of(was), env_of(now)
+        for variable in sorted(map(str, now_env.keys() - was_env.keys())):
+            out.append(RiskChange(RISKIER, "environment", f"{MCP_CONFIG} now gives '{name}' the environment variable {variable}: whatever value is set is reachable by the server.", MCP_CONFIG))
+        for variable in sorted(map(str, was_env.keys() - now_env.keys())):
+            out.append(RiskChange(SAFER, "environment", f"{MCP_CONFIG} no longer gives '{name}' the environment variable {variable}.", MCP_CONFIG))
+        for variable in sorted(map(str, now_env.keys() & was_env.keys())):
+            if now_env[variable] != was_env[variable]:
+                out.append(RiskChange(
+                    RISKIER, "environment",
+                    f"{MCP_CONFIG} now gives '{name}' {variable} from {source(now_env[variable])} instead of {source(was_env[variable])}.", MCP_CONFIG,
+                ))
+
+
 def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[RiskChange]) -> None:
-    """Inside a plugin: each skill and agent that is in both versions is compared with the rules of its own kind, and a component
-    that came or went is said. The plugin's manifest and README are not instructions an agent follows, so they are not diffed."""
-    from ..validate.plugin import MCP_CONFIG, components, shipped_code, shown_command  # here: `validate.plugin` needs nothing from the library
+    """Inside a plugin: each skill, agent and MCP server that is in both versions is compared with the rules of its own kind, a component
+    that came or went is said, and so are the manifest's options and start-keys, what `.mcp.json` starts, the hooks, and any code outside
+    the components."""
+    from ..validate.plugin import components, declared_commands, shipped_code  # here: `validate.plugin` needs nothing from the library
 
     def keyed(files: Mapping[str, bytes]) -> dict[tuple[str, str], dict[str, bytes]]:
         return {(kind, name): sub for kind, name, sub in components(files)}
@@ -473,6 +609,13 @@ def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
             reasons.append("MCP servers")
         return reasons
 
+    def commands(kind: str, sub: Mapping[str, bytes]) -> list[str]:
+        """The commands a skill's or agent's front matter says to start (its hooks and MCP servers), as shown to a person."""
+        if kind == "mcp":
+            return []
+        meta = _front_matter(sub, "SKILL.md" if kind == "skill" else "AGENT.md")[0]
+        return declared_commands(meta.get("hooks")) + declared_commands(meta.get("mcpServers") or meta.get("mcp_servers"))
+
     before, after = keyed(old), keyed(new)
     for kind, name in sorted(after.keys() - before.keys()):
         reasons = power(kind, after[(kind, name)])
@@ -480,6 +623,9 @@ def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
             detail = f"The MCP server '{name}' is now in the plugin: a program that starts on your machine, with your permissions and outside any sandbox, whenever Claude Code loads the plugin."
         else:
             detail = f"The {kind} '{name}' is now in the plugin" + (f" and asks for {', '.join(reasons)}." if reasons else "; it asks for nothing beyond reading.")
+            started = commands(kind, after[(kind, name)])
+            if started:
+                detail += " It would start: " + "; ".join(started[:3]) + "."
         out.append(RiskChange(RISKIER if reasons else LOOK, "component_added", detail, where(kind, name)))
     for kind, name in sorted(before.keys() - after.keys()):
         out.append(RiskChange(SAFER, "component_removed", f"The {label(kind)} '{name}' is no longer in the plugin.", where(kind, name)))
@@ -492,40 +638,17 @@ def _plugin_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: lis
         gained = [word for word in power(kind, new_c) if word in ("hooks", "MCP servers") and word not in power(kind, old_c)]
         if gained:
             out.append(RiskChange(RISKIER, "capability", f"The {kind} '{name}' now declares {' and '.join(gained)}: they run on your machine.", where(kind, name)))
+        was_started = commands(kind, old_c)
+        for command in commands(kind, new_c):
+            if command not in was_started:
+                out.append(RiskChange(RISKIER, "capability", f"The {kind} '{name}' now declares a command that starts {command}.", where(kind, name)))
 
-    # what `.mcp.json` starts. A server that came or went with the plugin is said above, so it is not said twice here.
-    said = {name for kind, name in after.keys() ^ before.keys() if kind == "mcp"}
-
-    def entries(files: Mapping[str, bytes]) -> dict[str, dict]:
-        try:
-            data = json.loads(files[MCP_CONFIG].decode("utf-8"))
-        except (KeyError, UnicodeDecodeError, ValueError):
-            return {}
-        found = data.get("mcpServers") if isinstance(data, dict) else None
-        return {str(k): v for k, v in found.items() if isinstance(v, dict)} if isinstance(found, dict) else {}
-
-    def variables(entry: Mapping) -> set[str]:
-        env = entry.get("env")
-        return {str(k) for k in env} if isinstance(env, dict) else set()  # the names only: a value is never shown
-
-    started_before, started_after = entries(old), entries(new)
-    for name in sorted(started_after.keys() - started_before.keys() - said):
-        out.append(RiskChange(RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}': {shown_command(started_after[name])}. It runs on your machine when the plugin is enabled.", MCP_CONFIG))
-    for name in sorted(started_before.keys() - started_after.keys() - said):
-        out.append(RiskChange(SAFER, "server_start", f"{MCP_CONFIG} no longer starts '{name}'.", MCP_CONFIG))
-    for name in sorted(started_before.keys() & started_after.keys()):
-        was, now = started_before[name], started_after[name]
-        if (was.get("command"), was.get("args")) != (now.get("command"), now.get("args")):
-            out.append(RiskChange(
-                RISKIER, "server_start", f"{MCP_CONFIG} now starts '{name}' as {shown_command(now)} instead of {shown_command(was)}.", MCP_CONFIG,
-            ))
-        for variable in sorted(variables(now) - variables(was)):
-            out.append(RiskChange(RISKIER, "environment", f"{MCP_CONFIG} now gives '{name}' the environment variable {variable}: whatever value is set is reachable by the server.", MCP_CONFIG))
-        for variable in sorted(variables(was) - variables(now)):
-            out.append(RiskChange(SAFER, "environment", f"{MCP_CONFIG} no longer gives '{name}' the environment variable {variable}.", MCP_CONFIG))
-
+    came_with_server = {name for kind, name in after.keys() ^ before.keys() if kind == "mcp"}
+    _manifest_changes(old, new, out)
+    _config_changes(old, new, out, came_with_server)
     _hook_changes(old, new, out)
-    _script_changes(old, new, out, pick=_plugin_level_code)  # a script the hooks file runs that is not the catalogue's, or any other code outside the components
+    owned = {entry.shipped_path for hook in (*_hooks_in(old).values(), *_hooks_in(new).values()) if (entry := hook["entry"]) is not None}
+    _script_changes(old, new, out, pick=lambda files: _plugin_level_code(files, owned))  # a script a hooks file runs that is not a catalogue hook's, or any other code outside the components
 
 
 def risk_diff(old: Mapping[str, bytes], new: Mapping[str, bytes], older: str = "", newer: str = "", kind: str = "skill") -> RiskDiff:

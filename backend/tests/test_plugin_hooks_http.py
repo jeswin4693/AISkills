@@ -43,12 +43,12 @@ def test_a_preview_shows_the_hooks_files_and_what_they_do_and_keeps_nothing(tmp_
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["failed"] is False and body["components"] == [
-        {"kind": "hook", "name": "block-secret-files", "version": "r2"}, {"kind": "hook", "name": "block-force-push", "version": "r2"},
+        {"kind": "hook", "name": "block-force-push", "version": "r2"}, {"kind": "hook", "name": "block-secret-files", "version": "r2"},  # by name, not in the order picked
     ]
     paths = [f["path"] for f in body["files"]]
     assert HOOKS in paths and "hooks/block-secret-files.py" in paths and "hooks/block-force-push.py" in paths
-    first = body["capabilities"]["hook_entries"][0]
-    assert first["id"] == "block-secret-files" and first["options"] == {"also": ["secrets.json"]} and first["effect"] == "blocks"
+    first = next(h for h in body["capabilities"]["hook_entries"] if h["id"] == "block-secret-files")
+    assert first["command"] == "python -I hooks/block-secret-files.py" and first["options"] == {"also": ["secrets.json"]} and first["effect"] == "blocks"
     assert "outside any sandbox" in " ".join(body["capabilities"]["notes"])
     assert any(c["name"].startswith("hooks/hooks.json runs only catalogue hooks") and c["status"] == "passed" for c in body["checks"])
     assert lib.for_kind("plugin").names() == []
@@ -123,7 +123,7 @@ def test_a_plugin_from_outside_with_only_a_command_the_catalogue_does_not_have_h
 
 
 def test_a_plugin_from_outside_with_one_catalogue_hook_and_one_other_command_is_kept_with_a_warning_that_shows_the_command(tmp_path):
-    force = {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}]}
+    force = {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "python", "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}]}
     report = outside(tmp_path, [force, {"hooks": [SHELL_HOOK]}], drop=("hooks/block-secret-files.py",))
     assert not report.refused
     warned = [c for c in report.checks if c.status == "warning" and c.name.startswith("hooks/hooks.json")]

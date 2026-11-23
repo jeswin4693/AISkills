@@ -28,7 +28,7 @@ MAX_NAME = 64  # the longest skill name the checks, the library and the kinds al
 SLUG = re.compile(r"^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\Z)[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 TEXT_SUFFIXES = {".md", ".json", ".txt", ".yaml", ".yml", ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".toml", ".cfg", ".ini", ".csv"}
-PY_SUFFIXES = {".py"}
+PY_SUFFIXES = {".py", ".pyw"}  # .pyw is Python too (Windows runs it without a console, and imports it)
 JS_LANGS = {".ts": "typescript", ".mts": "typescript", ".cts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript"}
 BINARY_SUFFIXES = {".exe", ".dll", ".so", ".dylib", ".bin", ".jar", ".class", ".pyc", ".msi", ".app", ".o", ".a"}
 SHELL_SUFFIXES = {".sh", ".bash", ".zsh", ".bat", ".cmd", ".ps1"}
@@ -149,6 +149,10 @@ def _check_paths_and_size(files: Mapping[str, bytes], problems: list[tuple[str, 
         parts = PurePosixPath(rel).parts
         if ".." in parts or rel.startswith("/") or "\\" in rel or re.match(r"^[A-Za-z]:", rel):
             bad.append(f"{rel} points outside the folder")
+        elif any(part != part.rstrip(" .") or ":" in part for part in parts):
+            # Windows drops a trailing dot or space (`server.py.` IS `server.py`) and reads `name:stream` as a hidden stream of `name`: the checks
+            # would look at one file while another is run
+            bad.append(f"{rel} has a name Windows reads as another file (a trailing dot or space, or a colon)")
     paths = CheckResult("no symbolic links or paths that leave the folder", FAILED, "; ".join(bad)) if bad else CheckResult("no symbolic links or paths that leave the folder", PASSED)
 
     sizes = [msg for kind, msg in problems if kind == "size"] + [msg for kind, msg in problems if kind == "unreadable"]
@@ -229,6 +233,9 @@ def _check_json(files: Mapping[str, bytes]) -> CheckResult:
         count += 1
         try:
             doc = json.loads(data.decode("utf-8"))
+        except RecursionError:
+            problems.append(f"{rel}: nested too deeply to read")  # a hostile file is a failed check, not a crash
+            continue
         except (UnicodeDecodeError, ValueError) as exc:
             problems.append(f"{rel}: not valid JSON ({exc})")
             continue

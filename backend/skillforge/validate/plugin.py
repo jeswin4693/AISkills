@@ -20,9 +20,12 @@ import re
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
+import yaml
+
+from ..hookcatalog.catalogue import HOOKS_FILE, accepts, entry_for_args, parse_args
 from ..results import FAILED, PASSED, WARNING, CheckResult
-from ..hookcatalog.catalogue import HOOKS_FILE, accepts, entry_for_script_path, parse_args
 from .mcp import analyze_server
 from .static import JS_LANGS, MAX_NAME, PY_SUFFIXES, SLUG, script_capabilities, validate_files
 
@@ -36,20 +39,35 @@ HOOKS_CHECK = "hooks/hooks.json runs only catalogue hooks, unchanged"
 SCRIPTS_CHECK = "scripts shipped inside the plugin"
 EXTRAS_CHECK = "no hooks, undescribed MCP servers, settings or executables"
 MCP_CONFIG_CHECK = ".mcp.json starts only the MCP servers shipped inside the plugin"
+ALIAS_CHECK = "no file name that Windows or macOS would read as another file"
 CODE_SUFFIXES = {
-    ".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".rb", ".php", ".pl", ".lua", ".java",
+    ".py", ".pyw", ".pyz", ".js", ".mjs", ".cjs", ".ts", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".rb", ".php", ".pl", ".lua", ".java",
     ".go", ".rs", ".c", ".cc", ".cpp", ".cs", ".kt",
 }
-EXTRA_FILES = {"hooks.json", ".mcp.json", ".lsp.json", "settings.json", "settings.local.json"}  # what a plugin should not carry undescribed
+EXTRA_FILES = {"hooks.json", ".mcp.json", ".lsp.json", "settings.json", "settings.local.json", "monitors.json"}  # what a plugin should not carry undescribed
+EXTRA_DIRS = ("bin", "commands", "monitors", "workflows")  # Claude Code runs or loads what is here: put on the Bash PATH, markdown that can run shell lines, background shell commands, scripts
+SPECIAL_FILES = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".mcp.json", HOOKS_FILE, "monitors/monitors.json")
+SPECIAL_DIRS = (".claude-plugin", "skills", "agents", "servers", "hooks", "bin", "commands", "monitors", "workflows", "output-styles", "themes")
+LOADER_PREFIXES = ("PYTHON", "LD_", "DYLD_", "NODE_")  # variables that change how a program is loaded or searched
+LOADER_NAMES = frozenset({
+    "PATH", "PATHEXT", "IFS", "ENV", "SHELL", "COMSPEC", "PSMODULEPATH", "CLASSPATH", "BASH_ENV", "PERL5LIB", "PERL5OPT", "RUBYOPT", "RUBYLIB",
+    "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS",
+})
 MCP_CONFIG = ".mcp.json"
 SERVERS_DIR = "servers"  # not "mcp/": no folder is ever called like the SDK package
 PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"  # Claude Code replaces it with the folder the plugin is installed in
 START_COMMAND = "python"
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")  # a userConfig key (a dashed one is refused by `claude plugin validate`) and an environment variable name
 _OPTION_REF = re.compile(r"^\$\{user_config\.([A-Za-z_][A-Za-z0-9_]*)\}\Z")
-_SHOWN_ARGS = 3
-_SHOWN_CHARS = 40
-EXTRA_MANIFEST_KEYS = ("hooks", "mcpServers", "lspServers")
+_SHOWN_ARGS = 8  # how many arguments of a command are shown
+_SHOWN_CHARS = 40  # how much of a name is shown
+_ARG_CHARS = 160  # how much of one argument is shown
+EXTRA_MANIFEST_KEYS = ("hooks", "mcpServers", "lspServers", "channels", "commands", "workflows", "experimental")  # keys that point at, or hold, something that runs
+_SECRET_FLAG = re.compile(r"(--?[A-Za-z0-9_-]*(?:token|key|secret|passw|pwd|auth|credential)[A-Za-z0-9_-]*=)\S+", re.I)
+_SECRET_QUERY = re.compile(r"([?&][^=&\s]*(?:token|key|secret|passw|pwd|auth)[^=&\s]*=)[^&\s]+", re.I)
+_SECRET_TOKEN = re.compile(r"\b((?:gh[pousr]_|github_pat_|sk-|xox[abprs]-|AKIA|AIza|glpat-|npm_)[A-Za-z0-9_\-]{8,})")
+_LONG_OPAQUE = re.compile(r"[A-Za-z0-9+/_\-=]{40,}")
+_BANG_LINE = re.compile(r"(?m)(?:^|\s)!`([^`\n]+)`|^```!")  # a skill or command line that runs a shell command when it loads
 
 
 def name_problem(name: object) -> str:
@@ -65,6 +83,13 @@ def name_problem(name: object) -> str:
 def is_identifier(text: object) -> bool:
     """A name Claude Code accepts as a `userConfig` key, and a plain environment variable name."""
     return isinstance(text, str) and bool(_IDENTIFIER.match(text))
+
+
+def is_loader_variable(name: str) -> bool:
+    """A variable that changes how a program is found or loaded (PATH, PYTHONPATH, LD_PRELOAD, NODE_OPTIONS ...). A server must never be
+    handed one through an option: setting it makes the server, or what it starts, run something else."""
+    upper = name.upper()
+    return upper in LOADER_NAMES or upper.startswith(LOADER_PREFIXES)
 
 
 def user_config_key(server: str, variable: str) -> str:
@@ -88,6 +113,8 @@ def _json(files: Mapping[str, bytes], path: str) -> tuple[object, str]:
         return json.loads(files[path].decode("utf-8")), ""
     except UnicodeDecodeError:
         return None, f"{path} is not valid UTF-8"
+    except RecursionError:
+        return None, f"{path} is nested too deeply to read"  # a hostile file must be a failed row, not a crash
     except ValueError as exc:
         return None, f"{path} is not valid JSON ({exc})"
 
@@ -151,20 +178,76 @@ def _component_rows(files: Mapping[str, bytes]) -> list[CheckResult]:
     return rows
 
 
+def _front_meta(data: bytes) -> dict:
+    """The front matter of a skill or agent file as a dict (empty when there is none or it cannot be read)."""
+    text = data.decode("utf-8", "replace").replace("\r\n", "\n")
+    match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        meta = yaml.safe_load(match.group(1))
+    except (yaml.YAMLError, RecursionError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def declared_commands(value: object, depth: int = 0) -> list[str]:
+    """Every command a hooks, mcpServers, lspServers or monitors structure would start, as shown to a person (nested lists and maps are walked)."""
+    found: list[str] = []
+    if depth > 8:
+        return found
+    if isinstance(value, dict):
+        if "command" in value or "url" in value:
+            found.append(shown_command(value))
+        else:
+            for item in value.values():
+                found += declared_commands(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            found += declared_commands(item, depth + 1)
+    return found
+
+
 def _extras_row(files: Mapping[str, bytes], manifest: dict, described: frozenset[str] = frozenset()) -> CheckResult:
-    """`described` holds the root files other rows describe in full (`.mcp.json`, `hooks/hooks.json`): they are not unexplained extras."""
+    """What a plugin carries that runs or loads something and that no other row describes. `described` holds the root files other rows describe
+    in full (`.mcp.json`, `hooks/hooks.json`). Commands declared in the manifest or in a skill's or agent's front matter are SHOWN, not just
+    counted, and a skill or command file with a line that runs a shell command when it loads is named."""
+    special_names = {n.casefold() for n in EXTRA_FILES}
     found = sorted(
         rel for rel in files
-        if (PurePosixPath(rel).name in EXTRA_FILES or PurePosixPath(rel).parts[0] == "bin") and rel not in described
+        if rel not in described and (PurePosixPath(rel).name.casefold() in special_names or PurePosixPath(rel).parts[0].casefold() in EXTRA_DIRS)
     )
-    keys = [k for k in EXTRA_MANIFEST_KEYS if k in manifest]
-    if not found and not keys:
-        return CheckResult(EXTRAS_CHECK, PASSED, "none")
-    parts = []
+    parts: list[str] = []
     if found:
         parts.append("files: " + ", ".join(found[:8]) + (f" and {len(found) - 8} more" if len(found) > 8 else ""))
-    if keys:
-        parts.append("the manifest declares " + ", ".join(keys))
+    for key in EXTRA_MANIFEST_KEYS:
+        if key not in manifest:
+            continue
+        value = manifest[key]
+        if key == "experimental":
+            value = value.get("monitors") if isinstance(value, dict) else None
+            key = "experimental.monitors"
+            if value is None:
+                continue
+        commands = declared_commands(value)
+        if commands:
+            parts.append(f"the manifest's {key} would start " + "; ".join(commands[:6]))
+        else:
+            parts.append(f"the manifest declares {key}" + (f" ({', '.join(str(v)[:60] for v in value[:3])})" if isinstance(value, list) and all(isinstance(v, str) for v in value) else ""))
+    for kind, name, sub in components(files):
+        if kind in ("skill", "agent"):
+            definition = "SKILL.md" if kind == "skill" else "AGENT.md"
+            meta = _front_meta(sub.get(definition, b""))
+            for field_name in ("hooks", "mcpServers", "mcp_servers"):
+                if meta.get(field_name):
+                    commands = declared_commands(meta[field_name]) or ["something SkillForge cannot read"]
+                    parts.append(f"the {kind} '{name}' declares {field_name}: " + "; ".join(commands[:4]))
+        if kind == "skill":
+            bang = [m.group(1) or "a ```! block" for m in _BANG_LINE.finditer(sub.get("SKILL.md", b"").decode("utf-8", "replace"))]
+            if bang:
+                parts.append(f"the skill '{name}' runs shell commands when it loads (the ! syntax): " + "; ".join(safe_text(c, 80) for c in bang[:3]))
+    if not parts:
+        return CheckResult(EXTRAS_CHECK, PASSED, "none")
     return CheckResult(EXTRAS_CHECK, WARNING, "; ".join(parts) + ". These run or load on your machine when the plugin is used: read them before installing.")
 
 
@@ -204,18 +287,52 @@ def _script_row(files: Mapping[str, bytes], catalogue_scripts: AbstractSet[str] 
     return CheckResult(SCRIPTS_CHECK, WARNING, "; ".join(parts) + ". Read them before installing.")
 
 
+def _mask(text: str) -> str:
+    """Keys, tokens and long opaque strings in a command are not repeated back: a report must never be where a secret leaks."""
+    text = _SECRET_FLAG.sub(r"\1…", text)
+    text = _SECRET_QUERY.sub(r"\1…", text)
+    text = _SECRET_TOKEN.sub(lambda m: m.group(1)[: m.group(1).index("_") + 1 if "_" in m.group(1)[:8] else 3] + "…", text)
+    return _LONG_OPAQUE.sub("…", text)
+
+
+def safe_text(text: str, limit: int = _ARG_CHARS) -> str:
+    """Text for a person to read: control characters written out (\\x1b), a long run of blanks named (so it cannot hide a tail behind it),
+    keys masked, and a marker when it was cut."""
+    out = []
+    for ch in text:
+        if ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 32 or ord(ch) == 127:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    shown = re.sub(r" {4,}", lambda m: f" [{len(m.group())} spaces] ", "".join(out))
+    shown = _mask(shown)
+    return shown if len(shown) <= limit else shown[:limit] + "…"
+
+
 def shown_command(entry: object) -> str:
-    """What an entry would start, for a person to read: the command and its first arguments, each cut short. A value in `env` is
-    never shown, only the names."""
+    """What an entry would start, for a person to read: the command and its arguments (up to eight, each cut with a visible marker). A value in
+    `env` is never shown, only the names; a remote server shows its host only; keys and tokens are masked; control characters and runs of blanks
+    are made visible."""
     if not isinstance(entry, dict):
-        return json.dumps(entry)[:_SHOWN_CHARS]
+        return safe_text(json.dumps(entry), _SHOWN_CHARS)
     if "command" not in entry:
-        return "an entry with " + (", ".join(sorted(str(k) for k in entry)[:4]) or "no keys")
+        if isinstance(entry.get("url"), str):
+            try:
+                host = urlsplit(entry["url"]).hostname or "an address that cannot be read"
+            except ValueError:
+                host = "an address that cannot be read"
+            return f"a remote server at {safe_text(host, 80)}"
+        return "an entry with " + (", ".join(safe_text(str(k), _SHOWN_CHARS) for k in sorted(entry, key=str)[:4]) or "no keys")
     raw_args = entry.get("args")
     args = raw_args if isinstance(raw_args, list) else []
-    words = [entry["command"], *args[:_SHOWN_ARGS]]
-    shown = " ".join(str(w)[:_SHOWN_CHARS] for w in words)
-    return shown + (" ..." if len(args) > _SHOWN_ARGS else "")
+    words = [safe_text(str(entry["command"]), 80), *(safe_text(str(a)) for a in args[:_SHOWN_ARGS])]
+    return " ".join(words) + (f" …({len(args) - _SHOWN_ARGS} more)" if len(args) > _SHOWN_ARGS else "")
 
 
 def _server_reads(files: Mapping[str, bytes]) -> dict[str, set[str]]:
@@ -230,10 +347,12 @@ def _server_reads(files: Mapping[str, bytes]) -> dict[str, set[str]]:
     return reads
 
 
-def _entry_problem(name: str, entry: object, servers: Mapping[str, set[str]], declared: set[str], undeclared: list[str]) -> str:
+def _entry_problem(name: str, entry: object, servers: Mapping[str, set[str]], options: Mapping[str, object], undeclared: list[str]) -> str:
     """Why this `.mcp.json` entry is not the one the composer writes for a server shipped here ("" when it is). Fills `undeclared` with
     the options it uses that the manifest does not declare. `servers` maps each shipped server to the variables its code reads: an entry
-    may pass only those, so an option cannot be used to set something the server never asked for (`PYTHONPATH`, `LD_PRELOAD`)."""
+    may pass only those, and never a loader variable (`PYTHONPATH`, `LD_PRELOAD`). Each variable must take its value from the option the
+    composer makes for that server and variable (so a secret typed for one server never reaches another), and that option must ask for a
+    required secret with no default. `options` is the manifest's `userConfig`."""
     if not isinstance(entry, dict):
         return "is not an object"
     if name not in servers:
@@ -247,18 +366,37 @@ def _entry_problem(name: str, entry: object, servers: Mapping[str, set[str]], de
     env = entry.get("env", {})
     if not isinstance(env, dict):
         return "has an env that is not an object"
-    literal = []
+    literal: list[str] = []
+    foreign: list[str] = []
+    weak: list[str] = []
     for variable, value in env.items():
         ref = _OPTION_REF.match(value) if isinstance(value, str) else None
         if ref is None:
             literal.append(str(variable)[:_SHOWN_CHARS])
-        elif ref.group(1) not in declared:
-            undeclared.append(ref.group(1))
+            continue
+        key = ref.group(1)
+        if key not in options:
+            undeclared.append(key)
+        elif key != user_config_key(name, str(variable)):
+            foreign.append(f"{str(variable)[:_SHOWN_CHARS]} (it takes its value from the option {key}, which is another server's or another variable's)")
+        else:
+            body = options[key]
+            body = body if isinstance(body, dict) else {}
+            lacking = [what for what, ok in (("sensitive", body.get("sensitive") is True), ("required", body.get("required") is True), ("without a default", "default" not in body)) if not ok]
+            if lacking:
+                weak.append(f"the option {key} is not a required secret without a default (it is missing: {', '.join(lacking)})")
     if literal:
         return "gives " + ", ".join(literal) + " a value written in the file (only ${user_config.X} references are expected, so no key is kept here)"
     unread = sorted(str(v)[:_SHOWN_CHARS] for v in env if v not in servers[name])
     if unread:
         return "passes " + ", ".join(unread) + ", which the server's code does not read"
+    loader = sorted(str(v)[:_SHOWN_CHARS] for v in env if is_loader_variable(str(v)))
+    if loader:
+        return "passes " + ", ".join(loader) + ", a variable that changes how a program is found or loaded: an option must never set it"
+    if foreign:
+        return "gives " + ", ".join(foreign)
+    if weak:
+        return "; ".join(weak)
     return ""
 
 
@@ -274,7 +412,7 @@ def _group_problems(event: str, group: object, files: Mapping[str, bytes], found
     if not isinstance(hooks, list) or len(hooks) != 1 or not isinstance(hooks[0], dict):
         return [f"{where} has a group that does not hold exactly one hook"]
     hook = hooks[0]
-    entry = entry_for_script_path(hook["args"][0] if isinstance(hook.get("args"), list) and hook["args"] else None)
+    entry = entry_for_args(hook.get("args"))
     if entry is None:
         return [f"{where} runs {shown_command(hook)} (type {str(hook.get('type'))[:20]!r}), which is not a catalogue hook"]
     problems: list[str] = []
@@ -300,7 +438,7 @@ def _group_problems(event: str, group: object, files: Mapping[str, bytes], found
         problems.append(f"'{entry.id}' is under {where}, the catalogue runs it on {entry.event}")
     if group.get("matcher", "") != entry.matcher:
         problems.append(f"'{entry.id}' has the matcher {str(group.get('matcher', ''))[:40]!r}, the catalogue's is {entry.matcher!r}")
-    if hook.get("timeout") != entry.timeout and "timeout" in hook:
+    if "timeout" in hook and (type(hook["timeout"]) is not int or hook["timeout"] != entry.timeout):  # 10.0 and true are not the integer 10
         problems.append(f"'{entry.id}' has the timeout {str(hook.get('timeout'))[:10]}, the catalogue's is {entry.timeout}")
     if parse_args(entry, hook.get("args")) is None:
         problems.append(f"'{entry.id}' has arguments the catalogue does not write: {shown_command(hook)}")
@@ -335,10 +473,14 @@ def _hooks_row(files: Mapping[str, bytes]) -> tuple[CheckResult | None, bool, se
     stray = sorted(map(str, set(data) - {"hooks", "description"})) if isinstance(data, dict) else []
     if stray:
         problems.append(f"{HOOKS_FILE} has {', '.join(stray)[:60]}, which SkillForge does not read")
+    loose = sorted(rel for rel in files if rel.startswith("hooks/") and rel != HOOKS_FILE and rel not in script_ok)
+    if loose:  # a module planted beside a script can replace one it imports; the scripts run in isolated mode, but nothing else beside them is expected
+        problems.append(f"{', '.join(loose[:5])} sits beside the hook scripts and is not one of them: a file there can be imported instead of a standard module, or run by another hook")
     if problems:
         detail = "; ".join(problems[:5]) + ". A hook runs on your machine with your permissions when the plugin is enabled: read it before installing."
         return CheckResult(HOOKS_CHECK, WARNING, detail), False, script_ok, len(found)
-    return CheckResult(HOOKS_CHECK, PASSED, "runs " + ", ".join(found) + " from the catalogue, unchanged"), True, script_ok, len(found)
+    detail = "runs " + ", ".join(found) + f" from the catalogue, unchanged (this row covers only {HOOKS_FILE}: hooks declared anywhere else are listed on the extras row)"
+    return CheckResult(HOOKS_CHECK, PASSED, detail), True, script_ok, len(found)
 
 
 def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckResult | None, bool]:
@@ -356,9 +498,12 @@ def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckRe
     if not isinstance(entries, dict) or not entries:
         return CheckResult(MCP_CONFIG_CHECK, WARNING, f'{MCP_CONFIG} has no "mcpServers" entries in the form SkillForge reads, so what it starts is not described: read it'), False
     options = manifest.get("userConfig")
-    declared = set(options) if isinstance(options, dict) else set()
+    declared = options if isinstance(options, dict) else {}
     undeclared: list[str] = []
     problems = []
+    stray = sorted(map(str, set(data) - {"mcpServers"})) if isinstance(data, dict) else []
+    if stray:  # the plugin is only described by what it says under mcpServers; anything beside it may be read by Claude Code as more servers
+        problems.append(f"{MCP_CONFIG} has {', '.join(s[:_SHOWN_CHARS] for s in stray[:4])} beside mcpServers, which SkillForge does not read")
     for name, entry in entries.items():
         problem = _entry_problem(str(name), entry, servers, declared, undeclared)
         if problem:
@@ -370,6 +515,29 @@ def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckRe
     if problems:
         return CheckResult(MCP_CONFIG_CHECK, WARNING, "; ".join(problems[:5]) + ". It runs on your machine when the plugin is enabled: read it before installing."), False
     return CheckResult(MCP_CONFIG_CHECK, PASSED, "starts " + ", ".join(sorted(map(str, entries)))), True
+
+
+def _alias_row(files: Mapping[str, bytes]) -> CheckResult:
+    """A name that differs from a special file only in capitals names the SAME file on Windows and macOS (`.MCP.JSON` is `.mcp.json`), but
+    every check here looks files up by their exact spelling and would see nothing. Such a file, and a special folder spelled with other
+    capitals (`Hooks/`, `Servers/`), fail the plugin. (A trailing dot or space and a colon are refused by the shared path check.)"""
+    special = {p.casefold(): p for p in SPECIAL_FILES}
+    folders = {d.casefold(): d for d in SPECIAL_DIRS}
+    extras = {n.casefold(): n for n in EXTRA_FILES}
+    problems: list[str] = []
+    for rel in sorted(files):
+        parts = PurePosixPath(rel).parts
+        if not parts:
+            continue
+        if rel.casefold() in special and rel != special[rel.casefold()]:
+            problems.append(f"{rel} is {special[rel.casefold()]} on Windows and macOS")
+        elif parts[0].casefold() in folders and parts[0] != folders[parts[0].casefold()]:
+            problems.append(f"{rel} is in the folder {folders[parts[0].casefold()]}/ on Windows and macOS")
+        elif parts[-1].casefold() in extras and parts[-1] != extras[parts[-1].casefold()]:
+            problems.append(f"{rel} is a {extras[parts[-1].casefold()]} on Windows and macOS")
+    if problems:
+        return CheckResult(ALIAS_CHECK, FAILED, "; ".join(problems[:5]) + ": the checks would not see it, and Claude Code would load it")
+    return CheckResult(ALIAS_CHECK, PASSED, "none")
 
 
 def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[CheckResult]:
@@ -407,6 +575,7 @@ def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[Ch
                 out.append(CheckResult(MARKETPLACE_CHECK, FAILED, f"the entry's source is {shown}, not this folder (\"./\"): it would install code from somewhere else"))
             else:
                 out.append(CheckResult(MARKETPLACE_CHECK, PASSED))
+    out.append(_alias_row(files))
     has_skill = any(PurePosixPath(rel).match("skills/*/SKILL.md") for rel in files)
     has_agent = any(PurePosixPath(rel).parent.as_posix() == "agents" and rel.endswith(".md") for rel in files)
     has_server = bool(server_names(files))

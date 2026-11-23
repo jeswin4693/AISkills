@@ -134,14 +134,15 @@ def test_an_option_that_the_manifest_does_not_declare_fails_as_it_does_in_claude
 
 
 def test_a_variable_the_servers_code_does_not_read_is_not_described_even_when_it_is_only_a_reference():
-    declared = {"k": {"type": "string", "title": "t", "description": "d"}}
+    declared = {"k": {"type": "string", "title": "t", "description": "d", "sensitive": True, "required": True}}
     entry = {**server_entry(NAME), "env": {"PYTHONPATH": "${user_config.k}"}}
     files = plugin(SERVER, mcp_json={"mcpServers": {NAME: entry}}, user_config=declared)
     status_, detail = rows(files)[MCP_CONFIG_CHECK]
     assert status_ == WARNING and "PYTHONPATH" in detail and "does not read" in detail
     assert rows(files)[EXTRAS_CHECK][0] == WARNING  # still named as an unexplained extra
-    read = {**server_entry(NAME), "env": {"WEATHER_API_KEY": "${user_config.k}"}}
-    assert rows(plugin(KEYED, mcp_json={"mcpServers": {NAME: read}}, user_config=declared))[MCP_CONFIG_CHECK][0] == PASSED
+    read = {**server_entry(NAME), "env": {"WEATHER_API_KEY": "${user_config.word_tools_weather_api_key}"}}
+    right = {"word_tools_weather_api_key": declared["k"]}  # the option the composer makes for this server and this variable
+    assert rows(plugin(KEYED, mcp_json={"mcpServers": {NAME: read}}, user_config=right))[MCP_CONFIG_CHECK][0] == PASSED
 
 
 def test_an_option_written_in_args_instead_of_env_is_not_the_shape_the_composer_writes():

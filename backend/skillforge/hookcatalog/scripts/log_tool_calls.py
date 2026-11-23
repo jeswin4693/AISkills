@@ -27,7 +27,7 @@ def main():
         return fail("Claude Code did not give a data folder (CLAUDE_PLUGIN_DATA).")
     try:
         event = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         return fail("Claude Code sent something that is not JSON.")
     tool = event.get("tool_name") if isinstance(event, dict) else None
     if not isinstance(tool, str) or not tool:
@@ -37,8 +37,11 @@ def main():
     path = os.path.join(folder, NAME)
     try:
         os.makedirs(folder, exist_ok=True)
-        if os.path.exists(path) and os.path.getsize(path) >= LIMIT:
-            os.replace(path, path + ".1")
+        try:
+            if os.path.exists(path) and os.path.getsize(path) >= LIMIT:
+                os.replace(path, path + ".1")
+        except FileNotFoundError:
+            pass  # another hook rotated it first: the line below starts a fresh log
         with open(path, "a", encoding="utf-8") as log:
             log.write(line + "\n")
     except OSError as exc:

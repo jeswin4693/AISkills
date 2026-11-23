@@ -26,7 +26,8 @@ from ..results import FAILED, CheckResult
 from ..validate import validate_files
 from ..validate.mcp import analyze_server
 from ..validate.plugin import (
-    MANIFEST, MARKETPLACE, MCP_CONFIG, SERVERS_DIR, START_COMMAND, is_identifier, name_problem, server_entry, shipped_code, user_config_key,
+    MANIFEST, MARKETPLACE, MCP_CONFIG, SERVERS_DIR, START_COMMAND, is_identifier, is_loader_variable, name_problem, server_entry, shipped_code,
+    user_config_key,
 )
 from ..validate.static import JS_LANGS, PY_SUFFIXES, script_capabilities, split_tools
 from .package import MAX_ENTRIES, LibraryError
@@ -34,6 +35,7 @@ from .risk import _front_matter
 from .store import Library, content_hash
 
 COMPONENT_KINDS = ("skill", "agent", "mcp", "hook")
+KIND_ORDER = {kind: i for i, kind in enumerate(COMPONENT_KINDS)}
 SERVER_POWERS = {
     "network": "reach the network", "write_files": "write or delete files", "read_files": "read files", "run_commands": "start other programs",
 }
@@ -109,7 +111,7 @@ def _server_summary(name: str, files: dict[str, bytes]) -> dict:
     return {
         "name": name, "tools": [t.name for t in facts.tools], "capabilities": sorted(facts.capabilities),
         "environment": sorted(facts.env_names), "environment_dynamic": facts.env_dynamic, "dynamic": sorted(facts.dynamic),
-        "command": f"{START_COMMAND} {SERVERS_DIR}/{name}/server.py",
+        "command": f"{START_COMMAND} {SERVERS_DIR}/{name}/server.py", "requirements": "requirements.txt" in files,
     }
 
 
@@ -124,7 +126,10 @@ def _server_notes(server: dict) -> list[str]:
     )
     if server["dynamic"]:
         first += f" It also uses {', '.join(server['dynamic'])}, which the checks cannot follow, so what it does is not fully known."
-    second = f"The server '{name}' needs Python with the package in servers/{name}/requirements.txt: run pip install -r servers/{name}/requirements.txt."
+    second = (
+        f"The server '{name}' needs Python with the package in servers/{name}/requirements.txt: run pip install -r servers/{name}/requirements.txt."
+        if server["requirements"] else f"The server '{name}' ships no requirements.txt, so what it needs installed is for you to find in its code."
+    )
     names = server["environment"]
     if names:
         second += (
@@ -142,7 +147,7 @@ def _hook_summary(entry: HookEntry, options: Mapping[str, Sequence[str]] | None)
     return {
         "id": entry.id, "title": entry.title, "summary": entry.summary, "event": entry.event, "matcher": entry.matcher, "effect": entry.effect,
         "sees": entry.sees, "options": {key: list(values) for key, values in (options or {}).items() if values}, "powers": sorted(entry.powers),
-        "command": f"python {entry.shipped_path}", "revision": entry.revision,
+        "command": f"python -I {entry.shipped_path}", "revision": entry.revision,
     }
 
 
@@ -272,14 +277,30 @@ def _server_config(servers: list[dict]) -> tuple[dict, dict]:
     a plain name, or two that would share an option, refuse the plugin."""
     entries: dict[str, dict] = {}
     options: dict[str, dict] = {}
+    owner: dict[str, tuple[str, str]] = {}  # option key -> (server, variable) that already uses it
     for server in servers:
         name, wanted = server["name"], {}
         for variable in server["environment"]:
             key = user_config_key(name, variable)
             if not is_identifier(variable):
                 raise PluginError(f"The MCP server '{name}' reads the environment variable '{variable}', which is not a plain name (letters, digits and underscores), so it cannot be given as a plugin option.")
-            if key in options or key in wanted.values():
-                raise PluginError(f"The MCP server '{name}' reads two variables that would share the option '{key}' (for example '{variable}'): rename one in the server.")
+            if is_loader_variable(variable):
+                raise PluginError(
+                    f"The MCP server '{name}' reads {variable}, a variable that changes how a program is found or loaded: a plugin option must never set it, "
+                    "so this server cannot go into a plugin as it is."
+                )
+            if not is_identifier(key):
+                raise PluginError(
+                    f"The MCP server '{name}' cannot be given an option for {variable}: its name makes the option key '{key}', which Claude Code refuses "
+                    "(a key starts with a letter or an underscore). Give the server a name that starts with a letter."
+                )
+            if key in owner:
+                other_server, other_variable = owner[key]
+                raise PluginError(
+                    f"The MCP servers '{other_server}' (variable {other_variable}) and '{name}' (variable {variable}) would share the option '{key}': "
+                    "rename one of the variables or one of the servers."
+                )
+            owner[key] = (name, variable)
             wanted[variable] = key
             options[key] = {
                 "type": "string", "title": f"{variable} for {name}", "sensitive": True, "required": True,
@@ -313,9 +334,13 @@ def _readme(name: str, description: str, version: str, plan: list[dict], caps: C
         lines.append("")
     if caps.servers:
         options = [(s["name"], v, user_config_key(s["name"], v)) for s in caps.servers for v in s["environment"]]
-        lines += ["## Before the MCP servers can start", "", "Each server runs with `python` and needs its package, once, from this folder:", "", "```"]
-        lines += [f"pip install -r servers/{s['name']}/requirements.txt" for s in caps.servers]
-        lines += ["```", ""]
+        lines += ["## Before the MCP servers can start", "", "Each server runs with `python`."]
+        needing = [s["name"] for s in caps.servers if s["requirements"]]
+        if needing:
+            lines += ["It needs its package, once, from this folder:", "", "```"]
+            lines += [f"pip install -r servers/{name}/requirements.txt" for name in needing]
+            lines += ["```"]
+        lines += [""]
         if options:
             lines += [
                 "Claude Code asks for these options when the plugin is enabled and stores them in its own credentials store (marked sensitive). Without the dialog, give each one to the install command:", "",
@@ -349,7 +374,8 @@ def compose_plugin(
     plan: list[dict] = []
     files: dict[str, bytes] = {}
     chosen_hooks: list[tuple[HookEntry, Mapping[str, Sequence[str]] | None]] = []
-    for ref in components:
+    # By kind, then by name, whatever order the parts were clicked in: the same parts make the same plugin (and so no new version).
+    for ref in sorted(components, key=lambda r: (KIND_ORDER.get(r.kind, len(KIND_ORDER)), r.name)):
         if ref.kind not in COMPONENT_KINDS:
             raise PluginError(f"A plugin can hold a skill, an agent or an MCP server, or a hook, not '{ref.kind}'.")
         if (ref.kind, ref.name) in seen:

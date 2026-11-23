@@ -312,10 +312,13 @@ def _environment(tree: ast.AST, names: _Names, facts: ServerFacts) -> None:
                 seen(_literal(grand.args[0]) if grand.args else None)
             elif isinstance(parent, ast.Subscript) and parent.value is node:
                 seen(_literal(parent.slice))
-            elif not (isinstance(parent, ast.Attribute) and parent.attr in ("get",)):
-                seen(None)  # any other use may hand out the whole environment
+            else:
+                seen(None)  # any other use may hand out the whole environment, including `g = os.environ.get` and `map(os.environ.get, names)`
         elif q == "os.getenv" and not (isinstance(parents.get(node), ast.Call) and parents[node].func is node):
             facts.env_dynamic = True  # the function passed around: it can read any name
+
+
+FOLD_LIMIT = 4096  # the longest piece of text built from constants that is still looked at: a key is far shorter
 
 
 def _folded(node: ast.AST) -> str | None:
@@ -329,13 +332,15 @@ def _folded(node: ast.AST) -> str | None:
         return None
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = _folded(node.left), _folded(node.right)
-        return left + right if left is not None and right is not None else None
+        if left is None or right is None or len(left) + len(right) > FOLD_LIMIT:
+            return None
+        return left + right
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
         base, count = (node.left, node.right) if isinstance(node.right, ast.Constant) else (node.right, node.left)
         text = _folded(base)
-        if text is not None and isinstance(count, ast.Constant) and isinstance(count.value, int) and 0 <= count.value <= 200:
+        if text is not None and isinstance(count, ast.Constant) and isinstance(count.value, int) and 0 <= count.value <= 200 and len(text) * count.value <= FOLD_LIMIT:
             return text * count.value
-        return None
+        return None  # too long to be a key, and building it would let a few bytes of source take gigabytes
     if isinstance(node, ast.JoinedStr):
         return "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else "" for v in node.values)
     return None

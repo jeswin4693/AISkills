@@ -303,19 +303,20 @@ def _group_problems(event: str, group: object, files: Mapping[str, bytes], found
     return problems
 
 
-def _hooks_row(files: Mapping[str, bytes]) -> tuple[CheckResult | None, bool, set[str]]:
-    """(the row, whether `hooks/hooks.json` is the described one, the paths of shipped scripts that are the catalogue's own). It is
-    described when every hook in it is a catalogue hook with exactly the event, matcher, timeout, command and arguments the catalogue
-    writes, and its script is the catalogue's. Anything else is shown to the person and never trusted."""
+def _hooks_row(files: Mapping[str, bytes]) -> tuple[CheckResult | None, bool, set[str], int]:
+    """(the row, whether `hooks/hooks.json` is the described one, the paths of shipped scripts that are the catalogue's own, how many
+    hooks are exactly catalogue hooks). It is described when every hook in it is a catalogue hook with exactly the event, matcher,
+    timeout, command and arguments the catalogue writes, and its script is the catalogue's. Anything else is shown to the person and
+    never trusted."""
     if HOOKS_FILE not in files:
-        return None, False, set()
+        return None, False, set(), 0
     data, why = _json(files, HOOKS_FILE)
     if why:
-        return CheckResult(HOOKS_CHECK, FAILED, why), False, set()
+        return CheckResult(HOOKS_CHECK, FAILED, why), False, set(), 0
     events = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(events, dict) or not any(isinstance(groups, list) and groups for groups in events.values()):
         detail = f'{HOOKS_FILE} has no hooks in the form SkillForge reads (a top-level "hooks" object of events), so what it runs is not described: read it'
-        return CheckResult(HOOKS_CHECK, WARNING, detail), False, set()
+        return CheckResult(HOOKS_CHECK, WARNING, detail), False, set(), 0
     problems: list[str] = []
     found: list[str] = []
     script_ok: set[str] = set()
@@ -330,8 +331,8 @@ def _hooks_row(files: Mapping[str, bytes]) -> tuple[CheckResult | None, bool, se
         problems.append(f"{HOOKS_FILE} has {', '.join(stray)[:60]}, which SkillForge does not read")
     if problems:
         detail = "; ".join(problems[:5]) + ". A hook runs on your machine with your permissions when the plugin is enabled: read it before installing."
-        return CheckResult(HOOKS_CHECK, WARNING, detail), False, script_ok
-    return CheckResult(HOOKS_CHECK, PASSED, "runs " + ", ".join(found) + " from the catalogue, unchanged"), True, script_ok
+        return CheckResult(HOOKS_CHECK, WARNING, detail), False, script_ok, len(found)
+    return CheckResult(HOOKS_CHECK, PASSED, "runs " + ", ".join(found) + " from the catalogue, unchanged"), True, script_ok, len(found)
 
 
 def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckResult | None, bool]:
@@ -403,9 +404,9 @@ def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[Ch
     has_skill = any(PurePosixPath(rel).match("skills/*/SKILL.md") for rel in files)
     has_agent = any(PurePosixPath(rel).parent.as_posix() == "agents" and rel.endswith(".md") for rel in files)
     has_server = bool(server_names(files))
-    hooks_row, hooks_described, catalogue_scripts = _hooks_row(files)
-    out.append(
-        CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent or has_server or hooks_described
+    hooks_row, hooks_described, catalogue_scripts, catalogue_hooks = _hooks_row(files)
+    out.append(  # a hook counts as content when at least one is exactly a catalogue hook; a plugin of nothing but commands we cannot describe has none
+        CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent or has_server or catalogue_hooks
         else CheckResult(CONTENTS_CHECK, FAILED, "there is no skills/<name>/SKILL.md, agents/<name>.md or servers/<name>/server.py in it, and no hook it can describe")
     )
     out += _component_rows(files)

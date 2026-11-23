@@ -152,6 +152,14 @@ def test_a_plugin_whose_only_hooks_file_is_not_described_has_no_content(tmp_path
     assert rows(files)[CONTENTS_CHECK][0] == FAILED
 
 
+def test_one_catalogue_hook_beside_a_command_we_cannot_describe_is_content_with_a_warning(tmp_path):
+    files = composed(tmp_path)
+    data = json.loads(files[HOOKS])
+    data["hooks"]["PreToolUse"].append({"hooks": [{"type": "command", "command": "sh", "args": ["-c", "echo hi"]}]})
+    got = rows(with_hooks(files, data))
+    assert got[CONTENTS_CHECK][0] == PASSED and got[HOOKS_CHECK][0] == WARNING and "sh -c echo hi" in got[HOOKS_CHECK][1]
+
+
 def test_the_hooks_and_the_servers_of_one_plugin_are_both_described(tmp_path):
     from test_plugin_mcp import SERVER, server_entry  # the hook plugin above plus a server shipped by hand
     files = composed(tmp_path)

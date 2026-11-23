@@ -7,22 +7,27 @@ so a plugin that fails its checks is refused (422) and a repeat of the same plug
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from ..hookcatalog.catalogue import CATALOGUE
 from ..library import SkillSource, import_source
 from ..library.plugin import ComponentRef, PluginPlan, compose_for_keeping
 from ..validate.plugin import MANIFEST
 from .views import checks_view, import_view
 
 
+OptionValues = Annotated[list[Annotated[str, Field(max_length=100)]], Field(max_length=20)]  # the catalogue holds the real limits; these only bound a request
+
+
 class ComponentBody(BaseModel):
-    kind: Literal["skill", "agent", "mcp"]
+    kind: Literal["skill", "agent", "mcp", "hook"]  # a hook is named by its id in the catalogue
     name: str = Field(max_length=64)
-    version: int | None = Field(default=None, ge=1)  # none: the latest
+    version: int | None = Field(default=None, ge=1)  # none: the latest. A hook has no version
+    options: dict[Annotated[str, Field(max_length=40)], OptionValues] = Field(default_factory=dict, max_length=5)  # only a hook has options
 
 
 class PluginBody(BaseModel):
@@ -34,7 +39,7 @@ class PluginBody(BaseModel):
 
 def _plan(request: Request, body: PluginBody) -> PluginPlan:
     return compose_for_keeping(
-        request.app.state.library, [ComponentRef(c.kind, c.name, c.version) for c in body.components],
+        request.app.state.library, [ComponentRef(c.kind, c.name, c.version, c.options or None) for c in body.components],
         name=body.name, description=body.description, author=body.author,
     )
 
@@ -47,8 +52,26 @@ def _view(plan: PluginPlan) -> dict:
     }
 
 
+def _hook_view(entry) -> dict:
+    """A catalogue hook as the page needs it. How an option reaches the script (its flag) stays inside; the pattern is shown so the page can
+    hint early, and the server remains the one that decides."""
+    return {
+        "id": entry.id, "title": entry.title, "summary": entry.summary, "event": entry.event, "matcher": entry.matcher, "effect": entry.effect,
+        "sees": entry.sees, "timeout": entry.timeout, "powers": sorted(entry.powers), "revision": entry.revision,
+        "options": [
+            {"key": o.key, "label": o.label, "help": o.help, "max_items": o.max_items, "max_length": o.max_length, "pattern": o.pattern.pattern}
+            for o in entry.options
+        ],
+    }
+
+
 def plugins_router() -> APIRouter:
     r = APIRouter()
+
+    @r.get("/hooks")
+    def hooks() -> list[dict]:
+        """The hooks a plugin may carry: the only ones. Each is a fixed script from SkillForge with typed options."""
+        return [_hook_view(entry) for entry in CATALOGUE.values()]
 
     @r.post("/plugins/preview")
     def preview(body: PluginBody, request: Request) -> dict:

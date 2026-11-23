@@ -4,7 +4,7 @@ Runs after every tool call and adds one line, {"time": ..., "tool": ...}, to too
 Claude Code names in CLAUDE_PLUGIN_DATA). It records the tool's NAME and the time and nothing else: never what the tool was given
 or what it returned. The log is renamed to tool-calls.log.1 when it reaches 1 MB. It does not use the network or start programs,
 and it writes only that one file. If it cannot read the event or write the line it says so on stderr and exits 1 (a non-blocking
-error); it never blocks anything.
+error); it never blocks anything, because it guards nothing: a missing log must not stop anyone's work.
 """
 
 import datetime

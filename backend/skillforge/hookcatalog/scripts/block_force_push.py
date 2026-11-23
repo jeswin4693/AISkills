@@ -5,7 +5,8 @@ as -fu), --force-with-lease, --force-if-includes (or the start of one of them, w
 with +. It reads the command as text, one simple command
 at a time (split on ; & | and new lines), so an alias, a script, or a push built from variables is not seen. It exits 2 (which
 blocks) with the reason on stderr. It does not write files, use the network or start programs. If it cannot understand the event
-it does NOT block: it exits 1, which Claude Code shows as a non-blocking error.
+it BLOCKS (exit 2) and says so: a guard that cannot see what it is guarding does not wave it through. (If it cannot be started at
+all, for example because python is not on the PATH, hooks.json says onFailure "block".)
 """
 
 import json
@@ -19,8 +20,8 @@ LONG_FORCE = ("--force", "--force-with-lease", "--force-if-includes")
 
 
 def fail(reason):
-    sys.stderr.write("block-force-push: " + reason + " It did not block anything.\n")
-    return 1
+    sys.stderr.write("block-force-push: " + reason + " It blocked this to be safe.\n")
+    return 2
 
 
 def words(segment):

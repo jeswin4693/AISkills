@@ -2,8 +2,9 @@
 
 Runs before Claude's file tools (Read, Write, Edit, NotebookEdit) and stops them when the file's name looks like one that holds a
 secret. It reads one JSON event on stdin, looks only at the file's name, and exits 2 (which blocks) with the reason on stderr.
-It does not write files, use the network or start programs. If it cannot understand the event it does NOT block: it exits 1,
-which Claude Code shows as a non-blocking error, so a changed format is noticed and never silently ignored.
+It does not write files, use the network or start programs. If it cannot understand the event it BLOCKS (exit 2) and says so:
+a guard that cannot see what it is guarding does not wave it through, and a changed format is noticed at once, never silently
+ignored. (If it cannot be started at all, for example because python is not on the PATH, hooks.json says onFailure "block".)
 
 Extra names to protect come as `--also NAME` (letters, digits and . _ - * ? only).
 """
@@ -21,8 +22,8 @@ PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
 def fail(reason):
-    sys.stderr.write("block-secret-files: " + reason + " It did not block anything.\n")
-    return 1
+    sys.stderr.write("block-secret-files: " + reason + " It blocked this to be safe.\n")
+    return 2
 
 
 def base_name(path):

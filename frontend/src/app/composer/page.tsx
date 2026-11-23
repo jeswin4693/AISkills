@@ -264,7 +264,8 @@ export default function ComposerPage() {
                 <h3 className="mb-1 font-semibold">Hooks this plugin runs</h3>
                 <p className="mb-2 text-sm text-muted">
                   Each one is a fixed script from the catalogue, shipped unchanged. It runs on your machine, with your permissions and outside any sandbox, every time its event happens. A hook is a
-                  policy aid, not a security boundary: it matches names and text, and if it cannot read what Claude Code sends it, it does not block and says so.
+                  policy aid, not a security boundary: it matches names and text. A hook that guards something fails closed: if it cannot read what Claude Code sends it, or python is not on your PATH,
+                  it blocks the action it watches until that is fixed.
                 </p>
                 <ul className="space-y-3">
                   {preview.capabilities.hook_entries.map((h) => {
@@ -316,7 +317,7 @@ export default function ComposerPage() {
                         {s.dynamic.length > 0 && <p className="mt-1 text-warn">It uses {s.dynamic.join(", ")}, which the checks cannot follow.</p>}
                         {s.environment.length > 0 && (
                           <p className="mt-1">
-                            Claude Code will ask you for <span className="font-mono">{s.environment.join(", ")}</span> when you enable the plugin, and keeps it as a secret. No value is written in the plugin.
+                            Claude Code will ask you for <span className="font-mono">{s.environment.join(", ")}</span> when you enable the plugin, and stores it in its own credentials store (on Windows a file in your Claude folder, not a vault). No value is written in the plugin.
                           </p>
                         )}
                         {s.environment_dynamic && <p className="mt-1 text-warn">It also reads environment variables by a name that is not written in the code.</p>}

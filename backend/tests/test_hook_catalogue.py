@@ -76,15 +76,15 @@ def test_the_extra_names_the_person_chose_are_blocked_too_and_can_name_an_exampl
 
 
 @pytest.mark.parametrize("raw", [b"", b"not json", b"[1, 2]", b"\xff\xfe\x00", b'"text"'])
-def test_input_it_cannot_read_never_blocks_and_says_so_loudly(raw):
+def test_input_it_cannot_read_blocks_to_be_safe_and_says_why(raw):
     done = run("block-secret-files", None, raw=raw)
-    assert done.returncode == 1 and "did not block" in text(done.stderr)  # exit 1 is a non-blocking error Claude Code shows
+    assert done.returncode == 2 and "blocked this to be safe" in text(done.stderr)  # exit 2 blocks, whatever the Claude Code version: a guard that cannot see does not wave things through
 
 
 @pytest.mark.parametrize("event", [{"tool_name": "Read"}, {"tool_name": "Read", "tool_input": "x"}, {"tool_name": "Read", "tool_input": {"offset": 1}}])
-def test_an_event_with_no_file_path_in_it_is_reported_not_silently_allowed(event):
+def test_an_event_with_no_file_path_in_it_blocks_to_be_safe_instead_of_being_silently_allowed(event):
     done = run("block-secret-files", event)
-    assert done.returncode == 1 and "did not block" in text(done.stderr)
+    assert done.returncode == 2 and "blocked this to be safe" in text(done.stderr)
 
 
 # ---- block-force-push -----------------------------------------------------------------------------------------------------
@@ -117,13 +117,20 @@ def test_the_powershell_tool_is_read_the_same_way():
 
 
 @pytest.mark.parametrize("raw", [b"", b"nope", b"[]"])
-def test_a_force_push_hook_that_cannot_read_its_input_does_not_block_and_says_so(raw):
+def test_a_force_push_hook_that_cannot_read_its_input_blocks_to_be_safe_and_says_why(raw):
     done = run("block-force-push", None, raw=raw)
-    assert done.returncode == 1 and "did not block" in text(done.stderr)
+    assert done.returncode == 2 and "blocked this to be safe" in text(done.stderr)
 
 
-def test_an_event_without_a_command_is_reported():
-    assert run("block-force-push", tool("Bash", description="x")).returncode == 1
+def test_an_event_without_a_command_blocks_to_be_safe():
+    done = run("block-force-push", tool("Bash", description="x"))
+    assert done.returncode == 2 and "blocked this to be safe" in text(done.stderr)
+
+
+def test_a_script_that_only_observes_never_blocks_whatever_it_is_given(tmp_path):
+    # the logging hook is not a guard: when it cannot do its job it says so (exit 1, a non-blocking error) and the action goes ahead
+    done = run("log-tool-calls", None, raw=b"garbage", env={"CLAUDE_PLUGIN_DATA": str(tmp_path / "d")})
+    assert done.returncode == 1 and done.returncode != 2
 
 
 # ---- log-tool-calls -------------------------------------------------------------------------------------------------------
@@ -204,10 +211,23 @@ def test_arguments_that_are_not_exactly_what_the_catalogue_writes_are_not_recogn
 def test_a_hook_is_written_as_one_exec_form_group_and_the_matcher_is_left_out_when_it_is_every_tool():
     assert hook_group(SECRETS, {"also": ["a.key"]}) == {
         "matcher": "Read|Write|Edit|NotebookEdit",
-        "hooks": [{"type": "command", "command": "python", "args": [SECRETS.command_path, "--also", "a.key"], "timeout": 10}],
+        "hooks": [{"type": "command", "command": "python", "args": [SECRETS.command_path, "--also", "a.key"], "timeout": 10, "onFailure": "block"}],
     }
     assert "matcher" not in hook_group(LOG) and hook_group(LOG)["hooks"][0]["args"] == [LOG.command_path]
     assert START_COMMAND == "python" and PLUGIN_ROOT == "${CLAUDE_PLUGIN_ROOT}"  # the catalogue and the validator say the same words
+
+
+def test_a_hook_that_can_block_fails_closed_and_one_that_only_looks_does_not():
+    # Checked in real Claude Code 2.1.325: without onFailure a hook that cannot start (python missing from the PATH) or that exits 1 lets the
+    # action go ahead and nothing tells the person; with onFailure "block" the action is stopped and the reason is shown.
+    assert (SECRETS.on_failure, FORCE.on_failure, LOG.on_failure) == ("block", "block", None)
+    assert hook_group(FORCE)["hooks"][0]["onFailure"] == "block" and "onFailure" not in hook_group(LOG)["hooks"][0]
+    assert all(e.on_failure == ("block" if e.effect == "blocks" else None) for e in CATALOGUE.values())
+
+
+def test_the_blocking_scripts_are_a_new_revision_because_the_first_one_failed_open_and_is_not_accepted():
+    assert (SECRETS.revision, FORCE.revision, LOG.revision) == (2, 2, 1)
+    assert SECRETS.earlier == frozenset() and FORCE.earlier == frozenset()  # the revision that let an unreadable event through is deliberately not described any more
 
 
 def test_the_catalogue_is_found_by_id_and_by_the_path_a_hooks_file_names():

@@ -63,7 +63,7 @@ def test_each_variable_a_server_reads_becomes_a_required_secret_option_and_only_
     options = json.loads(plan.files[MANIFEST])["userConfig"]
     assert options == {"word_tools_weather_api_key": {
         "type": "string", "title": "WEATHER_API_KEY for word-tools", "required": True, "sensitive": True,
-        "description": "Read by the MCP server word-tools. Claude Code asks for it when the plugin is enabled and keeps it as a secret.",
+        "description": "Read by the MCP server word-tools. Claude Code asks for it when the plugin is enabled and stores it in its own credentials store.",
     }}
     assert not plan.failed and not [c for c in plan.checks if c.status in (FAILED, WARNING)]  # a "not run" row is the shared script check leaving it to the components
 

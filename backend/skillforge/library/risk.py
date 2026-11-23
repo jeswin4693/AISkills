@@ -351,7 +351,9 @@ def _hooks_in(files: Mapping[str, bytes]) -> dict[str, dict]:
                 entry = hook_catalogue.entry_for_script_path(args[0] if isinstance(args, list) and args else None)
                 shown = shown_command(hook)
                 options = (hook_catalogue.parse_args(entry, args) or {"arguments": [shown]}) if entry else {}
-                found[entry.id if entry else f"{event}: {shown}"] = {"event": str(event), "matcher": matcher, "shown": shown, "entry": entry, "options": options}
+                found[entry.id if entry else f"{event}: {shown}"] = {
+                    "event": str(event), "matcher": matcher, "shown": shown, "entry": entry, "options": options, "on_failure": hook.get("onFailure"),
+                }
     return found
 
 
@@ -399,6 +401,17 @@ def _hook_changes(old: Mapping[str, bytes], new: Mapping[str, bytes], out: list[
             out.append(RiskChange(
                 LOOK, "hook_options", f"The options of the hook '{name}' changed. Was: {_options_text(was['options'])}. Now: {_options_text(now['options'])}.", where,
             ))
+        if was["on_failure"] != now["on_failure"]:
+            if was["on_failure"] == "block":
+                out.append(RiskChange(
+                    RISKIER, "hook_failure",
+                    f"The hook '{name}' no longer says onFailure \"block\": if it cannot run (python missing from the PATH) or fails, the action it guards now lets the action through, and nothing tells the person.",
+                    where,
+                ))
+            elif now["on_failure"] == "block":
+                out.append(RiskChange(SAFER, "hook_failure", f"The hook '{name}' now says onFailure \"block\": if it cannot run or fails, Claude Code stops the action instead of letting it through.", where))
+            else:
+                out.append(RiskChange(LOOK, "hook_failure", f"The hook '{name}' changed what Claude Code does when it cannot run (onFailure): was {was['on_failure']!r}, now {now['on_failure']!r}.", where))
         entry = now["entry"]
         if entry is None:
             continue

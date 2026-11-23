@@ -285,9 +285,15 @@ def _group_problems(event: str, group: object, files: Mapping[str, bytes], found
         problems.append(f"{entry.shipped_path} is not the catalogue's script for '{entry.id}': what it does is not what the catalogue vouches for")
     else:
         script_ok.add(entry.shipped_path)
-    odd_keys = sorted(map(str, set(hook) ^ {"type", "command", "args", "timeout"}))
+    written = {"type", "command", "args", "timeout"} | ({"onFailure"} if entry.on_failure else set())
+    odd_keys = sorted(map(str, set(hook) ^ written))
     if odd_keys:
-        problems.append(f"'{entry.id}' does not have exactly the keys the catalogue writes (type, command, args, timeout): {', '.join(odd_keys)[:60]}")
+        problems.append(f"'{entry.id}' does not have exactly the keys the catalogue writes ({', '.join(sorted(written))}): {', '.join(odd_keys)[:60]}")
+    if "onFailure" in hook and hook.get("onFailure") != entry.on_failure:
+        problems.append(
+            f"'{entry.id}' has onFailure {str(hook.get('onFailure'))[:20]!r}, the catalogue's is {entry.on_failure!r}: "
+            + ("a guard that cannot run would let the action through" if entry.on_failure else "a hook that only looks must not stop the session when it cannot run")
+        )
     if hook.get("type") != "command" or hook.get("command") != "python":
         problems.append(f"'{entry.id}' runs {shown_command(hook)} (type {str(hook.get('type'))[:20]!r}) instead of python")
     if event != entry.event:

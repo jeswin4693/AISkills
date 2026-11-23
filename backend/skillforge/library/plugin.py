@@ -129,7 +129,8 @@ def _server_notes(server: dict) -> list[str]:
     if names:
         second += (
             f" It reads the environment variable{'s' if len(names) != 1 else ''} {', '.join(names)}: Claude Code asks you for "
-            f"{'each' if len(names) != 1 else 'it'} when the plugin is enabled and keeps {'them' if len(names) != 1 else 'it'} as {'secrets' if len(names) != 1 else 'a secret'}."
+            f"{'each' if len(names) != 1 else 'it'} when the plugin is enabled and stores {'them' if len(names) != 1 else 'it'} in its own credentials store "
+            "(on Windows a file, .credentials.json, in your Claude folder: private to you, but not a vault)."
         )
     if server["environment_dynamic"]:
         second += " It also reads environment variables by a name that is not written in the code (or all of them), so it can read any variable Claude Code gives it."
@@ -164,7 +165,10 @@ def _hook_notes(hooks: list[dict]) -> list[str]:
         text = (
             f"The hook '{hook['id']}' runs a program on this machine, with your permissions and outside any sandbox, every time Claude Code {when}. "
             f"{hook['summary']} It is handed {hook['sees']}. "
-            + ("It can stop what Claude is about to do. " if hook["effect"] == "blocks" else "It only looks; it cannot stop anything. ")
+            + (
+                "It can stop what Claude is about to do. If it cannot run, it stops the action instead of letting it through. " if hook["effect"] == "blocks"
+                else "It only looks; it cannot stop anything. If it cannot run, nothing is logged and the action goes ahead. "
+            )
             + ("By reading its script it can write files, and it does not reach the network or start programs." if hook["powers"]
                else "By reading its script it does not reach the network, start programs or write files.")
         )
@@ -173,8 +177,9 @@ def _hook_notes(hooks: list[dict]) -> list[str]:
         notes.append(text)
     if hooks:
         notes.append(
-            "A hook is a policy aid, not a security boundary: it matches names and text. If a hook cannot read what Claude Code sends it, it does not block, "
-            "and says so as a non-blocking error. Hooks start with `python`, which must be on your PATH."
+            "A hook is a policy aid, not a security boundary: it matches names and text. A hook that guards something fails closed: if it cannot read what Claude Code sends it, "
+            "or `python` is not on your PATH, it blocks the action it watches until that is fixed (the missing-python case needs Claude Code 2.1.295 or newer: older versions "
+            "let the action through when the program cannot start, and tell nobody)."
         )
     return notes
 
@@ -278,7 +283,7 @@ def _server_config(servers: list[dict]) -> tuple[dict, dict]:
             wanted[variable] = key
             options[key] = {
                 "type": "string", "title": f"{variable} for {name}", "sensitive": True, "required": True,
-                "description": f"Read by the MCP server {name}. Claude Code asks for it when the plugin is enabled and keeps it as a secret.",
+                "description": f"Read by the MCP server {name}. Claude Code asks for it when the plugin is enabled and stores it in its own credentials store.",
             }
         entries[name] = server_entry(name, wanted)
     return entries, options
@@ -299,7 +304,8 @@ def _readme(name: str, description: str, version: str, plan: list[dict], caps: C
     if caps.hook_entries:
         lines += [
             "## Hooks", "", "A hook runs on your machine every time its event happens, with your permissions. Each one here is a fixed script from "
-            "SkillForge's catalogue, shipped unchanged in `hooks/`; none was written by a model. They start with `python`, which must be on your PATH.", "",
+            "SkillForge's catalogue, shipped unchanged in `hooks/`; none was written by a model. They start with `python`, which must be on your PATH: a hook that guards "
+            "something fails closed (`onFailure: block`), so without Python it blocks the action it watches until you install Python or remove the plugin.", "",
         ]
         for hook in caps.hook_entries:
             chosen = "".join(f" {key}: {', '.join(values)}." for key, values in hook["options"].items())
@@ -312,7 +318,7 @@ def _readme(name: str, description: str, version: str, plan: list[dict], caps: C
         lines += ["```", ""]
         if options:
             lines += [
-                "Claude Code asks for these options when the plugin is enabled, and keeps them as secrets. Without the dialog, give each one to the install command:", "",
+                "Claude Code asks for these options when the plugin is enabled and stores them in its own credentials store (marked sensitive). Without the dialog, give each one to the install command:", "",
                 "```", f"claude plugin install {name}@{market} " + " ".join(f"--config {key}=<value>" for _, _, key in options), "```", "",
             ]
             lines += [f"- `{key}`: the environment variable `{variable}` of `{server}`" for server, variable, key in options]

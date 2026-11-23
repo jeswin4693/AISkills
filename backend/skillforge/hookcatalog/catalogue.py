@@ -62,6 +62,14 @@ class HookEntry:
     earlier: frozenset[str] = field(default_factory=frozenset)  # SHA-256 of earlier revisions of the script that a plugin may still carry
 
     @property
+    def on_failure(self) -> str | None:
+        """What Claude Code does when this hook cannot run or exits 1: `"block"` for a hook that guards something (a guard that cannot
+        run must not wave the action through), nothing for one that only looks. Checked in Claude Code 2.1.325 on 2026-11-23: with Python
+        missing from the PATH, a hook without it let a read of `.env` through and nothing told the person; with it the action was blocked and
+        the reason shown. Claude Code before 2.1.295 does not know the key, so there a hook that cannot start still lets the action through."""
+        return "block" if self.effect == "blocks" else None
+
+    @property
     def shipped_path(self) -> str:
         """Where the script sits inside a plugin."""
         return f"{HOOKS_DIR}/{self.id}.py"
@@ -92,6 +100,7 @@ CATALOGUE: dict[str, HookEntry] = {
             sees="the name of the tool and the path of the file it is about to use",
             timeout=10,
             script="block_secret_files.py",
+            revision=2,  # revision 1 let an event it could not read through (exit 1); it is deliberately not accepted any more
             options=(
                 Option(
                     key="also", label="More file names to protect", flag="--also", pattern=_SECRET_PATTERN, max_items=10, max_length=60,
@@ -112,6 +121,7 @@ CATALOGUE: dict[str, HookEntry] = {
             sees="the name of the tool and the shell command Claude is about to run",
             timeout=10,
             script="block_force_push.py",
+            revision=2,  # revision 1 let an event it could not read through (exit 1) and missed an abbreviated --forc; neither is accepted any more
         ),
         HookEntry(
             id="log-tool-calls",
@@ -200,7 +210,10 @@ def hook_group(entry: HookEntry, options: Mapping[str, Sequence[str]] | None = N
     group: dict = {}
     if entry.matcher:
         group["matcher"] = entry.matcher
-    group["hooks"] = [{"type": "command", "command": START_COMMAND, "args": render_args(entry, options), "timeout": entry.timeout}]
+    hook: dict = {"type": "command", "command": START_COMMAND, "args": render_args(entry, options), "timeout": entry.timeout}
+    if entry.on_failure:
+        hook["onFailure"] = entry.on_failure
+    group["hooks"] = [hook]
     return group
 
 

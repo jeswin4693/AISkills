@@ -44,9 +44,12 @@ script and its options, no shell), so an option can never become code.
 - **A hook is always described plainly:** when it runs, what Claude Code hands it, whether it can stop what Claude is about to do, and what its script can do (proven by a test for each entry: none reaches
   the network, starts a program or builds code from text; only `log-tool-calls` writes, and only its log). It is never called read-only. The preview, the README and the risk diff all say it runs on your machine.
 - **A hook is a policy aid, not a security boundary.** It matches names and text: `block-secret-files` does not see `cat .env` through the shell, and `block-force-push` reads the command as text, so an alias or a script that pushes
-  is not seen. If a script cannot understand what Claude Code sends it, it **does not block** and says so (exit 1, a non-blocking error), so a changed format is noticed and never locks you out or is silently ignored.
+  is not seen. **A guard fails closed:** if a blocking script cannot understand what Claude Code sends it, it blocks and says so (exit 2), and every blocking hook is written with `"onFailure": "block"`, so even when it cannot be started (`python` missing
+  from the PATH) Claude Code stops the action instead of letting it through. This was checked in real Claude Code: without `onFailure`, a `Read` of `.env` went through with no Python and nothing told the person. Older Claude Code (before 2.1.295) ignores the
+  key. Without Python, or after a format change, the guarded tools stay blocked until it is fixed; the message says why. A hook that only looks (the log) does not fail closed.
 - **The plugin's check recognises a hook only when it is exactly a catalogue hook:** its event, matcher, timeout, command and arguments are the ones the catalogue writes, the options are valid, and the script beside it
-  is the catalogue's own (compared by SHA-256, line endings ignored; the hashes of earlier revisions stay accepted so an older plugin does not turn unrecognised). In a plugin from outside, anything else
+  is the catalogue's own (compared by SHA-256, line endings ignored; a hash is listed as an earlier revision only when that script was safe to keep describing: the two guards' first revision failed open and is not). A blocking hook must also carry
+  `onFailure: "block"`, and a hook that only looks must not. In a plugin from outside, anything else
   (a shell command, another script, extra keys, another hook type, a changed script) is **warned about with the command shown**. A plugin that holds nothing it can describe has no content and is refused;
   one with a catalogue hook beside another command is kept with the warning.
 - **The risk diff:** a new hook is riskier (with when it runs and whether it can block), a removed one safer, a hook that now runs on other events is riskier, a script that is no longer the catalogue's
@@ -64,8 +67,8 @@ A server from the MCP library ([mcp-builder.md](mcp-builder.md)) is shipped unde
 ```
 
 - **Every environment variable the server's code reads** becomes one `userConfig` option in `plugin.json` (`type: string`, `sensitive`, `required`), named `<server>_<variable lowercased>`
-  (a hyphen becomes an underscore: Claude Code refuses a key with a dash, which was checked with its validator). Claude Code asks for the value when the plugin is enabled and keeps
-  it as a secret; `claude plugin install ... --config <key>=<value>` sets it without the dialog. **No value is ever written to a file**, only the `${user_config.KEY}` reference.
+  (a hyphen becomes an underscore: Claude Code refuses a key with a dash, which was checked with its validator). Claude Code asks for the value when the plugin is enabled and stores
+  it in its own credentials store (**checked on Windows: a file, `.credentials.json`, in the Claude folder, private to you but not a vault**); `claude plugin install ... --config <key>=<value>` sets it without the dialog. **No value is ever written to a file**, only the `${user_config.KEY}` reference.
   Two servers that read the same variable get two options, so they never share one value. A variable that is not a plain name, or two that would share an option, refuse the plugin.
 - **The composer never relies on a server inheriting Claude Code's environment**: the docs do not say it does, so every variable is passed explicitly.
 - **What a server can do is computed by code** from its `server.py` with the MCP reader (its tools, network, file writes, started programs, the variables it reads) and said in plain

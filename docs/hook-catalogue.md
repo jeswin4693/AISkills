@@ -17,14 +17,20 @@ are proven by a test, and whose bytes are pinned by hash.
 | `block-force-push` | before Bash, PowerShell | yes (exit 2) | nothing beyond reading its input | none |
 | `log-tool-calls` | after every tool | no | write `tool-calls.log` in the plugin's data folder (`CLAUDE_PLUGIN_DATA`), rotated at 1 MB | none |
 
-An entry fixes the event, the matcher, the timeout (10 s), the script, what the script may do (`powers`) and the options. An option has a strict pattern (letters, digits and `. _ - * ?`, not starting with a dash, at least one
+An entry fixes the event, the matcher, the timeout (10 s), the script, what the script may do (`powers`), whether it fails closed (`onFailure: block`, for every hook that can block) and the options. `revision` is 2 for the two guards because
+revision 1 failed open and is deliberately **not** accepted as the catalogue's script any more. An option has a strict pattern (letters, digits and `. _ - * ?`, not starting with a dash, at least one
 letter or digit), a maximum number of values and a maximum length. Options reach the script as separate `args` after a flag, never joined into a string and never through a shell.
 
 ## What a script does with what Claude Code sends it
 
-It reads one JSON event on stdin (`tool_name`, `tool_input`) and exits `2` with the reason on stderr to block (for `PreToolUse`), or `0` to allow. If it cannot understand the event it exits `1`, which Claude Code treats as a
-**non-blocking error** shown to the person: a changed format is noticed, and never locks anyone out or is silently ignored. A hook matches names and text: it is a policy aid, not a security boundary (the entries say what they
-do not see).
+It reads one JSON event on stdin (`tool_name`, `tool_input`) and exits `2` with the reason on stderr to block (for `PreToolUse`), or `0` to allow.
+
+**A guard fails closed.** If a blocking script cannot understand the event it **blocks** (exit 2, "blocked this to be safe"), so a changed format is noticed at once instead of silently turning the guard off. If it cannot even be
+started (for example `python` is not on the PATH) Claude Code would, by default, treat that as a non-blocking error and let the action through while telling nobody: **checked in real Claude Code 2.1.325 on 2026-11-23, a `Read` of `.env` went through
+with no Python on the PATH.** So every blocking entry is written with `"onFailure": "block"` (a documented hook field, Claude Code 2.1.295 or newer; the same real run showed the read then blocked, with the reason "failed; blocking because onFailure is
+block", for a missing Python and also for a script that exits 1). A hook that only looks (`log-tool-calls`) does not have it: a missing log must not stop anyone's work. The cost of failing closed is that without Python, or after a format change, the guarded
+tools are blocked until it is fixed (the message says why); older Claude Code does not know `onFailure`, so there a guard that cannot start still lets the action through. A hook matches names and text: it is a policy aid, not a security
+boundary (the entries say what they do not see).
 
 ## Adding a hook (the rules)
 

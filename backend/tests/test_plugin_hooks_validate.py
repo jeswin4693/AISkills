@@ -35,7 +35,7 @@ def with_hooks(files: dict[str, bytes], data: object) -> dict[str, bytes]:
 
 
 def force_hook(**changes) -> dict:
-    hook = {"type": "command", "command": "python", "args": [f"{ROOT}/hooks/block-force-push.py"], "timeout": 10}
+    hook = {"type": "command", "command": "python", "args": [f"{ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}
     return {k: v for k, v in {**hook, **changes}.items() if v is not None}
 
 
@@ -100,6 +100,9 @@ def test_a_hook_whose_script_is_missing_is_warned_about(tmp_path):
     (one(hook=force_hook(shell="powershell")), "shell"),
     (one(hook=force_hook(timeout=600)), "timeout"),
     (one(hook=force_hook(timeout=None)), "timeout"),
+    (one(hook=force_hook(onFailure=None)), "onFailure"),  # without it a hook that cannot start lets the action through, and nothing says so
+    (one(hook=force_hook(onFailure="continue")), "onFailure"),
+    ({"hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "python", "args": [f"{ROOT}/hooks/log-tool-calls.py"], "timeout": 10, "onFailure": "block"}]}]}}, "onFailure"),  # a hook that only looks must not stop the session when it cannot run
     (one(event="PostToolUse"), "PostToolUse"),
     (one(matcher="Write"), "matcher"),
     (one(matcher=None), "matcher"),

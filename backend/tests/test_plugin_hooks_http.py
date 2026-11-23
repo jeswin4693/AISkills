@@ -29,7 +29,7 @@ def test_the_catalogue_is_listed_with_what_each_hook_does_and_the_options_it_acc
     hooks = {h["id"]: h for h in r.json()}
     assert list(hooks) == ["block-secret-files", "block-force-push", "log-tool-calls"]
     secrets = hooks["block-secret-files"]
-    assert (secrets["event"], secrets["matcher"], secrets["effect"], secrets["powers"], secrets["revision"]) == ("PreToolUse", "Read|Write|Edit|NotebookEdit", "blocks", [], 1)
+    assert (secrets["event"], secrets["matcher"], secrets["effect"], secrets["powers"], secrets["revision"]) == ("PreToolUse", "Read|Write|Edit|NotebookEdit", "blocks", [], 2)
     assert secrets["title"] and secrets["summary"] and secrets["sees"] and secrets["timeout"] == 10
     option = secrets["options"][0]
     assert option["key"] == "also" and option["label"] and option["help"] and option["max_items"] == 10 and option["max_length"] == 60 and option["pattern"]
@@ -43,7 +43,7 @@ def test_a_preview_shows_the_hooks_files_and_what_they_do_and_keeps_nothing(tmp_
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["failed"] is False and body["components"] == [
-        {"kind": "hook", "name": "block-secret-files", "version": "r1"}, {"kind": "hook", "name": "block-force-push", "version": "r1"},
+        {"kind": "hook", "name": "block-secret-files", "version": "r2"}, {"kind": "hook", "name": "block-force-push", "version": "r2"},
     ]
     paths = [f["path"] for f in body["files"]]
     assert HOOKS in paths and "hooks/block-secret-files.py" in paths and "hooks/block-force-push.py" in paths
@@ -123,7 +123,7 @@ def test_a_plugin_from_outside_with_only_a_command_the_catalogue_does_not_have_h
 
 
 def test_a_plugin_from_outside_with_one_catalogue_hook_and_one_other_command_is_kept_with_a_warning_that_shows_the_command(tmp_path):
-    force = {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/block-force-push.py"], "timeout": 10}]}
+    force = {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}]}
     report = outside(tmp_path, [force, {"hooks": [SHELL_HOOK]}], drop=("hooks/block-secret-files.py",))
     assert not report.refused
     warned = [c for c in report.checks if c.status == "warning" and c.name.startswith("hooks/hooks.json")]

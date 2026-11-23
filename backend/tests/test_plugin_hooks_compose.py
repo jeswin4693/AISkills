@@ -33,9 +33,9 @@ def test_a_plugin_with_one_hook_has_the_hooks_file_and_the_catalogues_script_unc
     assert plan.files["hooks/block-force-push.py"] == script_bytes(get_entry("block-force-push"))
     assert json.loads(plan.files[HOOKS]) == {"hooks": {"PreToolUse": [{
         "matcher": "Bash|PowerShell",
-        "hooks": [{"type": "command", "command": "python", "args": [f"{ROOT}/hooks/block-force-push.py"], "timeout": 10}],
+        "hooks": [{"type": "command", "command": "python", "args": [f"{ROOT}/hooks/block-force-push.py"], "timeout": 10, "onFailure": "block"}],
     }]}}
-    assert plan.components == [{"kind": "hook", "name": "block-force-push", "version": "r1"}]
+    assert plan.components == [{"kind": "hook", "name": "block-force-push", "version": "r2"}]  # revision 2: the first one failed open
     assert json.loads(plan.files[MANIFEST]) == {"name": "my-plugin", "version": "0.1.0", "description": "Safety hooks.", "author": {"name": "Jeswin"}}
 
 
@@ -64,7 +64,9 @@ def test_what_a_hook_does_is_said_plainly_and_a_hook_is_never_read_only(tmp_path
     assert "can stop what Claude is about to do" in text and "only looks" in text
     assert "secrets.json, *.token" in text  # the options that were chosen are said
     assert "log-tool-calls" in text and "has used any tool" in text and "write files" in text
-    assert "policy aid" in text and "does not block" in text  # a hook matches names and text, and if it cannot read the event it lets it through
+    assert "policy aid" in text  # a hook matches names and text
+    assert "fails closed" in text and "python" in text and "2.1.295" in text  # a guard that cannot run blocks (older Claude Code lets the action through when the program cannot start)
+    assert "If it cannot run, it stops the action instead of letting it through" in text and "nothing is logged and the action goes ahead" in text
     assert "only read" not in text
 
 

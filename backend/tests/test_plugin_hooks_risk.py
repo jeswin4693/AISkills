@@ -71,6 +71,18 @@ def test_a_hook_that_now_runs_more_often_is_riskier(tmp_path):
     assert [c.direction for c in moved] == ["riskier"] and "Bash|PowerShell|Read" in moved[0].detail and "Bash|PowerShell" in moved[0].detail
 
 
+def test_a_guard_that_no_longer_fails_closed_is_riskier_and_one_that_now_does_is_safer(tmp_path):
+    old = composed(tmp_path, [FORCE])
+    loose = json.loads(old[HOOKS])
+    del loose["hooks"]["PreToolUse"][0]["hooks"][0]["onFailure"]
+    new = with_hooks(old, loose)
+    lost = of(diff(old, new), "hook_failure")
+    assert [c.direction for c in lost] == ["riskier"] and "block-force-push" in lost[0].detail and "lets the action through" in lost[0].detail
+    assert diff(old, new).level == "more_risk"
+    gained = of(diff(new, old), "hook_failure")
+    assert [c.direction for c in gained] == ["safer"] and "stops the action" in gained[0].detail
+
+
 def test_a_script_that_is_no_longer_the_catalogues_is_riskier(tmp_path):
     old = composed(tmp_path, [FORCE])
     new = {**old, "hooks/block-force-push.py": old["hooks/block-force-push.py"] + b"\nimport subprocess\n"}

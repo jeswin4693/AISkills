@@ -52,6 +52,19 @@ export function setOption(picks: ComponentPick[], pick: ComponentPick, key: stri
   });
 }
 
+/** The id of the box where a person types one option of one hook (its label, its text state and the page's `htmlFor` all use it). */
+export const optionTextId = (pick: ComponentPick, key: string): string => `hook-${pick.name}-${key}`;
+
+/**
+ * What was typed in the option boxes, without the boxes of `pick` when it is a hook. Unticking a hook drops its parts from the request, so what was
+ * typed for it must go too: otherwise ticking it again shows old text in the box while the request carries no options.
+ */
+export function withoutOptionTexts(texts: Record<string, string>, pick: ComponentPick): Record<string, string> {
+  if (pick.kind !== "hook") return texts;
+  const prefix = `hook-${pick.name}-`;
+  return Object.fromEntries(Object.entries(texts).filter(([id]) => !id.startsWith(prefix)));
+}
+
 /** The words a person typed (commas, spaces or new lines between them) as a list of values, in order, each once. */
 export const parseOptionText = (text: string): string[] => [...new Set(text.split(/[\s,]+/).filter((v) => v !== ""))];
 

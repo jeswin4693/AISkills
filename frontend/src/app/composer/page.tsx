@@ -8,8 +8,8 @@ import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
 import {
-  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, parseOptionText, partLabel, pluginRequest, serverPowers, setOption, togglePick,
-  type ComponentPick, type PluginForm,
+  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, optionTextId, parseOptionText, partLabel, pluginRequest, serverPowers, setOption,
+  togglePick, withoutOptionTexts, type ComponentPick, type PluginForm,
 } from "@/lib/plugin";
 import type { HookInfo, PluginPreview, PluginSaveResult, SkillSummary } from "@/lib/types";
 import { useAsync, type AsyncState } from "@/lib/useAsync";
@@ -97,7 +97,7 @@ function HookParts({
                 </label>
                 {picked &&
                   h.options.map((o) => {
-                    const id = `hook-${h.id}-${o.key}`;
+                    const id = optionTextId(pick, o.key);
                     const values = current?.options?.[o.key] ?? [];
                     const problem = optionProblem(o, values);
                     return (
@@ -147,11 +147,12 @@ export default function ComposerPage() {
     stale();
   };
   const toggle = (p: ComponentPick) => {
+    if (isPicked(picks, p)) setTexts(withoutOptionTexts(texts, p)); // unticking drops the hook's options, so what was typed for it goes too
     setPicks(togglePick(picks, p));
     stale();
   };
   const option = (p: ComponentPick, key: string, text: string) => {
-    setTexts({ ...texts, [`hook-${p.name}-${key}`]: text });
+    setTexts({ ...texts, [optionTextId(p, key)]: text });
     setPicks(setOption(picks, p, key, parseOptionText(text)));
     stale();
   };

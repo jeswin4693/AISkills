@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, parseOptionText, partLabel, pluginRequest, serverPowers, setOption, togglePick,
-  type ComponentPick,
+  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, optionTextId, parseOptionText, partLabel, pluginRequest, serverPowers, setOption,
+  togglePick, withoutOptionTexts, type ComponentPick,
 } from "./plugin";
 import type { HookInfo } from "./types";
 
@@ -62,6 +62,14 @@ describe("a hook as a part of a plugin", () => {
     expect(canPreview(form, setOption([secrets], secrets, "also", ["ok.key"]), hooks)).toBe(true);
     expect(canPreview(form, setOption([secrets], secrets, "also", ["a;b"]), hooks)).toBe(false);
     expect(canPreview(form, setOption([secrets], secrets, "also", ["a;b"]))).toBe(true); // the catalogue has not loaded: the server will say
+  });
+
+  it("forgets what was typed in a hook's option boxes when the hook is unticked, so ticking it again never shows text the request does not carry", () => {
+    const texts = { "hook-block-secret-files-also": "secrets.json, *.token", "hook-block-force-push-x": "keep", "hook-block-secret-files-other": "gone too" };
+    expect(optionTextId(secrets, "also")).toBe("hook-block-secret-files-also");
+    expect(withoutOptionTexts(texts, secrets)).toEqual({ "hook-block-force-push-x": "keep" });
+    expect(texts["hook-block-secret-files-also"]).toBe("secrets.json, *.token"); // the object it was given is not changed
+    expect(withoutOptionTexts(texts, { kind: "skill", name: "block-secret-files" })).toEqual(texts); // only a hook has option boxes
   });
 
   it("is called a hook, and says in plain words when it runs", () => {

@@ -294,6 +294,8 @@ export interface PluginServer {
   environment_dynamic: boolean;
   dynamic: string[];
   command: string;
+  /** Whether the server ships a requirements.txt (the page only says "pip install -r" for one that does). */
+  requirements: boolean;
 }
 
 /** What a plugin can do on the machine, worked out by code from its files. */

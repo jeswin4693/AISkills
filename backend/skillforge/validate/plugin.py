@@ -18,9 +18,11 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from pathlib import PurePosixPath
 
 from ..results import FAILED, PASSED, WARNING, CheckResult
+from ..hookcatalog.catalogue import HOOKS_FILE, accepts, entry_for_script_path, parse_args
 from .mcp import analyze_server
 from .static import JS_LANGS, MAX_NAME, PY_SUFFIXES, SLUG, script_capabilities, validate_files
 
@@ -29,7 +31,8 @@ MARKETPLACE = ".claude-plugin/marketplace.json"
 RESERVED_PREFIXES = ("claude-", "anthropic-")  # Claude Code refuses plugin names that start like this
 MANIFEST_CHECK = "plugin.json exists and is a valid plugin manifest"
 MARKETPLACE_CHECK = "the marketplace entry matches the manifest"
-CONTENTS_CHECK = "the plugin contains a skill, an agent or an MCP server"
+CONTENTS_CHECK = "the plugin contains a skill, an agent, an MCP server or a hook"
+HOOKS_CHECK = "hooks/hooks.json runs only catalogue hooks, unchanged"
 SCRIPTS_CHECK = "scripts shipped inside the plugin"
 EXTRAS_CHECK = "no hooks, undescribed MCP servers, settings or executables"
 MCP_CONFIG_CHECK = ".mcp.json starts only the MCP servers shipped inside the plugin"
@@ -148,10 +151,11 @@ def _component_rows(files: Mapping[str, bytes]) -> list[CheckResult]:
     return rows
 
 
-def _extras_row(files: Mapping[str, bytes], manifest: dict, described_config: bool = False) -> CheckResult:
+def _extras_row(files: Mapping[str, bytes], manifest: dict, described: frozenset[str] = frozenset()) -> CheckResult:
+    """`described` holds the root files other rows describe in full (`.mcp.json`, `hooks/hooks.json`): they are not unexplained extras."""
     found = sorted(
         rel for rel in files
-        if (PurePosixPath(rel).name in EXTRA_FILES or PurePosixPath(rel).parts[0] == "bin") and not (described_config and rel == MCP_CONFIG)
+        if (PurePosixPath(rel).name in EXTRA_FILES or PurePosixPath(rel).parts[0] == "bin") and rel not in described
     )
     keys = [k for k in EXTRA_MANIFEST_KEYS if k in manifest]
     if not found and not keys:
@@ -169,12 +173,14 @@ def _in_server(rel: str, servers: set[str]) -> bool:
     return len(parts) >= 3 and parts[0] == SERVERS_DIR and parts[1] in servers
 
 
-def _script_row(files: Mapping[str, bytes]) -> CheckResult:
+def _script_row(files: Mapping[str, bytes], catalogue_scripts: AbstractSet[str] = frozenset()) -> CheckResult:
     servers = set(server_names(files))
-    scripts = {rel: data for rel, data in shipped_code(files).items() if not _in_server(rel, servers)}  # a server is read as a server, above
+    scripts = {  # a server is read as a server, and a catalogue hook's script as the catalogue's own, on their rows
+        rel: data for rel, data in shipped_code(files).items() if not _in_server(rel, servers) and rel not in catalogue_scripts
+    }
     if not scripts:
-        if servers:
-            return CheckResult(SCRIPTS_CHECK, PASSED, "no scripts besides its MCP servers, which are read as servers (see their rows)")
+        if servers or catalogue_scripts:
+            return CheckResult(SCRIPTS_CHECK, PASSED, "no scripts besides its MCP servers and catalogue hooks, which are read on their own rows")
         return CheckResult(SCRIPTS_CHECK, PASSED, "this plugin ships no code")
     caps: set[str] = set()
     unanalysed: list[str] = []
@@ -256,6 +262,78 @@ def _entry_problem(name: str, entry: object, servers: Mapping[str, set[str]], de
     return ""
 
 
+def _group_problems(event: str, group: object, files: Mapping[str, bytes], found: list[str], script_ok: set[str]) -> list[str]:
+    """Why this matcher group of `hooks.json` is not exactly what the composer writes for one catalogue hook (an empty list when it is).
+    Adds the hook's id to `found` when it is, and its script's path to `script_ok` whenever that script is the catalogue's."""
+    where = event[:40]
+    if not isinstance(group, dict):
+        return [f"{where} holds an entry that is not an object"]
+    if set(group) - {"matcher", "hooks"}:
+        return [f"{where} has {', '.join(sorted(map(str, set(group) - {'matcher', 'hooks'})))[:60]}, which SkillForge does not read"]
+    hooks = group.get("hooks")
+    if not isinstance(hooks, list) or len(hooks) != 1 or not isinstance(hooks[0], dict):
+        return [f"{where} has a group that does not hold exactly one hook"]
+    hook = hooks[0]
+    entry = entry_for_script_path(hook["args"][0] if isinstance(hook.get("args"), list) and hook["args"] else None)
+    if entry is None:
+        return [f"{where} runs {shown_command(hook)} (type {str(hook.get('type'))[:20]!r}), which is not a catalogue hook"]
+    problems: list[str] = []
+    data = files.get(entry.shipped_path)
+    if data is None:
+        problems.append(f"'{entry.id}' is missing its script {entry.shipped_path}")
+    elif not accepts(entry, data):
+        problems.append(f"{entry.shipped_path} is not the catalogue's script for '{entry.id}': what it does is not what the catalogue vouches for")
+    else:
+        script_ok.add(entry.shipped_path)
+    odd_keys = sorted(map(str, set(hook) ^ {"type", "command", "args", "timeout"}))
+    if odd_keys:
+        problems.append(f"'{entry.id}' does not have exactly the keys the catalogue writes (type, command, args, timeout): {', '.join(odd_keys)[:60]}")
+    if hook.get("type") != "command" or hook.get("command") != "python":
+        problems.append(f"'{entry.id}' runs {shown_command(hook)} (type {str(hook.get('type'))[:20]!r}) instead of python")
+    if event != entry.event:
+        problems.append(f"'{entry.id}' is under {where}, the catalogue runs it on {entry.event}")
+    if group.get("matcher", "") != entry.matcher:
+        problems.append(f"'{entry.id}' has the matcher {str(group.get('matcher', ''))[:40]!r}, the catalogue's is {entry.matcher!r}")
+    if hook.get("timeout") != entry.timeout and "timeout" in hook:
+        problems.append(f"'{entry.id}' has the timeout {str(hook.get('timeout'))[:10]}, the catalogue's is {entry.timeout}")
+    if parse_args(entry, hook.get("args")) is None:
+        problems.append(f"'{entry.id}' has arguments the catalogue does not write: {shown_command(hook)}")
+    if not problems:
+        found.append(entry.id)
+    return problems
+
+
+def _hooks_row(files: Mapping[str, bytes]) -> tuple[CheckResult | None, bool, set[str]]:
+    """(the row, whether `hooks/hooks.json` is the described one, the paths of shipped scripts that are the catalogue's own). It is
+    described when every hook in it is a catalogue hook with exactly the event, matcher, timeout, command and arguments the catalogue
+    writes, and its script is the catalogue's. Anything else is shown to the person and never trusted."""
+    if HOOKS_FILE not in files:
+        return None, False, set()
+    data, why = _json(files, HOOKS_FILE)
+    if why:
+        return CheckResult(HOOKS_CHECK, FAILED, why), False, set()
+    events = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(events, dict) or not any(isinstance(groups, list) and groups for groups in events.values()):
+        detail = f'{HOOKS_FILE} has no hooks in the form SkillForge reads (a top-level "hooks" object of events), so what it runs is not described: read it'
+        return CheckResult(HOOKS_CHECK, WARNING, detail), False, set()
+    problems: list[str] = []
+    found: list[str] = []
+    script_ok: set[str] = set()
+    for event, groups in events.items():
+        if not isinstance(groups, list):
+            problems.append(f"{str(event)[:40]} is not a list of groups")
+            continue
+        for group in groups:
+            problems += _group_problems(str(event), group, files, found, script_ok)
+    stray = sorted(map(str, set(data) - {"hooks", "description"})) if isinstance(data, dict) else []
+    if stray:
+        problems.append(f"{HOOKS_FILE} has {', '.join(stray)[:60]}, which SkillForge does not read")
+    if problems:
+        detail = "; ".join(problems[:5]) + ". A hook runs on your machine with your permissions when the plugin is enabled: read it before installing."
+        return CheckResult(HOOKS_CHECK, WARNING, detail), False, script_ok
+    return CheckResult(HOOKS_CHECK, PASSED, "runs " + ", ".join(found) + " from the catalogue, unchanged"), True, script_ok
+
+
 def _mcp_config_row(files: Mapping[str, bytes], manifest: dict) -> tuple[CheckResult | None, bool]:
     """(the row, whether `.mcp.json` is the described one). It is described when every entry starts a server shipped in this plugin,
     in the one form the composer writes."""
@@ -325,14 +403,18 @@ def check_plugin_json(files: Mapping[str, bytes], folder: str | None) -> list[Ch
     has_skill = any(PurePosixPath(rel).match("skills/*/SKILL.md") for rel in files)
     has_agent = any(PurePosixPath(rel).parent.as_posix() == "agents" and rel.endswith(".md") for rel in files)
     has_server = bool(server_names(files))
+    hooks_row, hooks_described, catalogue_scripts = _hooks_row(files)
     out.append(
-        CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent or has_server
-        else CheckResult(CONTENTS_CHECK, FAILED, "there is no skills/<name>/SKILL.md, agents/<name>.md or servers/<name>/server.py in it")
+        CheckResult(CONTENTS_CHECK, PASSED) if has_skill or has_agent or has_server or hooks_described
+        else CheckResult(CONTENTS_CHECK, FAILED, "there is no skills/<name>/SKILL.md, agents/<name>.md or servers/<name>/server.py in it, and no hook it can describe")
     )
     out += _component_rows(files)
-    config_row, described = _mcp_config_row(files, manifest)
+    config_row, config_described = _mcp_config_row(files, manifest)
     if config_row is not None:
         out.append(config_row)
+    if hooks_row is not None:
+        out.append(hooks_row)
+    described = frozenset(([MCP_CONFIG] if config_described else []) + ([HOOKS_FILE] if hooks_described else []))
     out.append(_extras_row(files, manifest, described))
-    out.append(_script_row(files))
+    out.append(_script_row(files, catalogue_scripts))
     return out

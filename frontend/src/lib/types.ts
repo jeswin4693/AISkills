@@ -225,11 +225,55 @@ export interface KindInfo {
   slots: SlotInfo[];
 }
 
-/** One skill, agent or MCP server in a plugin. */
+/** One skill, agent, MCP server or hook in a plugin. A hook is named by its id in the catalogue and has no version. */
 export interface PluginComponentRef {
-  kind: "skill" | "agent" | "mcp";
+  kind: "skill" | "agent" | "mcp" | "hook";
   name: string;
   version?: number;
+  /** A hook's typed options (only a hook has any). */
+  options?: Record<string, string[]>;
+}
+
+/** One thing a person may choose for a catalogue hook. */
+export interface HookOption {
+  key: string;
+  label: string;
+  help: string;
+  max_items: number;
+  max_length: number;
+  /** A regular expression every value must match completely. The server decides; the page only hints early. */
+  pattern: string;
+}
+
+/** A hook of the catalogue: the only hooks a plugin may carry. */
+export interface HookInfo {
+  id: string;
+  title: string;
+  summary: string;
+  event: string;
+  matcher: string;
+  /** "blocks": it can stop what Claude is about to do; "observes": it only looks. */
+  effect: string;
+  sees: string;
+  timeout: number;
+  powers: string[];
+  revision: number;
+  options: HookOption[];
+}
+
+/** A catalogue hook a plugin carries, with the options chosen. */
+export interface PluginHook {
+  id: string;
+  title: string;
+  summary: string;
+  event: string;
+  matcher: string;
+  effect: string;
+  sees: string;
+  options: Record<string, string[]>;
+  powers: string[];
+  command: string;
+  revision: number;
 }
 
 export interface PluginRequest {
@@ -262,6 +306,7 @@ export interface PluginCapabilities {
   mcp_servers: string[];
   notes: string[];
   servers: PluginServer[];
+  hook_entries: PluginHook[];
 }
 
 export interface PluginPreview {

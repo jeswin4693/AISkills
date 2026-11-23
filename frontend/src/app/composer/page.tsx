@@ -7,8 +7,11 @@ import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from
 import { api } from "@/lib/api";
 import { plural } from "@/lib/format";
 import { withKindParam } from "@/lib/kind";
-import { canPreview, isPicked, keepRequest, nameHint, partLabel, pluginRequest, serverPowers, togglePick, type ComponentPick, type PluginForm } from "@/lib/plugin";
-import type { PluginPreview, PluginSaveResult, SkillSummary } from "@/lib/types";
+import {
+  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, parseOptionText, partLabel, pluginRequest, serverPowers, setOption, togglePick,
+  type ComponentPick, type PluginForm,
+} from "@/lib/plugin";
+import type { HookInfo, PluginPreview, PluginSaveResult, SkillSummary } from "@/lib/types";
 import { useAsync, type AsyncState } from "@/lib/useAsync";
 
 const READING = new Set(["Read", "Grep", "Glob"]);
@@ -51,10 +54,80 @@ function Parts({
   );
 }
 
+/** The catalogue of hooks. A hook is never typed: each one is a fixed script from SkillForge, and the only thing a person adds is an option. */
+function HookParts({
+  list, picks, texts, onToggle, onOption,
+}: {
+  list: AsyncState<HookInfo[]>;
+  picks: ComponentPick[];
+  texts: Record<string, string>;
+  onToggle: (p: ComponentPick) => void;
+  onOption: (pick: ComponentPick, key: string, text: string) => void;
+}) {
+  return (
+    <Card className="p-4">
+      <h2 className="font-semibold">Hooks</h2>
+      <p className="mt-1 text-xs text-muted">
+        A hook is a small program that runs on your machine, with your permissions, every time its event happens. These are the only ones offered: fixed scripts from SkillForge, none written by a model.
+      </p>
+      {list.error ? (
+        <ErrorBox error={list.error} onRetry={list.reload} />
+      ) : list.data === undefined ? (
+        <Loading what="hooks" />
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {list.data.map((h) => {
+            const pick: ComponentPick = { kind: "hook", name: h.id };
+            const picked = isPicked(picks, pick);
+            const powers = serverPowers(h.powers);
+            const current = picks.find((p) => p.kind === "hook" && p.name === h.id);
+            return (
+              <li key={h.id}>
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" className="mt-1" checked={picked} onChange={() => onToggle(pick)} />
+                  <span>
+                    <span className="font-medium">{h.title}</span>{" "}
+                    <Badge tone="warn">runs on your machine</Badge>{" "}
+                    <Badge tone={h.effect === "blocks" ? "warn" : "neutral"}>{h.effect === "blocks" ? "can block" : "only looks"}</Badge>
+                    <span className="block text-muted">{h.summary}</span>
+                    <span className="block text-xs text-muted">
+                      Runs {hookWhen(h)}. It is handed {h.sees}.{powers.length ? ` Its script can ${powers.join(", ")}.` : " Its script does not reach the network, start programs or write files."}
+                    </span>
+                  </span>
+                </label>
+                {picked &&
+                  h.options.map((o) => {
+                    const id = `hook-${h.id}-${o.key}`;
+                    const values = current?.options?.[o.key] ?? [];
+                    const problem = optionProblem(o, values);
+                    return (
+                      <div key={o.key} className="ml-6 mt-2">
+                        <label htmlFor={id} className="text-sm font-medium">
+                          {o.label} <span className="font-normal text-muted">(optional, separated by commas)</span>
+                        </label>
+                        <input
+                          id={id} value={texts[id] ?? ""} onChange={(e) => onOption(pick, o.key, e.target.value)}
+                          className="mt-1 block w-full rounded-md border border-border bg-bg px-3 py-1.5 font-mono text-sm"
+                        />
+                        <p className={`mt-1 text-xs ${problem ? "text-warn" : "text-muted"}`}>{problem || o.help}</p>
+                      </div>
+                    );
+                  })}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 export default function ComposerPage() {
   const skills = useAsync(() => api.listSkills("skill"), "composer-skills");
   const agents = useAsync(() => api.listSkills("agent"), "composer-agents");
   const servers = useAsync(() => api.listSkills("mcp"), "composer-servers");
+  const hooks = useAsync(() => api.hooks(), "composer-hooks");
+  const [texts, setTexts] = useState<Record<string, string>>({}); // what is typed in each option box, as typed (the list is parsed from it)
   const [form, setForm] = useState<PluginForm>({ name: "", description: "", author: "" });
   const [picks, setPicks] = useState<ComponentPick[]>([]);
   const [preview, setPreview] = useState<PluginPreview | null>(null);
@@ -77,6 +150,11 @@ export default function ComposerPage() {
     setPicks(togglePick(picks, p));
     stale();
   };
+  const option = (p: ComponentPick, key: string, text: string) => {
+    setTexts({ ...texts, [`hook-${p.name}-${key}`]: text });
+    setPicks(setOption(picks, p, key, parseOptionText(text)));
+    stale();
+  };
 
   async function run<T>(what: "preview" | "keep", call: () => Promise<T>, done: (r: T) => void) {
     const mine = ++latest.current;
@@ -94,7 +172,7 @@ export default function ComposerPage() {
 
   const request = pluginRequest(form, picks);
   const hint = nameHint(form.name.trim());
-  const ready = canPreview(form, picks);
+  const ready = canPreview(form, picks, hooks.data ?? []);
 
   return (
     <>
@@ -134,10 +212,11 @@ export default function ComposerPage() {
           </div>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <Parts title="Skills" kind="skill" list={skills} picks={picks} onToggle={toggle} />
           <Parts title="Agents" kind="agent" list={agents} picks={picks} onToggle={toggle} />
           <Parts title="MCP servers" kind="mcp" list={servers} picks={picks} onToggle={toggle} />
+          <HookParts list={hooks} picks={picks} texts={texts} onToggle={toggle} onOption={option} />
         </div>
 
         {error && (
@@ -153,7 +232,7 @@ export default function ComposerPage() {
           >
             Preview the plugin
           </Button>
-          {!ready && <span className="text-sm text-muted">Give it a name, a description and at least one skill, agent or MCP server.</span>}
+          {!ready && <span className="text-sm text-muted">Give it a name, a description and at least one skill, agent, MCP server or hook (and fix any option marked above).</span>}
         </div>
 
         {preview && (
@@ -178,8 +257,43 @@ export default function ComposerPage() {
                   </Badge>
                 ))}
               </div>
-              <p className="mt-1 text-xs text-muted">Worked out by code from the files. Hooks are not part of this kind of plugin yet.</p>
+              <p className="mt-1 text-xs text-muted">Worked out by code from the files. Hooks come only from SkillForge&apos;s catalogue.</p>
             </section>
+            {preview.capabilities.hook_entries.length > 0 && (
+              <section>
+                <h3 className="mb-1 font-semibold">Hooks this plugin runs</h3>
+                <p className="mb-2 text-sm text-muted">
+                  Each one is a fixed script from the catalogue, shipped unchanged. It runs on your machine, with your permissions and outside any sandbox, every time its event happens. A hook is a
+                  policy aid, not a security boundary: it matches names and text, and if it cannot read what Claude Code sends it, it does not block and says so.
+                </p>
+                <ul className="space-y-3">
+                  {preview.capabilities.hook_entries.map((h) => {
+                    const powers = serverPowers(h.powers);
+                    const chosen = Object.entries(h.options);
+                    return (
+                      <li key={h.id} className="rounded-md border border-border p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{h.title}</span>
+                          <code className="text-xs text-muted">{h.id}</code>
+                          <Badge tone={h.effect === "blocks" ? "warn" : "neutral"}>{h.effect === "blocks" ? "can block" : "only looks"}</Badge>
+                        </div>
+                        <p className="mt-1">
+                          Runs {hookWhen(h)}. {h.summary}
+                        </p>
+                        <p className="mt-1 text-muted">
+                          It is handed {h.sees}.{powers.length ? ` By reading its script it can ${powers.join(", ")}.` : " By reading its script it does not reach the network, start programs or write files."}
+                        </p>
+                        {chosen.map(([key, values]) => (
+                          <p key={key} className="mt-1">
+                            Your choice, {key}: <span className="font-mono">{values.join(", ")}</span>
+                          </p>
+                        ))}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
             {preview.capabilities.servers.length > 0 && (
               <section>
                 <h3 className="mb-1 font-semibold">Programs this plugin starts</h3>

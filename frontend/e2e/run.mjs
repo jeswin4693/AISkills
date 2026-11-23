@@ -472,10 +472,59 @@ try {
     await page.getByText("Saved to the library as 'todo-counter-e2e' v1").waitFor();
   });
 
+  console.log("Plugins with hooks");
+  await step("the composer lists the hook catalogue with what each hook does, and a bad option stops the preview until it is fixed", async () => {
+    await page.goto(UI + "/composer");
+    await page.getByRole("heading", { name: "Compose a plugin", level: 1 }).waitFor();
+    await page.getByLabel("Name", { exact: true }).fill("e2e-plugin");
+    await page.getByLabel("What is it for?").fill("Safety hooks and a demo skill.");
+    await page.getByRole("checkbox", { name: /e2e-demo/ }).check();
+    const hook = page.getByRole("checkbox", { name: /Keep secret files out of reach/ });
+    await hook.waitFor();
+    await page.getByText("runs on your machine").first().waitFor();
+    await page.getByText("can block").first().waitFor();
+    await hook.check();
+    const preview = page.getByRole("button", { name: "Preview the plugin" });
+    assert.ok(await preview.isEnabled(), "a skill and a hook with no options is enough");
+    const box = page.getByLabel(/More file names to protect/);
+    await box.fill("a;rm -rf /");
+    await page.getByText(/is not allowed/).waitFor();
+    assert.ok(await preview.isDisabled(), "an option the server would refuse must stop the preview");
+    await box.fill("secrets.json, *.token");
+    assert.ok(await preview.isEnabled());
+    await shot(page, "20-composer-hooks");
+  });
+  await step("the preview says what the hook does, the plugin is kept, and it is in the plugin library with its hook files", async () => {
+    await page.getByRole("button", { name: "Preview the plugin" }).click();
+    await page.getByRole("heading", { name: "Hooks this plugin runs" }).waitFor();
+    await page.getByText(/outside any sandbox/).first().waitFor();
+    await page.getByText("hooks/hooks.json", { exact: false }).first().waitFor();
+    await page.getByText("secrets.json, *.token", { exact: true }).waitFor(); // the option line; the plugin's note says it in a sentence too
+    await shot(page, "21-composer-preview");
+    await page.getByRole("button", { name: "Keep this plugin" }).click();
+    await page.getByText(/Kept 'e2e-plugin' as v1/).waitFor();
+    const rows = await (await fetch(API + "/api/library?kind=plugin")).json();
+    assert.ok(rows.some((r) => r.name === "e2e-plugin"), "the plugin should be in the plugin library");
+    const stored = await (await fetch(API + "/api/library/e2e-plugin?kind=plugin")).json();
+    const paths = JSON.stringify(stored.versions[0]);
+    assert.ok(paths.includes("hooks/hooks.json") && paths.includes("hooks/block-secret-files.py") && paths.includes("skills/e2e-demo/SKILL.md"), paths);
+  });
+  await step("an editing change to the form clears the old preview, so what is kept is only what was shown", async () => {
+    await page.goto(UI + "/composer");
+    await page.getByLabel("Name", { exact: true }).fill("e2e-plugin-two");
+    await page.getByLabel("What is it for?").fill("One hook.");
+    await page.getByRole("checkbox", { name: /Log which tools|Keep a log of the tools/ }).check();
+    await page.getByRole("button", { name: "Preview the plugin" }).click();
+    await page.getByRole("heading", { name: "Hooks this plugin runs" }).waitFor();
+    await page.getByText(/By reading its script it can write or delete files/).waitFor();
+    await page.getByLabel("What is it for?").fill("One hook, changed.");
+    await page.getByRole("heading", { name: "Hooks this plugin runs" }).waitFor({ state: "detached" });
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });
-    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2"]) {
+    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2", "/composer"]) {
       await page.goto(UI + url);
       await page.getByRole("heading", { level: 1 }).first().waitFor();
       await page.waitForTimeout(400);

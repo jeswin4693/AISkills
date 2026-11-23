@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, FileText, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   RescanResult, SandboxStatus, SaveResult, SkillSummary, VersionInfo,
 } from "./types";
 
@@ -72,6 +72,8 @@ export const api = {
   kinds: () => get<KindInfo[]>("/api/kinds"),
 
   // ---- plugins: composed from the library, no model ----
+  /** The hooks a plugin may carry: the catalogue, and nothing else. */
+  hooks: () => get<HookInfo[]>("/api/hooks"),
   previewPlugin: (req: PluginRequest) => post<PluginPreview>("/api/plugins/preview", req),
   /** 200 and 422 both carry a report (kept or unchanged, or refused with the checks that failed). */
   async savePlugin(req: PluginRequest): Promise<PluginSaveResult> {

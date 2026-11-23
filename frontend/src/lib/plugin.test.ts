@@ -1,9 +1,77 @@
 import { describe, expect, it } from "vitest";
-import { canPreview, isPicked, keepRequest, nameHint, partLabel, pluginRequest, serverPowers, togglePick, type ComponentPick } from "./plugin";
+import {
+  canPreview, hookWhen, isPicked, keepRequest, nameHint, optionProblem, parseOptionText, partLabel, pluginRequest, serverPowers, setOption, togglePick,
+  type ComponentPick,
+} from "./plugin";
+import type { HookInfo } from "./types";
 
 const skill: ComponentPick = { kind: "skill", name: "demo-skill" };
 const agent: ComponentPick = { kind: "agent", name: "demo-agent" };
 const server: ComponentPick = { kind: "mcp", name: "word-tools" };
+const secrets: ComponentPick = { kind: "hook", name: "block-secret-files" };
+const option = {
+  key: "also", label: "More file names to protect", help: "File names or patterns.", max_items: 3, max_length: 20,
+  pattern: "(?=.*[A-Za-z0-9])[A-Za-z0-9._*?][A-Za-z0-9._*?-]{0,59}",
+};
+const hooks: HookInfo[] = [
+  { id: "block-secret-files", title: "Keep secret files out of reach", summary: "s", event: "PreToolUse", matcher: "Read|Write", effect: "blocks", sees: "x", timeout: 10, powers: [], revision: 1, options: [option] },
+  { id: "log-tool-calls", title: "Log", summary: "s", event: "PostToolUse", matcher: "", effect: "observes", sees: "x", timeout: 10, powers: ["write_files"], revision: 1, options: [] },
+];
+
+describe("a hook as a part of a plugin", () => {
+  it("is told apart from other parts, carries its options without changing the list it was given, and is requested with them", () => {
+    const none: ComponentPick[] = [secrets, skill];
+    const set = setOption(none, secrets, "also", ["secrets.json", "*.token"]);
+    expect(set).toEqual([{ ...secrets, options: { also: ["secrets.json", "*.token"] } }, skill]);
+    expect(none).toEqual([secrets, skill]);
+    expect(isPicked(set, secrets)).toBe(true);
+    expect(isPicked([skill], { kind: "hook", name: "demo-skill" })).toBe(false);
+    const form = { name: "my-plugin", description: "Safety hooks.", author: "" };
+    expect(pluginRequest(form, set).components).toEqual([{ kind: "hook", name: "block-secret-files", options: { also: ["secrets.json", "*.token"] } }, { kind: "skill", name: "demo-skill" }]);
+    expect(pluginRequest(form, [secrets]).components).toEqual([{ kind: "hook", name: "block-secret-files" }]); // no empty options are sent
+    expect(pluginRequest(form, setOption([secrets], secrets, "also", [])).components).toEqual([{ kind: "hook", name: "block-secret-files" }]);
+  });
+
+  it("keeps its options when the request is pinned for keeping, and is not given a version (the catalogue has none)", () => {
+    const form = { name: "my-plugin", description: "Safety hooks.", author: "" };
+    const request = pluginRequest(form, setOption([secrets], secrets, "also", ["a.key"]));
+    const kept = keepRequest(request, [{ kind: "hook", name: "block-secret-files", version: "r1" }]);
+    expect(kept.components).toEqual([{ kind: "hook", name: "block-secret-files", options: { also: ["a.key"] } }]);
+  });
+
+  it("reads the words a person types into a list of names", () => {
+    expect(parseOptionText("secrets.json, *.token\n  other.key ,, secrets.json ")).toEqual(["secrets.json", "*.token", "other.key"]);
+    expect(parseOptionText("   ")).toEqual([]);
+    expect(parseOptionText("a b")).toEqual(["a", "b"]);
+  });
+
+  it("explains an option value early, from the pattern the server gave, and leaves the final say to the server", () => {
+    expect(optionProblem(option, ["secrets.json", "*.token"])).toBe("");
+    expect(optionProblem(option, [])).toBe("");
+    expect(optionProblem(option, ["a;rm -rf /"])).toMatch(/not allowed/);
+    expect(optionProblem(option, ["--force"])).toMatch(/not allowed/);
+    expect(optionProblem(option, ["*"])).toMatch(/not allowed/);
+    expect(optionProblem(option, ["x".repeat(21)])).toMatch(/at most 20/);
+    expect(optionProblem(option, ["a", "b", "c", "d"])).toMatch(/at most 3/i);
+    expect(optionProblem({ ...option, pattern: "(" }, ["x"])).toBe(""); // a pattern the browser cannot read is not a reason to stop the person
+  });
+
+  it("cannot be previewed while an option the server would refuse is in the form", () => {
+    const form = { name: "my-plugin", description: "Safety hooks.", author: "" };
+    expect(canPreview(form, [secrets], hooks)).toBe(true);
+    expect(canPreview(form, setOption([secrets], secrets, "also", ["ok.key"]), hooks)).toBe(true);
+    expect(canPreview(form, setOption([secrets], secrets, "also", ["a;b"]), hooks)).toBe(false);
+    expect(canPreview(form, setOption([secrets], secrets, "also", ["a;b"]))).toBe(true); // the catalogue has not loaded: the server will say
+  });
+
+  it("is called a hook, and says in plain words when it runs", () => {
+    expect(partLabel("hook")).toBe("hook");
+    expect(hookWhen(hooks[0])).toBe("before Claude uses Read, Write");
+    expect(hookWhen(hooks[1])).toBe("after Claude uses any tool");
+    expect(hookWhen({ event: "PreToolUse", matcher: "Bash" })).toBe("before Claude uses Bash");
+    expect(hookWhen({ event: "SessionStart", matcher: "" })).toBe("on SessionStart");
+  });
+});
 
 describe("an MCP server as a part of a plugin", () => {
   it("is told apart from a skill or an agent of the same name, requested as mcp and pinned like the others", () => {

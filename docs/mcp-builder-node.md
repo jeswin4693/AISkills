@@ -47,8 +47,8 @@ resolving imports and aliases first (`import * as fs from "node:fs"`, `import { 
 | Fails | Warns |
 |---|---|
 | it does not parse (a file that cannot be read is never a pass); no `McpServer`, no tool, no connected transport, more than one server; the folder name differs from the server name | a tool without a description |
-| it starts programs (`child_process`, `cluster`, `worker_threads`, `new Worker`, `process.binding`, `process.dlopen`) | it can reach the network (`fetch`, `http`, `net`, `WebSocket`, `axios` ...) |
-| code built from text or loaded while running (`eval`, `Function`, `import()`, `require`, `vm`, `WebAssembly`, `setTimeout("...")`, a property chosen by a computed name on `globalThis`, a module passed around as a value) or reaching the language's internals (`.constructor`, `__proto__`) | it can write or delete files (`fs.writeFileSync`, `rm`, `open` with a writing mode ...); it can read them |
+| it starts programs (`child_process`, `cluster`, `worker_threads`, `new Worker`, `process.binding`, `process.dlopen`, `process.execve`) | it can reach the network (`fetch`, `http`, `net`, `WebSocket`, `axios` ...) |
+| code built from text or loaded while running (`eval`, `Function`, `import()`, `require`, `vm`, `WebAssembly`, `setTimeout("...")`, `process.getBuiltinModule`, a property chosen by a computed name on `globalThis`, a module passed around as a value), **an import of code it never reads** (`data:`, `file:`, `https:`, a path, `#name`) or reaching the language's internals (`.constructor`, `__proto__`, also by destructuring, `x["con" + "structor"]` or a constant) | it can write or delete files (`fs.writeFileSync`, `rm`, `open` with a writing mode, `node:sqlite` ...); it can read them; it reaches a property by a name it cannot read (`m[text]`) |
 | a key written in the code, **also in pieces** (`"sk-" + "..."`); the report never repeats it | a package other than Node's own modules, the SDK and zod; an environment variable read by a computed name or all of them (`{...process.env}`); a name used but never defined (`require` and `__dirname` do not exist in an ES module) |
 | syntax `node server.ts` cannot run (enum, namespace, decorator, parameter property) | writing to standard output (`console.log`, `process.stdout`): it is the protocol channel and a message there breaks the connection |
 | **any other code beside `server.ts`** (`.js` `.mjs` `.ts` `.node` `.wasm`, `scripts/`, `bin/`), a **`node_modules`** folder, an **`.npmrc`** or similar | a `package.json` that installs more than the pinned packages, or has `overrides`, `imports`, `exports`, `bin` |
@@ -61,7 +61,8 @@ resolving imports and aliases first (`import * as fs from "node:fs"`, `import { 
 - a tool body may use only **its parameters, what it declares, the names it imports and an allow-list of globals** (`Math`, `JSON`, `Map`, `Set`, `RegExp`, `URL`, `Buffer`, `Error` ..., and `fetch` only with `network` declared); `process` only as `process.env.NAME` for a listed name;
   no `console`, `require`, `import()`, `eval`, `Function`, `globalThis`, `setTimeout`, `Date` (a tool must be deterministic), `Reflect`, `Proxy`, `Symbol`;
 - imports come only from a table of module and names (`node:crypto` `createHash` and `createHmac`, `node:path` names, and `node:fs` read functions only when `read_files` is declared): a module or name outside it fails, and an import name is validated before it is written as code;
-- a property called `constructor`, `__proto__`, `prototype`, `call`, `apply`, `bind`, `getPrototypeOf`, `defineProperty` ... fails anywhere, **also as a string** (`x["constructor"]`), and reaching a property by a computed name is a warning (use a `Map`);
+- a property called `constructor`, `__proto__`, `prototype`, `call`, `apply`, `bind`, `getPrototypeOf`, `defineProperty`, `random` ... fails anywhere, **also as a string** (`x["constructor"]`) and **also by destructuring**; reaching a property by a computed name fails unless the index is provably a number (a number, `s.length - 1`, a `for (let i = 0; ...)` counter never assigned elsewhere), so use a `Map`;
+  a body may not declare a name that hides a built-in, change a shared built-in (`JSON.stringify = ...`) or use `import.meta`;
 - an undeclared or not-offered permission, an environment variable that is not a plain listed name, an import never used (the mark of a stub), a tool that returns simulated or made-up data, a tool that returns nothing, invalid or repeated names (a parameter may not be a JavaScript keyword),
   a test case that names a missing tool or whose arguments do not match, an acceptance criterion with no case, no negative case, and `package.json` and the lockfile other than exactly what the builder writes. One repair is allowed and is kept only if it is not worse.
 
@@ -83,6 +84,38 @@ One honest difference from a person's machine: in the image the packages are out
 - **Install** copies the folder to a place you choose (it does not run `npm`). Then follow the README: `npm ci --ignore-scripts` in the folder, and the one `claude mcp add` command.
 - **Risk diff** (`library diff`): a changed `server.ts` is "code that runs on your machine", a new capability (network, writes, programs) is **riskier**, a new tool is "something to look at", a new environment variable is **riskier**, a construct the checks cannot follow is **riskier**,
   and for `package.json`: a new `scripts` entry, a new or changed dependency, an `overrides` key, and a lockfile that stopped being the pinned one are **riskier**; any other code file beside the server is new code that runs.
+
+## What two independent reviews found (2026-11-23), and what was done
+
+Two fresh reviewers, told to attack and to prove each claim by running code (hostile code only inside the locked container), read the reader and the builder. Every claim became a failing test first (73 of the second round's new tests failed on the code before the fixes), then a fix.
+
+**First review, of the builder, the harness and the run (one Critical):**
+
+| Found | Done |
+|---|---|
+| **Critical:** destructuring reaches `Function` without `.constructor`: `const { constructor: A } = []; const { constructor: F } = A;`, also with a computed key built from pieces. Every check passed, the build said **ok**, and the server really ran the code in the container | Destructuring keys (also computed ones, also `"con" + "structor"`) are checked like member access in the reader and the builder; and the generated file now **takes `constructor` away from every kind of function before a tool can run**, so reflection reaches `Array` or `Object` at most. A live test proves the chain gets nothing even when the checks are bypassed |
+| `node:sqlite` creates and writes a database file under `node --permission` with no write grant (`fs.writeFileSync` is refused) | A live test pins it. The reader counts `node:sqlite` as writing files and `process.getBuiltinModule` as loading code while running; a generated tool cannot import either. The README and docs no longer say Node refuses every write |
+| A `package.json` whose `scripts` is not an object was skipped by the risk diff | Any `scripts` change is called riskier, whatever its shape |
+
+**Second review, of the reader and the allow-lists (several Critical, all reproduced):**
+
+| Found | Done |
+|---|---|
+| One alias map for the whole file: a decoy `const Function = o` in an unrelated function made `Function(...)` look harmless (also `fetch`, `process`, `globalThis`, an import's own name). In the builder the same decoy hid the name from the free-name rule | A name keeps **every** meaning it is given and always its own spelling too (a declaration elsewhere can add a meaning, never remove one). In the builder, a body may not declare a name that hides a built-in (`Function`, `process`, `fetch`, `server` ...), and a parameter may not be named like one |
+| `{ eval }` (a shorthand property) was never classified | It is a use of the name |
+| A backslash before a line ending inside a string joins the lines (`"con\⏎structor"` is `"constructor"`), and `\u{0000065}` (any number of leading zeros) is `e` | Both are decoded as JavaScript does |
+| `import fs from "node:fs"` was read as `fs.default.writeFileSync`; `(0, process).binding(...)`, nested destructuring `const { promises: { writeFile } } = fs`, `process.execve`, `new fs.WriteStream` and `fs.mkdtempDisposable` were not seen | A Node module's default import is the module; a sequence is its last part; patterns bind recursively; the member lists are longer |
+| `import "data:text/javascript,..."` (and `file:`, `https:`, paths, `#name`) loaded code the checks never read, with a warning only. Node ran the `data:` module under `--permission` | Fails: an import that is not a bare package or a `node:` module is code the checks never read |
+| `process['env'].SECRET` and `process['env']['X']` were not seen (the builder's allow-list included) | Found, in both |
+| A `binding.gyp` beside `package.json` makes `npm install` run `node-gyp rebuild` | `.gyp` and `.gypi` count as other code |
+| A computed name the reader cannot resolve was silent; the builder's counter exemption was by name only (`for (let k = 0; ...)` then `const k = "con" + "structor"`) | A constant built of literals is resolved (`const k = "constructor"; x[k]`). A name is a number counter only if **every** declaration of it is a `for (let i = 0; ...)` counter and it is assigned nowhere but a loop's own update (not in a pattern, a `for (i of ...)` or the body). An index the reader cannot read is a warning there and a failure in the builder |
+| A body could overwrite a shared built-in (`JSON.stringify = ...`, `Object.assign(Object, ...)`), which broke the protocol output for every tool (live: a 20 s timeout) | Assigning to, deleting from or changing a built-in fails |
+| An environment variable name was written into the README command before it was validated (`X=1; curl ... | sh; #` ended up in the command, with a failed check) | Refused before anything is written, like the other names |
+| A 40,000-term sum (160 KB) took 38 s to read: `node.parent` is slow, and the key scan used it for every sum | Parents are indexed once per file; a long sum reads in well under a second; more than 64 tool registrations are refused |
+| Reads were not warned about although the table said so; `parts[0]` was a false failure | Reading files is a warning; an index that is provably a number is fine |
+| `Math.random()`, `import.meta.dirname`, `Error.prepareStackTrace = ...` passed | `random` and `import.meta` are refused; changing a built-in is refused |
+
+Not changed, said plainly: a tool can still loop forever, build an enormous string or run a catastrophic `RegExp` (only the 20 second test timeout stops them in the sandbox; on your machine nothing does); a hostile lockfile with the pinned `package.json` only warns (its `resolved` addresses are not read); the reader's reading by syntax still cannot prove a file safe, and a name built at run time from data (not from constants) is only a warning there.
 
 ## Limits (honest)
 

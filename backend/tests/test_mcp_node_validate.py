@@ -106,7 +106,8 @@ def test_a_plain_server_does_nothing_dangerous():
     ("const k = globalThis.process.env.KEY;", {"KEY"}, False),
     ("const { env } = process; const k = env.KEY;", {"KEY"}, False),
     ("const { A, ...rest } = process.env;", {"A"}, True),
-    ("const n = 'K'; const k = process.env[n];", set(), True),
+    ("const n = 'K'; const k = process.env[n];", {"K"}, False),  # a constant is a plain name
+    ("const k = process.env[text];", set(), True),
     ("const e = process.env; use(e);", set(), True),
     ("Object.keys(process.env);", set(), True),
     ("const all = { ...process.env };", set(), True),
@@ -118,7 +119,7 @@ def test_environment_variables_by_name_or_not(body, names, dynamic):
 
 
 def test_reading_an_environment_variable_by_a_computed_name_warns_but_is_not_called_building_code():
-    out = by_name(check_server_ts(files(source("const n = 'K'; const k = process.env[n];")), NAME))
+    out = by_name(check_server_ts(files(source("const k = process.env[text];")), NAME))
     assert out["environment variables are read by a plain name only"].status == WARNING
     assert out["no commands, code built from text or native code"].status == PASSED
 
@@ -304,10 +305,11 @@ DESTRUCTURING_LITERAL = [
     "const { __proto__: P } = [];",
     "const { constructor: { constructor: F } } = [];",
     "const [{ constructor: A }] = [[]];",
+    "const k = 'con' + 'structor'; const { [k]: A } = [];",  # a constant built of literals is the name it spells
 ]
 DESTRUCTURING_COMPUTED = [
     "const k = ['con', 'structor'].join(''); const { [k]: A } = [];",
-    "const k = 'con' + 'structor'; const { [k]: A } = [];",
+    "const k = text; const { [k]: A } = [];",
 ]
 
 

@@ -17,7 +17,7 @@ from ..providers.base import LLMProvider
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult
 from ..validate import validate_files
 from ..validate.mcp import SECRET_PATTERNS
-from ..validate.mcp_node import analyze_node_server, other_node_code
+from ..validate.mcp_node import KNOWN_GLOBALS, analyze_node_server, other_node_code
 from ..validate.static import SLUG
 from .mcp_node import (
     BODY_IMPORTS, DENY_PROPS, FILE_IMPORTS, GLOBALS_ALLOWED, NETWORK_GLOBALS, NodeDefinition, NodeDesignError, assemble_node, body_is_whole, body_returns_value,
@@ -35,6 +35,7 @@ from .render import MAX_NAME, write_files
 OFFERED = ("read_files", "network")
 MIN_ECHO = 4  # a test input shorter than this is too common to mean anything when it appears in a tool's text
 HEADER_MODULES = frozenset({SERVER_SDK, f"{SERVER_SDK}/stdio", "zod"})
+HIDEABLE = KNOWN_GLOBALS | {"server", "z", "McpServer", "StdioServerTransport"}  # names a declaration in a body must not take: it would hide the real one
 
 
 def _plain(module: str) -> str:
@@ -102,6 +103,13 @@ def check_node(defn: NodeDefinition, spec: RequirementSpec, files: dict[str, str
                 body_problems.append(f"{designed.name} uses {', '.join(bad_props)}, even as text: that is how a program reaches the language's internals")
             if tool.unsafe_index:
                 body_problems.append(f"{designed.name} reaches a property by a computed name ({', '.join(sorted(set(tool.unsafe_index))[:3])}): use a Map, .at(), or an index that is a number")
+            hidden = sorted((tool.declared - {p.name for p in designed.params} - {"text_result"}) & HIDEABLE)
+            if hidden:
+                body_problems.append(f"{designed.name} declares {', '.join(hidden[:4])}, a name that hides a built-in: a declaration anywhere in a body would change what the real name means")
+            if tool.mutates:
+                body_problems.append(f"{designed.name} changes {', '.join(sorted(set(tool.mutates))[:3])}, a built-in that every tool and the SDK share")
+            if tool.meta:
+                body_problems.append(f"{designed.name} uses import.meta, which tells where the server lives")
             if tool.process_other:
                 body_problems.append(f"{designed.name} uses process for something other than reading an environment variable by name")
         row("tool bodies use only allow-listed names and properties", body_problems)

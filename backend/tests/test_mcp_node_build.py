@@ -244,7 +244,8 @@ def test_what_the_builder_does_not_offer_fails_even_when_declared():
 
 def test_secrets_are_names_only_and_a_key_in_the_code_fails():
     assert "environment variables are plain names, listed, and read by name" in failed(one_tool(["return process.env.OTHER ?? text;"], env_vars=["WORDS_KEY"]))
-    assert "environment variables are plain names, listed, and read by name" in failed(one_tool(["return text;"], env_vars=["not a name"]))
+    with pytest.raises(NodeDesignError):  # a name that is not a name is refused before it can be written into the command in the README
+        made(one_tool(["return text;"], env_vars=["not a name"]))
     key = "sk-" + "a" * 30
     got = results(one_tool([f"return '{key}';"]))
     assert got["no key or token in any file"][0] == FAILED and "aaaaaaaa" not in got["no key or token in any file"][1]

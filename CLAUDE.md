@@ -22,7 +22,7 @@ Phase 4a is built too (a plugin can carry MCP servers from the library: `servers
 [docs/plugin-builder.md](docs/plugin-builder.md)).
 Phase 4b is built too (a plugin can carry hooks, only from the catalogue in `skillforge/hookcatalog/`: fixed scripts, typed options, recognised only when byte-identical;
 [docs/hook-catalogue.md](docs/hook-catalogue.md); real Claude Code ran them, which found that a guard that cannot start failed open, so guards now carry `onFailure: block`; two independent reviews of Phases 4a and 4b are fixed and tested).
-Phase 3b is built too (the MCP builder for Node: its own kind `mcp-node`, a TypeScript `server.ts` run by `node --permission` in the sandbox and read by `validate/mcp_node.py`; image built once with `python -m skillforge sandbox-build-mcp-node`; [docs/mcp-builder-node.md](docs/mcp-builder-node.md); not in plugins yet).
+Phase 3b is built too (the MCP builder for Node: its own kind `mcp-node`, a TypeScript `server.ts` run by `node --permission` in the sandbox and read by `validate/mcp_node.py`; image built once with `python -m skillforge sandbox-build-mcp-node`; [docs/mcp-builder-node.md](docs/mcp-builder-node.md); two independent reviews are fixed and tested; not in plugins yet).
 Next: the next differentiator ([docs/differentiators.md](docs/differentiators.md):
 the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
 Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).

@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Iterator, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
@@ -41,6 +43,8 @@ WRITES_CHECK = "no writing or deleting of files (found by syntax)"
 IMPORTS_CHECK = "only Node's own modules, the MCP SDK and zod are imported"
 ENV_CHECK = "environment variables are read by a plain name only"
 STDOUT_CHECK = "nothing is written to the protocol stream"
+READS_CHECK = "no reading of files (found by syntax)"
+UNREADABLE_CHECK = "no property is reached by a name the checks cannot read"
 SYNTAX_CHECK = "only syntax that `node server.ts` can run"
 EXTRA_CODE_CHECK = "server.ts is the only code in the folder"
 PACKAGE_CHECK = "package.json runs nothing when installed and names only the pinned packages"
@@ -54,7 +58,7 @@ MAX_NODES = 400_000
 # are resolved and a leading `node:` or `globalThis.` is dropped.
 
 COMMAND_REFS = frozenset({
-    "child_process", "cluster", "worker_threads", "repl", "wasi", "process.kill", "process.dlopen", "process.binding", "process._linkedBinding",
+    "child_process", "cluster", "worker_threads", "repl", "wasi", "process.kill", "process.dlopen", "process.binding", "process._linkedBinding", "process.execve",
     "Bun.spawn", "Bun.spawnSync", "Deno.Command", "Deno.run", "execa", "cross-spawn", "shelljs", "node-pty", "Worker", "SharedWorker",
 })
 DYNAMIC_REFS = frozenset({
@@ -71,12 +75,12 @@ WRITE_MEMBERS = frozenset({
     "writeFile", "writeFileSync", "appendFile", "appendFileSync", "createWriteStream", "mkdir", "mkdirSync", "mkdtemp", "mkdtempSync", "rm", "rmSync", "rmdir",
     "rmdirSync", "unlink", "unlinkSync", "rename", "renameSync", "copyFile", "copyFileSync", "cp", "cpSync", "symlink", "symlinkSync", "link", "linkSync",
     "truncate", "truncateSync", "ftruncate", "ftruncateSync", "chmod", "chmodSync", "chown", "chownSync", "lchown", "lchownSync", "utimes", "utimesSync",
-    "futimes", "futimesSync", "lutimes", "lutimesSync", "write", "writeSync", "writev", "writevSync", "fchmod", "fchmodSync", "fchown", "fchownSync", "lchmod", "lchmodSync",
+    "futimes", "futimesSync", "lutimes", "lutimesSync", "write", "writeSync", "writev", "writevSync", "fchmod", "fchmodSync", "fchown", "fchownSync", "lchmod", "lchmodSync", "WriteStream", "mkdtempDisposable",
 })
 READ_MEMBERS = frozenset({
     "readFile", "readFileSync", "readdir", "readdirSync", "stat", "statSync", "lstat", "lstatSync", "readlink", "readlinkSync", "access", "accessSync",
     "exists", "existsSync", "opendir", "opendirSync", "createReadStream", "realpath", "realpathSync", "glob", "globSync", "watch", "watchFile", "read", "readSync",
-    "readv", "readvSync", "statfs", "statfsSync", "fstat", "fstatSync",
+    "readv", "readvSync", "statfs", "statfsSync", "fstat", "fstatSync", "ReadStream",
 })
 OPEN_MEMBERS = frozenset({"open", "openSync"})  # read or write depending on the flags
 WRITE_REFS = frozenset({"sqlite", "Bun.write", "Deno.writeFile", "Deno.writeTextFile", "Deno.remove", "Deno.mkdir", "Deno.rename", "Deno.copyFile", "Deno.symlink", "Deno.truncate"})
@@ -126,6 +130,9 @@ class NodeToolFact:
     stdout: bool = False
     computed: bool = False
     unsafe_index: list[str] = field(default_factory=list)  # computed property names that are not provably numbers: how a program reaches `constructor`
+    declared: set[str] = field(default_factory=set)  # every name declared anywhere inside the handler (a declaration can hide a built-in name)
+    mutates: list[str] = field(default_factory=list)  # built-ins it assigns to or deletes from: `JSON.stringify = ...`
+    meta: bool = False  # uses import.meta
 
 
 @dataclass
@@ -143,6 +150,7 @@ class NodeFacts:
     env_names: set[str] = field(default_factory=set)
     env_dynamic: bool = False
     process_other: bool = False  # `process` used for anything but reading an environment variable by name
+    unsafe_index: list[str] = field(default_factory=list)  # computed property names that are not provably numbers, anywhere in the file
     secrets: list[tuple[int, str]] = field(default_factory=list)
     undefined: set[str] = field(default_factory=set)
     unused_imports: set[str] = field(default_factory=set)
@@ -152,6 +160,33 @@ class NodeFacts:
 
 
 # ---- reading the tree ----------------------------------------------------------------------------------------------------
+
+_CTX: ContextVar[Any] = ContextVar("mcp_node_tree", default=None)
+MAX_REGISTERED = 64  # registerTool calls read; more than this is refused (each one is read together with everything inside it)
+
+
+class _Tree:
+    """What is looked up again and again about one parsed file, worked out once: each node's parent (`node.parent` takes time in proportion to the depth, which made a
+    long sum take quadratic time) and the nodes that sit inside an import statement."""
+
+    def __init__(self, nodes: list[Any]) -> None:
+        self.parents: dict[int, Any] = {}
+        for node in nodes:
+            for child in node.children:
+                self.parents[child.id] = node
+        self.imports: set[int] = set()
+        for node in nodes:
+            if node.type == "import_statement" or (node.type == "export_statement" and _field(node, "source") is not None):
+                stack = [node]
+                while stack:
+                    inner = stack.pop()
+                    self.imports.add(inner.id)
+                    stack.extend(inner.children)
+
+
+def _parent(node: Any) -> Any:
+    tree = _CTX.get()
+    return tree.parents.get(node.id) if tree is not None else node.parent
 
 
 def _parse(source: str) -> Any:
@@ -180,11 +215,12 @@ def _walk(root: Any) -> Iterator[Any]:
 
 
 _IDENT_NODES = frozenset({"identifier", "property_identifier", "shorthand_property_identifier", "shorthand_property_identifier_pattern", "private_property_identifier"})
-_UNICODE_ESCAPE = re.compile(r"\\u\{([0-9A-Fa-f]{1,6})\}|\\u([0-9A-Fa-f]{4})")
+_UNICODE_ESCAPE = re.compile(r"\\u\{([0-9A-Fa-f]+)\}|\\u([0-9A-Fa-f]{4})")
+_LINE_CONTINUATION = re.compile("\\\\(?:\r\n|\n|\r|\u2028|\u2029)")
 
 
 def _text(node: Any) -> str:
-    """The source text of a node. An identifier may be written with unicode escapes (`\\u0065val` IS `eval`), so it is read as the name it means."""
+    """The source text of a node. An identifier may be written with unicode escapes (`\\u0065val` IS `eval`, also with any number of leading zeros inside the braces), so it is read as the name it means."""
     raw = node.text.decode("utf-8", "replace")
     if "\\u" in raw and node.type in _IDENT_NODES:
         def one(match: re.Match[str]) -> str:
@@ -201,9 +237,12 @@ def _field(node: Any, name: str) -> Any:
 
 
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v", "0": "\0", "\\": "\\", "'": "'", '"': '"', "`": "`", "$": "$"}
+_LINE_ENDINGS = ("\n", "\r\n", "\r", "\u2028", "\u2029")
 
 
 def _unescape(raw: str) -> str:
+    if raw[1:] in _LINE_ENDINGS:  # a backslash before a line ending joins the lines: it adds nothing to the string
+        return ""
     if len(raw) == 2 and raw[1] in _ESCAPES:
         return _ESCAPES[raw[1]]
     try:
@@ -224,7 +263,7 @@ def _string_value(node: Any) -> str | None:
         parts = []
         for child in node.children:
             if child.type == "string_fragment":
-                parts.append(_text(child))
+                parts.append(_LINE_CONTINUATION.sub("", _text(child)))
             elif child.type == "escape_sequence":
                 parts.append(_unescape(_text(child)))
         return "".join(parts)
@@ -232,16 +271,21 @@ def _string_value(node: Any) -> str | None:
 
 
 def _unwrap(node: Any) -> Any:
-    while node is not None and node.type in ("parenthesized_expression", "as_expression", "non_null_expression", "satisfies_expression", "type_assertion"):
-        inner = next((c for c in node.named_children if c.type not in ("type_annotation",)), None) if node.type != "as_expression" else node.named_children[0]
+    while node is not None and node.type in ("parenthesized_expression", "as_expression", "non_null_expression", "satisfies_expression", "type_assertion", "sequence_expression"):
+        if node.type == "sequence_expression":  # `(0, process)` is `process`: a sequence is worth its last part
+            inner = node.named_children[-1] if node.named_children else None
+        elif node.type == "as_expression":
+            inner = node.named_children[0]
+        else:
+            inner = next((c for c in node.named_children if c.type not in ("type_annotation",)), None)
         if inner is None:
             break
         node = inner
     return node
 
 
-def _fold(node: Any) -> str | None:
-    """A string built only of literals joined with `+` (and templates without substitutions), or None. Iterative and bounded."""
+def _fold(node: Any, consts: dict[str, str] | None = None) -> str | None:
+    """A string built only of literals (and constants that are themselves such strings) joined with `+`, or None. Iterative and bounded."""
     pieces: list[str] = []
     stack = [node]
     visited = 0
@@ -257,7 +301,10 @@ def _fold(node: Any) -> str | None:
             stack.append(_field(current, "right"))
             stack.append(_field(current, "left"))
             continue
-        value = _string_value(current)
+        if current.type == "identifier" and consts and _text(current) in consts:
+            value: str | None = consts[_text(current)]
+        else:
+            value = _string_value(current)
         if value is None:
             return None
         pieces.append(value)
@@ -267,7 +314,7 @@ def _fold(node: Any) -> str | None:
 
 
 def _binding_names(pattern: Any) -> list[Any]:
-    """Every identifier node a binding pattern declares (not the default values or computed keys inside it)."""
+    """Every identifier node a binding pattern declares or assigns (not the default values or computed keys inside it)."""
     out: list[Any] = []
     stack = [pattern]
     while stack:
@@ -287,123 +334,187 @@ def _binding_names(pattern: Any) -> list[Any]:
     return out
 
 
-def _declared_in(nodes: Iterator[Any]) -> set[str]:
-    """Names declared by the nodes given: variables, parameters, functions, classes, imports, catch and loop variables."""
-    out: set[str] = set()
+def _declared_names(nodes: Iterator[Any]) -> Iterator[str]:
+    """Names declared by the nodes given, one per declaration: variables, parameters, functions, classes, imports, catch and loop variables."""
     for node in nodes:
         kind = node.type
         if kind == "variable_declarator":
-            out.update(_text(n) for n in _binding_names(_field(node, "name")))
+            yield from (_text(n) for n in _binding_names(_field(node, "name")))
         elif kind in ("required_parameter", "optional_parameter"):
-            out.update(_text(n) for n in _binding_names(node))
-        elif kind == "formal_parameters":
-            pass
+            yield from (_text(n) for n in _binding_names(node))
         elif kind in ("function_declaration", "generator_function_declaration", "class_declaration", "function_expression", "generator_function", "class", "enum_declaration", "internal_module"):
             name = _field(node, "name")
             if name is not None:
-                out.add(_text(name))
+                yield _text(name)
         elif kind == "arrow_function":
             single = _field(node, "parameter")
             if single is not None:
-                out.add(_text(single))
+                yield _text(single)
         elif kind == "catch_clause":
             param = _field(node, "parameter")
             if param is not None:
-                out.update(_text(n) for n in _binding_names(param))
+                yield from (_text(n) for n in _binding_names(param))
         elif kind == "for_in_statement" and _field(node, "kind") is not None:
-            out.update(_text(n) for n in _binding_names(_field(node, "left")))
+            yield from (_text(n) for n in _binding_names(_field(node, "left")))
         elif kind == "import_specifier":
-            out.add(_text(_field(node, "alias") or _field(node, "name")))
-        elif kind == "namespace_import":
-            out.update(_text(c) for c in node.named_children if c.type == "identifier")
-        elif kind == "import_clause":
-            out.update(_text(c) for c in node.named_children if c.type == "identifier")
-    return out
+            yield _text(_field(node, "alias") or _field(node, "name"))
+        elif kind in ("namespace_import", "import_clause"):
+            yield from (_text(c) for c in node.named_children if c.type == "identifier")
+
+
+def _declared_in(nodes: Iterator[Any]) -> set[str]:
+    return set(_declared_names(nodes))
 
 
 # ---- names ---------------------------------------------------------------------------------------------------------------
 
 
 class _Names:
-    """Maps a local name to what it really is, after imports and simple aliases (`const w = fs.writeFileSync`, `const { exec } = cp`)."""
+    """What a local name can stand for. A name keeps EVERY meaning it is given anywhere in the file (an import, `const w = fs.writeFileSync`, `const { exec } = cp`, and a
+    decoy `const Function = o` in some other function) and always keeps its own spelling too, so a declaration somewhere else can add a meaning to a name but never take
+    one away. A constant that is a string built of literals is remembered, so `x[k]` with `const k = "con" + "structor"` is read as `x.constructor`."""
 
     def __init__(self, nodes: list[Any]) -> None:
-        self.alias: dict[str, str] = {}
-        self.modules: dict[str, str] = {}
+        self.alias: dict[str, list[str]] = {}
+        self.consts: dict[str, str] = {}
+        counts = Counter(_declared_names(iter(nodes)))
         for node in nodes:
             if node.type != "import_statement":
                 continue
             source = _field(node, "source")
             module = _plain(_string_value(source) or "") if source is not None else ""
+            builtin = module in KNOWN_NODE_MODULES  # a Node module's default import IS the module (`import fs from "node:fs"`), not a `default` member of it
             for clause in node.named_children:
                 if clause.type != "import_clause":
                     continue
                 for part in clause.named_children:
                     if part.type == "identifier":
-                        self.alias[_text(part)] = f"{module}.default"
+                        self._add(_text(part), module if builtin else f"{module}.default")
                     elif part.type == "namespace_import":
                         for ident in part.named_children:
                             if ident.type == "identifier":
-                                self.alias[_text(ident)] = module
+                                self._add(_text(ident), module)
                     elif part.type == "named_imports":
                         for spec in part.named_children:
                             if spec.type == "import_specifier":
-                                name = _field(spec, "name")
-                                alias = _field(spec, "alias")
-                                self.alias[_text(alias or name)] = f"{module}.{_text(name)}"
+                                name, alias = _field(spec, "name"), _field(spec, "alias")
+                                self._add(_text(alias or name), module if (builtin and _text(name) == "default") else f"{module}.{_text(name)}")
+        for _ in range(3):  # a constant built of other constants takes a pass more
+            for node in nodes:
+                if node.type != "variable_declarator":
+                    continue
+                target, value = _field(node, "name"), _field(node, "value")
+                if target is None or value is None or target.type != "identifier" or counts[_text(target)] != 1 or _text(target) in self.consts:
+                    continue
+                parent = _parent(node)
+                if parent is not None and parent.type == "lexical_declaration" and parent.children and parent.children[0].type == "const":
+                    folded = _fold(value, self.consts)
+                    if folded is not None:
+                        self.consts[_text(target)] = folded
         for _ in range(2):  # a second pass lets an alias of an alias resolve
             for node in nodes:
                 if node.type != "variable_declarator":
                     continue
                 target, value = _field(node, "name"), _field(node, "value")
-                if value is None or target is None:
+                if target is None or value is None:
                     continue
-                whole = self.qual(value)
-                if whole is None:
-                    continue
-                if target.type == "identifier":
-                    self.alias[_text(target)] = whole
-                elif target.type == "object_pattern":
-                    for child in target.named_children:
-                        if child.type == "shorthand_property_identifier_pattern":
-                            self.alias[_text(child)] = f"{whole}.{_text(child)}"
-                        elif child.type == "pair_pattern":
-                            key, inner = _field(child, "key"), _field(child, "value")
-                            if key is not None and inner is not None and inner.type == "identifier":
-                                self.alias[_text(inner)] = f"{whole}.{_text(key)}"
+                wholes = self.quals(value)
+                if wholes:
+                    self._bind(target, wholes)
 
-    def qual(self, node: Any) -> str | None:
-        """The dotted name an identifier or a member chain stands for, or None when it starts from something else."""
+    def _add(self, name: str, whole: str) -> None:
+        meanings = self.alias.setdefault(name, [])
+        if whole not in meanings:
+            meanings.append(whole)
+
+    def _bind(self, target: Any, wholes: list[str]) -> None:
+        if target is None:
+            return
+        kind = target.type
+        if kind == "identifier":
+            for whole in wholes:
+                self._add(_text(target), whole)
+        elif kind == "assignment_pattern":
+            self._bind(_field(target, "left"), wholes)
+        elif kind == "object_pattern":
+            for child in target.named_children:
+                if child.type == "shorthand_property_identifier_pattern":
+                    for whole in wholes:
+                        self._add(_text(child), f"{whole}.{_text(child)}")
+                elif child.type == "object_assignment_pattern":
+                    left = _field(child, "left")
+                    if left is not None:
+                        for whole in wholes:
+                            self._add(_text(left), f"{whole}.{_text(left)}")
+                elif child.type == "pair_pattern":
+                    key, inner = self.key_of(_field(child, "key")), _field(child, "value")
+                    if key is not None and inner is not None:
+                        self._bind(inner, [f"{whole}.{key}" for whole in wholes])
+
+    def key_of(self, key: Any) -> str | None:
+        """The name a property key spells (`constructor`, `"constructor"`, `["con" + "structor"]`), or None when it cannot be read."""
+        if key is None:
+            return None
+        if key.type in ("property_identifier", "private_property_identifier"):
+            return _text(key)
+        literal = _string_value(key)
+        if literal is not None:
+            return literal
+        if key.type == "computed_property_name":
+            inner = next(iter(key.named_children), None)
+            return self.literal(inner) if inner is not None else None
+        return None
+
+    def literal(self, node: Any) -> str | None:
+        return _fold(node, self.consts)
+
+    def heads(self, name: str) -> list[str]:
+        """Every meaning a name has, and its own spelling too (a decoy declaration elsewhere adds a meaning; it never removes one)."""
+        meanings = list(self.alias.get(name, []))
+        if name not in meanings:
+            meanings.append(name)
+        return meanings
+
+    def quals(self, node: Any) -> list[str]:
+        """Every dotted name an identifier or a member chain can stand for (after each meaning its first name has anywhere in the file), or [] when it starts from something else."""
         parts: list[str] = []
         node = _unwrap(node)
+        name = ""
         while node is not None:
-            if node.type == "identifier":
-                head = self.alias.get(_text(node), _text(node))
+            if node.type in ("identifier", "shorthand_property_identifier"):
+                name = _text(node)
                 break
-            if node.type == "this":
-                return None
             if node.type == "member_expression":
                 prop = _field(node, "property")
                 if prop is None:
-                    return None
+                    return []
                 parts.append(_text(prop))
                 node = _unwrap(_field(node, "object"))
             elif node.type == "subscript_expression":
                 index = _field(node, "index")
-                literal = _fold(index) if index is not None else None
+                literal = self.literal(index) if index is not None else None
                 if literal is None:
-                    return None
+                    return []
                 parts.append(literal)
                 node = _unwrap(_field(node, "object"))
             else:
-                return None
+                return []
         else:
-            return None
-        name = ".".join([head, *reversed(parts)])
-        for prefix in GLOBAL_PREFIXES:
-            while name.startswith(prefix):
-                name = name[len(prefix):]
-        return _plain(name)
+            return []
+        out: list[str] = []
+        for head in self.heads(name):
+            full = ".".join([head, *reversed(parts)])
+            for prefix in GLOBAL_PREFIXES:
+                while full.startswith(prefix):
+                    full = full[len(prefix):]
+            full = _plain(full)
+            if full not in out:
+                out.append(full)
+        return out
+
+    def qual(self, node: Any) -> str | None:
+        found = self.quals(node)
+        return found[0] if found else None
 
 
 # ---- the analysis --------------------------------------------------------------------------------------------------------
@@ -423,32 +534,24 @@ def _object_text(node: Any, key: str) -> str | None:
 
 def _is_object_of(node: Any) -> bool:
     """True when `node` is the thing a property is taken from (`node.x`, `node["x"]`): the chain it starts is classified as a whole."""
-    parent = node.parent
+    parent = _parent(node)
     return parent is not None and parent.type in ("member_expression", "subscript_expression") and _field(parent, "object") is not None and _field(parent, "object").id == node.id
 
 
 def _in_import(node: Any) -> bool:
     """Inside an import statement, where a name is declared or named, not used."""
-    parent = node.parent
-    while parent is not None:
-        if parent.type == "import_statement":
-            return True
-        if parent.type == "export_statement":
-            return _field(parent, "source") is not None
-        if parent.type in ("program", "statement_block", "arrow_function"):
-            return False
-        parent = parent.parent
-    return False
+    tree = _CTX.get()
+    return tree is not None and node.id in tree.imports
 
 
 def _is_declared_name(node: Any) -> bool:
-    parent = node.parent
+    parent = _parent(node)
     return parent is not None and parent.type == "variable_declarator" and _field(parent, "name") is not None and _field(parent, "name").id == node.id
 
 
 def _is_alias_value(node: Any) -> bool:
     """`const f = fs` or `const { rmSync } = fs`: the module is given another name, which the reading follows, not passed somewhere it cannot follow."""
-    parent = node.parent
+    parent = _parent(node)
     if parent is None or parent.type != "variable_declarator" or _field(parent, "value") is None or _field(parent, "value").id != node.id:
         return False
     target = _field(parent, "name")
@@ -466,9 +569,34 @@ def _root(node: Any) -> Any:
 _ARITHMETIC = frozenset({"+", "-", "*", "/", "%", "**"})
 
 
+def _assigned(node: Any) -> list[Any]:
+    """The identifier nodes this node assigns a new value to (`i = 1`, `i += 1`, `i++`, `[i] = x`, `({ i } = x)`, `for (i of x)`)."""
+    kind = node.type
+    if kind in ("assignment_expression", "augmented_assignment_expression"):
+        left = _field(node, "left")
+        return _binding_names(left) if left is not None else []
+    if kind == "update_expression":
+        argument = _field(node, "argument")
+        return [argument] if argument is not None and argument.type == "identifier" else []
+    if kind == "for_in_statement" and _field(node, "kind") is None:
+        left = _field(node, "left")
+        return _binding_names(left) if left is not None else []
+    return []
+
+
+def _inside(node: Any, ancestor: Any) -> bool:
+    current = node
+    while current is not None:
+        if current.id == ancestor.id:
+            return True
+        current = _parent(current)
+    return False
+
+
 def _loop_counters(nodes: list[Any]) -> set[str]:
-    """Names that are only ever numbers: declared as `for (let i = 0; ...; i++)` and never assigned to anywhere but the loop's own update."""
-    candidates: dict[str, Any] = {}
+    """Names that are only ever numbers: declared ONLY as `for (let i = 0; ...; i++)` counters (every declaration of the name anywhere is one) and never assigned to
+    anywhere but a loop's own update clause (`i++`, `i -= 2`). A name declared once more, or assigned in a pattern, in a `for (i of ...)` or in the body, is not one."""
+    loops: dict[str, list[Any]] = {}
     for node in nodes:
         if node.type != "for_statement":
             continue
@@ -478,28 +606,27 @@ def _loop_counters(nodes: list[Any]) -> set[str]:
         for decl in (c for c in init.named_children if c.type == "variable_declarator"):
             target, value = _field(decl, "name"), _field(decl, "value")
             if target is not None and target.type == "identifier" and value is not None and value.type == "number":
-                candidates[_text(target)] = _field(node, "increment")
+                loops.setdefault(_text(target), []).append(_field(node, "increment"))
+    if not loops:
+        return set()
+    declared = Counter(_declared_names(iter(nodes)))
+    candidates = {name: updates for name, updates in loops.items() if declared[name] == len(updates)}
     for node in nodes:
-        if node.type in ("assignment_expression", "augmented_assignment_expression", "update_expression"):
-            target = _field(node, "left") if node.type != "update_expression" else _field(node, "argument")
-            if target is None or target.type != "identifier" or _text(target) not in candidates:
+        for target in _assigned(node):
+            name = _text(target)
+            if name not in candidates:
                 continue
-            update = candidates[_text(target)]
-            inside = False
-            parent = node
-            while parent is not None and update is not None:
-                if parent.id == update.id:
-                    inside = True
-                    break
-                parent = parent.parent
-            if not inside or node.type == "assignment_expression":
-                candidates.pop(_text(target), None)
+            numeric = node.type == "update_expression" or (
+                node.type == "augmented_assignment_expression" and _field(node, "right") is not None and _field(node, "right").type == "number" and _field(node, "operator") is not None
+                and _text(_field(node, "operator")) in ("+=", "-=")
+            )
+            if not (numeric and any(update is not None and _inside(node, update) for update in candidates[name])):
+                candidates.pop(name, None)
     return set(candidates)
 
 
 def _safe_index(index: Any, counters: set[str]) -> bool:
-    """True when a computed property name is provably a number (or a string that can never be a property of `Object`): a number, a name that is only a loop counter,
-    or arithmetic with a number in it (`s.length - 1`, `i + 1`)."""
+    """True when a computed property name is provably a number: a number, a name that is only a loop counter, or arithmetic with a number in it (`s.length - 1`, `i + 1`)."""
     node = _unwrap(index)
     if node is None:
         return False
@@ -520,76 +647,83 @@ def _safe_index(index: Any, counters: set[str]) -> bool:
     return False
 
 
-def _pattern_key(node: Any) -> tuple[str | None, bool]:
+def _pattern_key(node: Any, names: _Names) -> tuple[str | None, bool]:
     """(the property a destructuring pattern takes, or None; whether it is taken by a computed name that cannot be read)."""
     if node.type == "shorthand_property_identifier_pattern":
         return _text(node), False
     key = _field(node, "key")
     if key is None or key.type == "number":
         return None, False
-    if key.type in ("property_identifier", "private_property_identifier"):
-        return _text(key), False
-    literal = _string_value(key)
-    if literal is not None:
-        return literal, False
+    name = names.key_of(key)
+    if name is not None:
+        return name, False
     if key.type == "computed_property_name":
         inner = next(iter(key.named_children), None)
         if inner is None or _unwrap(inner).type == "number":
             return None, False
-        folded = _fold(inner)
-        return (folded, False) if folded is not None else (None, True)
+        return None, True
     return None, False
+
+
+def _sensitive(head: str) -> bool:
+    """A name that, reached by a computed property, could be anything dangerous: a module that runs programs, writes, reads or reaches the network, or a way to build code."""
+    return (
+        _hit(head, DYNAMIC_REFS) or _hit(head, COMMAND_REFS) or _hit(head, NETWORK_REFS) or _hit(head, WRITE_REFS) or _hit(head, READ_REFS)
+        or head in FS_MODULES or head.split(".")[0] in ("fs", "process", "fs/promises")
+    )
 
 
 def _classify(nodes: list[Any], names: _Names, into: NodeFacts | NodeToolFact) -> None:
     """Add what `nodes` do to `into`. The same rules run over the whole file and over each tool."""
     caps, dynamic = into.capabilities, into.dynamic
-    counters = _loop_counters(nodes) if isinstance(into, NodeToolFact) else set()
+    counters = _loop_counters(nodes)
+    tool = into if isinstance(into, NodeToolFact) else None
     for node in nodes:
         kind = node.type
-        if kind in ("member_expression", "subscript_expression", "identifier") and not _is_object_of(node) and not _in_import(node) and not (kind == "identifier" and _is_declared_name(node)):
-            whole = names.qual(node)
-            if whole is None and kind != "identifier":
+        if kind in ("member_expression", "subscript_expression", "identifier", "shorthand_property_identifier") and not _is_object_of(node) and not _in_import(node) and not (kind == "identifier" and _is_declared_name(node)):
+            wholes = names.quals(node)
+            if not wholes and kind not in ("identifier", "shorthand_property_identifier"):
                 root = _root(node)
                 if root is not None:  # a computed name (`globalThis[k]`, `fs[k]`): what it starts from is still known
-                    whole = names.alias.get(_text(root), _text(root))
-                    if kind == "subscript_expression" and names.qual(_field(node, "object")) != "process.env":  # (an env read by a computed name has its own check)
-                        dynamic.add(f"a property of {whole.split('.')[0]} chosen by a computed name")
-            _ref(whole, node, into, alias=_is_alias_value(node))
+                    wholes = names.heads(_text(root))
+                    if kind == "subscript_expression" and "process.env" not in names.quals(_field(node, "object")) and any(_sensitive(h) for h in wholes):
+                        dynamic.add(f"a property of {wholes[0].split('.')[0]} chosen by a computed name")
+            aliased = _is_alias_value(node)
+            for whole in wholes:
+                _ref(whole, node, into, alias=aliased)
         if kind == "member_expression":
             prop = _field(node, "property")
             if prop is not None:
                 name = _text(prop)
-                if isinstance(into, NodeToolFact):
-                    into.props.add(name)
+                if tool is not None:
+                    tool.props.add(name)
                 if name in DYNAMIC_PROPS:
                     dynamic.add(f"the property .{name}")
         elif kind in ("pair_pattern", "shorthand_property_identifier_pattern"):
             # destructuring takes a property by name just as `.name` does: `const { constructor: A } = []` reaches Array, and `A.constructor` Function
-            name, unsafe = _pattern_key(node)
+            name, unsafe = _pattern_key(node, names)
             if name is not None:
-                if isinstance(into, NodeToolFact):
-                    into.props.add(name)
+                if tool is not None:
+                    tool.props.add(name)
                 if name in DYNAMIC_PROPS:
                     dynamic.add(f"the property {name}, taken by destructuring")
             elif unsafe:
                 into.computed = True
-                if isinstance(into, NodeToolFact):
-                    key = _field(node, "key") if node.type == "pair_pattern" else None
-                    inner = next(iter(key.named_children), None) if key is not None else None
-                    if inner is None or not _safe_index(inner, counters):
-                        into.unsafe_index.append(("{ [" + (_text(inner) if inner is not None else "?") + "]: ... }")[:40])
+                key = _field(node, "key") if node.type == "pair_pattern" else None
+                inner = next(iter(key.named_children), None) if key is not None else None
+                if inner is None or not _safe_index(inner, counters):
+                    into.unsafe_index.append(("{ [" + (_text(inner) if inner is not None else "?") + "]: ... }")[:40])
         elif kind == "subscript_expression":
             index = _field(node, "index")
-            literal = _fold(index) if index is not None else None
+            literal = names.literal(index) if index is not None else None
             if literal is not None:
-                if isinstance(into, NodeToolFact):
-                    into.props.add(literal)
+                if tool is not None:
+                    tool.props.add(literal)
                 if literal in DYNAMIC_PROPS:
                     dynamic.add(f'the property ["{literal}"]')
             elif index is not None and index.type != "number":
                 into.computed = True
-                if isinstance(into, NodeToolFact) and not _safe_index(index, counters) and names.qual(_field(node, "object")) != "process.env":
+                if not _safe_index(index, counters) and "process.env" not in names.quals(_field(node, "object")):
                     into.unsafe_index.append(_text(index)[:40])
         elif kind == "call_expression":
             function = _field(node, "function")
@@ -600,8 +734,7 @@ def _classify(nodes: list[Any], names: _Names, into: NodeFacts | NodeToolFact) -
                 literal = _string_value(_unwrap(first)) if first is not None else None
                 if literal is not None:
                     _ref(_plain(literal), node, into)
-            whole = names.qual(function) if function is not None else None
-            if whole is not None:
+            for whole in (names.quals(function) if function is not None else []):
                 if whole in ("setTimeout", "setInterval", "setImmediate") and first is not None and _unwrap(first).type in ("string", "template_string"):
                     dynamic.add(f"{whole} with a string (it is run as code)")
                 head, _, member = whole.rpartition(".")
@@ -611,13 +744,30 @@ def _classify(nodes: list[Any], names: _Names, into: NodeFacts | NodeToolFact) -
                     caps.add("read_files")
                     if value is None or not value.startswith("r") or "+" in value:
                         caps.add("write_files")
+                if tool is not None and whole in ("Object.assign", "Object.defineProperties") and first is not None and _unwrap(first).type == "identifier" and _text(_unwrap(first)) in KNOWN_GLOBALS:
+                    tool.mutates.append(_text(_unwrap(first)))
         elif kind == "new_expression":
             ctor = _field(node, "constructor")
-            whole = names.qual(ctor) if ctor is not None else None
-            if whole is not None:
+            for whole in (names.quals(ctor) if ctor is not None else []):
                 _ref(whole, node, into)
-        elif isinstance(into, NodeFacts) and (kind in NON_ERASABLE or (kind == "accessibility_modifier" and node.parent is not None and node.parent.type in ("required_parameter", "optional_parameter"))):
+        elif kind == "meta_property" and tool is not None:
+            tool.meta = True
+        elif isinstance(into, NodeFacts) and (kind in NON_ERASABLE or (kind == "accessibility_modifier" and _parent(node) is not None and _parent(node).type in ("required_parameter", "optional_parameter"))):
             into.non_erasable.add(NON_ERASABLE.get(kind, "a constructor parameter with a modifier"))
+        if tool is not None and kind in ("assignment_expression", "augmented_assignment_expression", "update_expression", "unary_expression"):
+            target = None
+            if kind == "unary_expression":
+                op = _field(node, "operator")
+                target = _field(node, "argument") if op is not None and _text(op) == "delete" else None
+            elif kind == "update_expression":
+                target = _field(node, "argument")
+            else:
+                target = _field(node, "left")
+            if target is not None:
+                inner = _unwrap(target)
+                root = _root(inner) if inner.type in ("member_expression", "subscript_expression") else (inner if inner.type == "identifier" else None)
+                if root is not None and _text(root) in KNOWN_GLOBALS:  # `JSON.stringify = ...`, `delete Map.get`, `Math.max++`: a built-in every tool and the SDK share
+                    tool.mutates.append(_text(root))
 
 
 def _ref(whole: str | None, node: Any, into: NodeFacts | NodeToolFact, alias: bool = False) -> None:
@@ -654,14 +804,14 @@ def _ref(whole: str | None, node: Any, into: NodeFacts | NodeToolFact, alias: bo
 
 
 def _env(nodes: list[Any], names: _Names, facts: NodeFacts) -> None:
-    """Environment variables: `process.env.NAME`, `process.env["NAME"]` and `const { NAME } = process.env` are plain reads by name; anything else reads
+    """Environment variables: `process.env.NAME`, `process.env["NAME"]`, `process["env"].NAME` and `const { NAME } = process.env` are plain reads by name; anything else reads
     them by a computed name or all of them."""
     for node in nodes:
-        if node.type not in ("member_expression", "identifier") or _in_import(node) or (node.type == "identifier" and _is_declared_name(node)):
+        if node.type not in ("member_expression", "subscript_expression", "identifier") or _in_import(node) or (node.type == "identifier" and _is_declared_name(node)):
             continue
-        if names.qual(node) != "process.env":
+        if "process.env" not in names.quals(node):
             continue
-        parent = node.parent
+        parent = _parent(node)
         ok = False
         if _is_object_of(node):
             if parent.type == "member_expression":
@@ -671,7 +821,7 @@ def _env(nodes: list[Any], names: _Names, facts: NodeFacts) -> None:
                     ok = True
             else:
                 index = _field(parent, "index")
-                literal = _string_value(index) if index is not None else None
+                literal = names.literal(index) if index is not None else None
                 if literal is not None:
                     facts.env_names.add(literal)
                     ok = True
@@ -690,10 +840,33 @@ def _env(nodes: list[Any], names: _Names, facts: NodeFacts) -> None:
             facts.env_dynamic = True
 
 
+_BARE_PACKAGE = re.compile(r"^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*$", re.I)
+
+
+def _import_spec(raw: str, facts: NodeFacts) -> None:
+    """Record an import specifier. A Node module (`node:fs`) or a bare package name is a module the person installs; ANYTHING else (a path, a `data:` or `https:` URL, `#name`) is
+    code the checks never read, which is what `other code beside it` is for files, so it is code built while loading."""
+    if raw.startswith("node:") or _BARE_PACKAGE.match(raw):
+        facts.imports.add(_plain(raw))
+        return
+    facts.imports.add(".")
+    facts.dynamic.add(f"an import of code that is not a package or a Node module ({raw[:40]}), which the checks never read")
+
+
 def analyze_node_server(source: str) -> NodeFacts:
     """Read `server.ts` by syntax. Raises SyntaxError (it does not parse) or ValueError (it cannot be read at all)."""
     root = _parse(source)
     nodes = list(_walk(root))
+    if sum(1 for n in nodes if n.type == "property_identifier" and _text(n) in ("registerTool", "tool")) > MAX_REGISTERED:
+        raise ValueError(f"it registers more than {MAX_REGISTERED} tools, which is too many to read")
+    token = _CTX.set(_Tree(nodes))
+    try:
+        return _analyze(source, nodes)
+    finally:
+        _CTX.reset(token)
+
+
+def _analyze(source: str, nodes: list[Any]) -> NodeFacts:
     names = _Names(nodes)
     facts = NodeFacts()
     _classify(nodes, names, facts)
@@ -701,14 +874,10 @@ def analyze_node_server(source: str) -> NodeFacts:
     declared = _declared_in(iter(nodes))
 
     for node in nodes:
-        if node.type == "import_statement":
-            module = _plain(_string_value(_field(node, "source")) or "") if _field(node, "source") is not None else ""
-            top = "." if module.startswith((".", "/")) else module
-            facts.imports.add(top)
-        elif node.type == "export_statement" and _field(node, "source") is not None:
-            module = _plain(_string_value(_field(node, "source")) or "")
-            facts.imports.add("." if module.startswith((".", "/")) else module)
-    facts.imported = {v for v in names.alias.values() if "." in v and not v.startswith(".")} | {m for m in facts.imports if m}
+        if node.type == "import_statement" or (node.type == "export_statement" and _field(node, "source") is not None):
+            raw = _string_value(_field(node, "source")) if _field(node, "source") is not None else None
+            _import_spec(raw if raw is not None else "", facts)
+    facts.imported = {v for meanings in names.alias.values() for v in meanings if "." in v and not v.startswith(".")} | {m for m in facts.imports if m}
     for module in list(facts.imports):
         facts.refs.add(module)
         if _hit(module, COMMAND_REFS):
@@ -732,7 +901,7 @@ def analyze_node_server(source: str) -> NodeFacts:
                 args = _field(node, "arguments")
                 if args is not None and args.named_children and facts.server_name is None:
                     facts.server_name = _object_text(_unwrap(args.named_children[0]), "name")
-                parent = node.parent
+                parent = _parent(node)
                 if parent is not None and parent.type == "variable_declarator" and _field(parent, "name") is not None:
                     server_vars.update(_text(n) for n in _binding_names(_field(parent, "name")))
     for node in nodes:
@@ -744,8 +913,12 @@ def analyze_node_server(source: str) -> NodeFacts:
         whole = names.qual(function)
         if whole is not None and whole.split(".")[-1] in ("serveStdio",):
             facts.connects = True
-        if function.type == "member_expression":
+        obj, prop = None, None
+        if function.type == "member_expression" and _field(function, "property") is not None:
             obj, prop = _field(function, "object"), _text(_field(function, "property"))
+        elif function.type == "subscript_expression" and _field(function, "index") is not None:
+            obj, prop = _field(function, "object"), names.literal(_field(function, "index"))
+        if prop is not None:
             if prop == "connect" and obj is not None and obj.type == "identifier" and _text(obj) in server_vars:
                 facts.connects = True
             if prop in ("registerTool", "tool") and obj is not None and obj.type == "identifier" and _text(obj) in server_vars:
@@ -759,7 +932,7 @@ def analyze_node_server(source: str) -> NodeFacts:
     uses: dict[str, int] = {}
     for node in nodes:
         if node.type in ("identifier", "shorthand_property_identifier") and not _in_import(node):
-            parent = node.parent
+            parent = _parent(node)
             if node.type == "identifier" and parent is not None and parent.type == "member_expression" and _field(parent, "property") is not None and _field(parent, "property").id == node.id:
                 continue
             uses[_text(node)] = uses.get(_text(node), 0) + 1
@@ -772,16 +945,20 @@ def analyze_node_server(source: str) -> NodeFacts:
             if not uses.get(local):
                 facts.unused_imports.add(local)
 
-    # keys: in the raw text, and in strings folded from pieces
+    # keys: in the raw text, and in strings folded from pieces (only the outermost `+` of a chain is folded: the inner ones are part of it)
     for pattern_label, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(source):
             facts.secrets.append((source.count("\n", 0, match.start()) + 1, pattern_label))
+    inner_sums: set[int] = set()
     for node in nodes:
         if node.type == "binary_expression":
-            parent = node.parent
-            if parent is not None and parent.type == "binary_expression":
-                continue
-            folded = _fold(node)
+            for side in ("left", "right"):
+                child = _field(node, side)
+                if child is not None and child.type == "binary_expression":
+                    inner_sums.add(child.id)
+    for node in nodes:
+        if node.type == "binary_expression" and node.id not in inner_sums:
+            folded = _fold(node, names.consts)
             if folded:
                 for pattern_label, pattern in SECRET_PATTERNS:
                     if pattern.search(folded):
@@ -808,9 +985,10 @@ def _tool(call: Any, how: str, names: _Names, declared_in_file: set[str], facts:
     inner = _declared_in(iter(sub))
     own = list(_walk(handler)) if handler is not None else []
     inner_handler = _declared_in(iter(own))
+    tool.declared = set(inner_handler)
     for node in own:
         if node.type in ("identifier", "shorthand_property_identifier"):
-            parent = node.parent
+            parent = _parent(node)
             if node.type == "identifier" and parent is not None and parent.type == "member_expression" and _field(parent, "property") is not None and _field(parent, "property").id == node.id:
                 continue
             name = _text(node)
@@ -855,7 +1033,7 @@ def node_name_of(files: Mapping[str, bytes]) -> str | None:
     return name if name and SLUG.match(name) and len(name) <= MAX_NAME else None
 
 
-CODE_EXTENSIONS = frozenset({".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", ".node", ".wasm", ".sh", ".bash", ".bat", ".cmd", ".ps1", ".exe", ".dll", ".so", ".dylib", ".py", ".rb", ".php", ".pl"})
+CODE_EXTENSIONS = frozenset({".gyp", ".gypi", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", ".node", ".wasm", ".sh", ".bash", ".bat", ".cmd", ".ps1", ".exe", ".dll", ".so", ".dylib", ".py", ".rb", ".php", ".pl"})
 CONFIG_FILES = frozenset({
     ".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs", "bunfig.toml", ".node-version", ".env", "npm-shrinkwrap.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "yarn.lock", "bun.lock", "bun.lockb",
 })
@@ -951,6 +1129,8 @@ def check_server_ts(files: Mapping[str, bytes], folder: str | None) -> list[Chec
     row(SECRETS_CHECK, [f"it contains what looks like {'; '.join(found)}. Read the key from an environment variable instead"] if found else [], "none found")
     row(NETWORK_CHECK, ["it can reach other computers: read what it calls"] if "network" in facts.capabilities else [], status=WARNING)
     row(WRITES_CHECK, ["it can create, change or delete files: read what it touches"] if "write_files" in facts.capabilities else [], status=WARNING)
+    row(READS_CHECK, ["it can read files: read which ones"] if "read_files" in facts.capabilities else [], status=WARNING)
+    row(UNREADABLE_CHECK, [f"it reaches a property by a name the checks cannot read ({', '.join(sorted(set(facts.unsafe_index))[:3])}): that is how a program reaches `constructor` and builds code from text"] if facts.unsafe_index else [], status=WARNING)
     third = sorted(m for m in facts.imports if m and (m == "." or not (_plain(m) in KNOWN_NODE_MODULES or m == SERVER_SDK or m.startswith(SERVER_SDK + "/") or m == "zod" or m.startswith("zod/"))))
     row(IMPORTS_CHECK, [f"it also imports {', '.join('a file next to server.ts' if m == '.' else m for m in third)}: install them yourself and read what they do"] if third else [], status=WARNING)
     env_problems = ["it reads an environment variable whose name is not written in the code (or all of them), so what a secret could reach cannot be listed"] if facts.env_dynamic else []

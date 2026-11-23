@@ -69,7 +69,7 @@ builder writes may now import only an allow-list of safe standard-library module
 TypeScript SDK v2 (the model drafts function bodies and the imports *as data*, from an allow-list), a `package.json` with exact versions and no scripts, and the pinned lockfile. It is read with tree-sitter by a second
 reader (programs, code built from text, network, file writes, a key in pieces, install scripts, other code beside it), run **in the sandbox under Node's permission model** (`node --permission`, which a real run showed
 refuses file writes through `fs`, starting programs and reads outside the folder, with known gaps such as `node:sqlite`) and called over the real MCP protocol. The README it writes has a `claude mcp add` command that starts the server the same way;
-real Claude Code accepted that command and called a tool of the generated server. It cannot be put in a plugin yet (a plugin cannot run `npm ci`).
+real Claude Code accepted that command and called a tool of the generated server. **Two independent reviews then attacked it** and found a Critical hole (destructuring reached `Function` and a build said "ok") and many reader gaps; they are fixed test-first, and the generated file now also removes `constructor` from every function as a second line of defence. It cannot be put in a plugin yet (a plugin cannot run `npm ci`).
 
 **What is next, in this order:**
 

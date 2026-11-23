@@ -22,7 +22,7 @@ from ..graph import languages
 from ..mcpnode import NODE_VERSION, PINNED, SDK_VERSION, SERVER_FILE, SERVER_SDK, ZOD_VERSION, package_json, package_lock
 from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
-from ..validate.mcp_node import analyze_node_server
+from ..validate.mcp_node import KNOWN_GLOBALS, analyze_node_server
 from .agent import person_lines
 from .architect import criteria_ids
 from .mcp import MCP_QUESTIONS, OFFERED_PERMISSIONS, IDENT, McpCase, McpParam
@@ -38,6 +38,7 @@ JS_RESERVED = frozenset({
     "constructor", "prototype", "server", "z", "text_result",  # `server` and `z` are written by code, `text_result` is its own variable
 })
 IMPORT_NAME = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]{0,63}\Z")
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}\Z")  # an environment variable name is written into the command in the README: a plain name only
 
 # What a tool body may import. The model lists them as data ({"module": ..., "names": [...]}); code writes the import lines.
 BODY_IMPORTS: dict[str, frozenset[str]] = {
@@ -57,7 +58,7 @@ NETWORK_GLOBALS = frozenset({"fetch", "AbortSignal", "Headers"})
 DENY_PROPS = frozenset({
     "constructor", "__proto__", "prototype", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "call", "apply", "bind", "caller", "callee",
     "getPrototypeOf", "setPrototypeOf", "defineProperty", "defineProperties", "getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getOwnPropertyNames",
-    "getOwnPropertySymbols", "allocUnsafe", "allocUnsafeSlow", "mainModule", "binding", "dlopen",
+    "getOwnPropertySymbols", "allocUnsafe", "allocUnsafeSlow", "mainModule", "binding", "dlopen", "random",  # `random`: a tool must be deterministic
 })
 
 NODE_DESIGN_SYSTEM = """You design a TypeScript MCP server: a few tools that Claude can call. You receive an approved requirement. Code writes the file around your tools; you write only the tools and the list of imports.
@@ -141,7 +142,7 @@ class NodeDesignError(ValueError):
 
 
 def valid_param(name: str) -> bool:
-    return bool(IDENT.match(name)) and name not in JS_RESERVED
+    return bool(IDENT.match(name)) and name not in JS_RESERVED and name not in KNOWN_GLOBALS  # a parameter named `process` or `fetch` would hide the real one
 
 
 def valid_tool_name(name: str) -> bool:
@@ -391,6 +392,9 @@ def cases_json(defn: NodeDefinition) -> str:
 
 def render_node_files(defn: NodeDefinition, spec: RequirementSpec) -> dict[str, str]:
     """Relative path -> file text. `report.md` is added later, once every check has run."""
+    for name in defn.env_vars:  # written into the `claude mcp add -e NAME=...` command in the README: refused here, before anything is written
+        if not ENV_NAME.match(name):
+            raise NodeDesignError(f"'{name[:40]}' is not an environment variable name (capital letters, digits and underscores): give names, never values")
     return {
         SERVER_FILE: render_node_server(defn),
         "package.json": package_json(defn.name),

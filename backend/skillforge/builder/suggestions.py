@@ -21,7 +21,8 @@ from ..providers import LLMProvider, ProviderError
 from ..suggest.pipeline import suggest as run_suggest
 from .errors import BadRequest, SessionNotFound, WrongState
 from .jobs import JobRunner
-from .repository import check_repo, clean_focus, folder_name, read_failure
+from .errors import BuilderError, UpstreamError
+from .repository import check_repo, clean_focus, display_name, read_failure, resolve_repo, source_of
 
 _ID = re.compile(r"^[0-9a-f]{32}\Z")
 _START = threading.Lock()  # one check-then-add at a time: two clicks cannot both start a run for the same folder
@@ -48,17 +49,18 @@ class SuggestRuns:
         return row
 
     def start(self, path: object, focus: object = None, with_ideas: bool = True) -> dict:
-        folder = check_repo(path)  # before any model is asked
+        found = resolve_repo(path)  # before any model is asked (a link is downloaded here)
+        stored = source_of(found)
         focus_text = clean_focus(focus)
         rid, stamp = uuid.uuid4().hex, now_text()
         with _START, self.db.session() as s:
             running = s.execute(
-                select(SuggestRun).where(SuggestRun.status == "working", SuggestRun.repo == str(folder), SuggestRun.focus == focus_text)
+                select(SuggestRun).where(SuggestRun.status == "working", SuggestRun.repo == stored, SuggestRun.focus == focus_text)
             ).scalars().first()
             if running is not None:  # a second click while the model is still being asked gets that run, not another one
                 return run_view(running)
             s.add(SuggestRun(
-                id=rid, created_at=stamp, updated_at=stamp, status="working", repo=str(folder), repo_name=folder_name(folder),
+                id=rid, created_at=stamp, updated_at=stamp, status="working", repo=stored, repo_name=display_name(stored),
                 focus=focus_text, with_ideas=with_ideas, result=None, error="", retryable=False,
             ))
         self.runner.submit(self._execute, rid)
@@ -118,7 +120,12 @@ class SuggestRuns:
         try:
             provider = self.provider_factory()
             try:
-                g = build_graph(repo, focus=focus)
+                folder = check_repo(repo)  # a link not used for a while is downloaded again
+            except BuilderError as exc:  # the folder is gone, or GitHub could not be reached: said without any path
+                self._finish(rid, "failed", error=str(exc), retryable=isinstance(exc, UpstreamError))
+                return
+            try:
+                g = build_graph(folder, focus=focus)
             except (OSError, ValueError) as exc:  # only reading the folder: a ValueError later is not the folder's fault
                 self._finish(rid, "failed", error=read_failure(exc))
                 return

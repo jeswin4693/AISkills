@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildRequest, callSummary, canBuild, categoryInfo, factSummary, ideaGroups, ideaKey, isNetworkPath, languageRows, levelNote, loadRemembered, looksAbsolute,
-  pathProblem, recordedWhen, remember, REPO_KEY, runInfo, verdictInfo, VERDICT_ORDER, workingRun,
+  buildRequest, callSummary, canBuild, categoryInfo, factSummary, githubProblem, githubRef, ideaGroups, ideaKey, isLinkLike, isNetworkPath, languageRows, levelNote,
+  loadRemembered, looksAbsolute, pathProblem, recordedWhen, remember, REPO_KEY, repoLabel, runInfo, skippedSummary, sourceNote, verdictInfo, VERDICT_ORDER, workingRun,
 } from "./repository";
-import type { EvidenceRef, Idea, RepoAnalysis, SuggestRunSummary } from "./types";
+import type { EvidenceRef, Idea, RepoAnalysis, RepoSource, SuggestRunSummary } from "./types";
 
 const idea = (over: Partial<Idea> = {}): Idea => ({
   title: "A skill", category: "skill", rationale: "why", evidence: ["F1"], next_step: "go", confidence: "high",
@@ -150,5 +150,84 @@ describe("evidence", () => {
     expect(factSummary(ref({ symbol_kind: "class", members_total: 3 }))).toContain("3 methods");
     expect(factSummary(ref({ kind: "file", symbols_total: 2, importers_total: 5 }))).toBe("2 symbols, imported by 5");
     expect(factSummary(ref({ kind: "file", symbols_total: 1, measured: false }))).toBe("1 symbol");
+  });
+});
+
+
+describe("a GitHub link in the box", () => {
+  it.each(["https://github.com/acme/shop", "http://github.com/acme/shop", "github.com/acme/shop", "www.github.com/acme", "ftp://x.test/y", "  https://gitlab.com/a/b "])(
+    "is meant as a link: %s", (text) => expect(isLinkLike(text)).toBe(true),
+  );
+  it.each(["", "C:\\code\\shop", "C:/code/shop", "/home/me/shop", "shop-api", "\\\\server\\share", "//server/share"])("is a path, not a link: %j", (text) => expect(isLinkLike(text)).toBe(false));
+
+  it.each([
+    ["https://github.com/acme/shop-api", "acme", "shop-api", null],
+    ["https://github.com/acme/shop-api/", "acme", "shop-api", null],
+    ["https://github.com/acme/shop-api.git", "acme", "shop-api", null],
+    ["HTTPS://GitHub.com/acme/shop-api", "acme", "shop-api", null],
+    ["github.com/acme/shop-api", "acme", "shop-api", null],
+    ["  https://www.github.com/acme/shop-api  ", "acme", "shop-api", null],
+    ["https://github.com/acme/shop-api/tree/v1.2.3", "acme", "shop-api", "v1.2.3"],
+    ["https://github.com/acme/shop-api?tab=readme#top", "acme", "shop-api", null],
+  ])("reads %s", (text, owner, repo, ref) => expect(githubRef(text)).toEqual({ owner, repo, ref }));
+
+  it.each([
+    "http://github.com/acme/shop", "https://gitlab.com/acme/shop", "https://github.com.evil.com/acme/shop", "https://github.com@evil.com/acme/shop",
+    "https://user:pw@github.com/acme/shop", "https://github.com:8443/acme/shop", "https://github.com/acme", "https://github.com/", "https://github.com/acme/shop/issues/1",
+    "https://github.com/acme/shop/tree/feature/x", "https://github.com/acme/..", "https://github.com/-acme/shop", "https://github.com/ac_me/shop",
+    "https://github.com/acme/shop%2Fx", "https://github.com/acme/sh" + String.fromCharCode(0x043e) + "p", "https://github.com/acme/shop x", "git://github.com/acme/shop", "file:///C:/x",
+  ])("refuses %s", (text) => expect(githubRef(text)).toBeNull());
+
+  it("says what is wrong, in words, and nothing for an empty box or a good link", () => {
+    expect(githubProblem("")).toBeNull();
+    expect(githubProblem("https://github.com/acme/shop")).toBeNull();
+    expect(githubProblem("http://github.com/acme/shop")).toContain("https://");
+    expect(githubProblem("https://gitlab.com/acme/shop")).toContain("public GitHub repository");
+    expect(githubProblem("https://github.com/acme/shop/tree/main/src")).toContain("Only this folder");
+    expect(githubProblem("https://github.com/acme")).toContain("public GitHub repository");
+  });
+
+  it("is checked by pathProblem too, so the page needs one rule for the box", () => {
+    expect(pathProblem("https://github.com/acme/shop")).toBeNull();
+    expect(pathProblem("https://gitlab.com/acme/shop")).toContain("public GitHub repository");
+    expect(pathProblem("https://gitlab.com/acme/shop")).not.toContain("full path");
+    expect(pathProblem("shop-api")).toContain("full path");
+  });
+
+  it("names the repository as owner/repo, and is empty for a folder", () => {
+    expect(repoLabel("https://github.com/acme/shop-api/tree/dev")).toBe("acme/shop-api");
+    expect(repoLabel("C:\\code\\shop")).toBe("");
+    expect(repoLabel("https://gitlab.com/acme/shop")).toBe("");
+  });
+});
+
+describe("where a repository came from", () => {
+  const github = (over: Partial<Extract<RepoSource, { kind: "github" }>> = {}): RepoSource => ({
+    kind: "github", owner: "acme", repo: "shop-api", ref: null, url: "https://github.com/acme/shop-api", fetched_at: "2026-11-23T10:00:00Z", files: 312,
+    bytes: 2_400_000, skipped: { not_source: 120, ignored_dir: 3, too_large: 1 }, reused: false, ...over,
+  });
+  const now = Date.parse("2026-11-23T10:00:30Z");
+
+  it("says nothing about a folder", () => expect(sourceNote({ kind: "folder" }, now)).toEqual([]));
+
+  it("says what was downloaded, that nothing was run, what was left out, and that history is missing", () => {
+    const lines = sourceNote(github(), now);
+    expect(lines[0]).toBe("From GitHub (default branch), downloaded just now: 312 source files kept (2.4 MB). Nothing was run.");
+    expect(lines[1]).toBe("Left out: 120 other files (docs, images, data) not read; 3 files in folders such as node_modules left out; 1 file over 1 MB left out.");
+    expect(lines[2]).toContain("Git history is not downloaded");
+  });
+
+  it("names a branch, a small download in KB, and a copy that was reused", () => {
+    const lines = sourceNote(github({ ref: "dev", bytes: 40_000, skipped: {}, reused: true }), now);
+    expect(lines[0]).toBe("From GitHub (branch or tag dev), a copy downloaded just now: 312 source files kept (40 KB). Nothing was run.");
+    expect(lines.length).toBe(2);
+  });
+
+  it("lists each kind of left-out file in a fixed order, skips zeros and ignores a reason it does not know", () => {
+    expect(skippedSummary({})).toEqual([]);
+    expect(skippedSummary({ unsafe_name: 2, link: 1, not_source: 0, mystery: 9, limit: 1, path_too_long: 3 })).toEqual([
+      "1 symbolic link left out", "2 files with an unsafe name left out", "1 file left out because of the size limits",
+      "3 files whose path is too long for this disk left out",
+    ]);
   });
 });

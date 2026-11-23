@@ -99,6 +99,8 @@ The skill's folder name must equal its `name` (a check enforces it).
 says `shared ... is called from 2 distinct places` and flags `tidy` as large; the plan says "A plan only. Nothing was run" and names `core.py`.
 Try it on a bigger repository too, such as this project's own `backend` folder.
 
+**A GitHub link works too** (Repository page, needs the network): paste `https://github.com/jeswin4693/AISkills` and press **Read the repository**. Expect the heading `jeswin4693/AISkills`, a **from GitHub** badge, "Nothing was run", what was left out, and "Git history is not downloaded". A link to another site, or to a private or missing repository, is refused with a plain message. The command line still needs a folder: clone first.
+
 **It proves:** the graph is computed from the code, every link is proven or labelled a guess, and nothing here used a model or ran anything.
 
 ## B. Library, risk diff and safety checks (no model)
@@ -274,4 +276,4 @@ The real-browser run (58 behaviours, drives Edge against the real API with a scr
 
 ## What does not exist yet (so you do not look for it)
 
-a drawn graph (the Repository page shows numbers and lists); reading a repository from a GitHub link (clone it first and give the folder); the behavioural canary scan; Node MCP servers inside plugins; evidence for plugins and MCP servers; the hosted version on a real host (the image was built and run in Docker, not deployed); macOS and Linux (only Windows was used); an interactive Claude Code session using what you build (real Claude Code accepted the generated plugin and server commands in isolated runs).
+a drawn graph (the Repository page shows numbers and lists); reading a GitHub link on the command line (the web page does it; clone first for the command line); the behavioural canary scan; Node MCP servers inside plugins; evidence for plugins and MCP servers; the hosted version on a real host (the image was built and run in Docker, not deployed); macOS and Linux (only Windows was used); an interactive Claude Code session using what you build (real Claude Code accepted the generated plugin and server commands in isolated runs).

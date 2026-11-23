@@ -13,8 +13,10 @@ Run with PYTHONPATH set to the backend folder and SKILLFORGE_DATA_DIR set to a t
 
 from __future__ import annotations
 
+import io
 import os
 import time
+import zipfile
 from pathlib import Path
 
 import uvicorn
@@ -23,6 +25,7 @@ from skillforge.ai.doctor import Ping
 from skillforge.api import create_app
 from skillforge.build.models import Extraction, IOField, SkillDraft, SkillTest, Slot, Step
 from skillforge.builder import Builder, JobRunner
+from skillforge.builder import github
 from skillforge.db import Database
 from skillforge.library import Library
 from skillforge.providers import MockProvider, ProviderError
@@ -131,7 +134,27 @@ def provider():
     return MockProvider(respond)
 
 
+SHOP = {
+    "core.py": "def shared():\n    return 1\n",
+    "a.py": "from core import shared\n\ndef use_a():\n    return shared()\n",
+    "b.py": "from core import shared\n\ndef use_b():\n    return shared()\n",
+    "README.md": "# not source\n",
+}
+
+
+def fake_download(link):
+    """What GitHub would send, so the browser test never touches the network: a tiny repository, and 'acme/missing' does not exist."""
+    if link.repo == "missing":
+        raise github.NotFound(github.NOT_FOUND)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, text in SHOP.items():
+            z.writestr(f"{link.owner}-{link.repo}-0123abc/{name}", text)
+    return buf.getvalue()
+
+
 def main() -> None:
+    github.fetch_archive = fake_download
     library = Library(DATA / "library")
     database = Database(f"sqlite:///{(DATA / 'e2e.db').as_posix()}")
     database.migrate()

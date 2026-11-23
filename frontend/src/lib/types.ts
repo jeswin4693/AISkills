@@ -462,8 +462,27 @@ export interface RiskyFile {
 }
 
 /** What the graph says about a folder. Computed from parsed code; no model took part. */
+/** Where a repository was read from. A GitHub link is downloaded (public repositories only, source files only, nothing run) into a copy on this computer. */
+export type RepoSource =
+  | { kind: "folder" }
+  | {
+      kind: "github";
+      owner: string;
+      repo: string;
+      ref: string | null;
+      url: string;
+      fetched_at: string;
+      files: number;
+      bytes: number;
+      /** Why files were left out, by reason and count. */
+      skipped: Record<string, number>;
+      /** True when a copy downloaded a little earlier was used instead of downloading again. */
+      reused: boolean;
+    };
+
 export interface RepoAnalysis {
   name: string;
+  source: RepoSource;
   focus: string | null;
   stats: {
     files: number;

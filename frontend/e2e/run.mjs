@@ -558,7 +558,7 @@ try {
   writeRepo("core.py", "def shared():\n    return 1\n");
   writeRepo("a.py", "from core import shared\n\ndef use_a():\n    return shared()\n");
   writeRepo("b.py", "from core import shared\n\ndef use_b():\n    return shared()\n");
-  const folderBox = () => page.getByLabel("Folder of the repository", { exact: true });
+  const folderBox = () => page.getByLabel("Folder or GitHub link", { exact: true });
   await step("the menu leads to the Repository page, which waits for a folder", async () => {
     await page.goto(UI + "/builder");
     await page.getByRole("link", { name: "Repository" }).click();
@@ -581,6 +581,26 @@ try {
     await folderBox().fill("//server/share/repo");
     await page.getByText(/Network paths are not read/).waitFor();
     assert.ok(await page.getByRole("button", { name: "Read the repository" }).isDisabled());
+  });
+  await step("a GitHub link is read like a folder, says where it came from and what was left out, and shows no path", async () => {
+    await folderBox().fill("https://gitlab.com/acme/shop-api");
+    await page.getByText(/public GitHub repository/).first().waitFor();
+    assert.ok(await page.getByRole("button", { name: "Read the repository" }).isDisabled());
+    await folderBox().fill("https://github.com/acme/shop-api");
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "acme/shop-api", level: 2 }).waitFor();
+    await page.getByText("from GitHub", { exact: true }).waitFor();
+    await page.getByText(/Nothing was run\./).waitFor();
+    await page.getByText(/Git history is not downloaded/).waitFor();
+    await page.getByText(/3 files/).first().waitFor();
+    const text = await page.locator("main").innerText();
+    assert.ok(!text.includes(scratch) && !text.includes("codeload"), "the page must not show where the copy is kept");
+    await shot(page, "30b-github-link");
+  });
+  await step("a link to a repository that does not exist (or is private) says so plainly", async () => {
+    await folderBox().fill("https://github.com/acme/missing");
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByText(/Private repositories cannot be read/).first().waitFor();
   });
   await step("reading a repository shows what the graph says, never the path, and the page remembers the folder", async () => {
     await folderBox().fill(repoDir);

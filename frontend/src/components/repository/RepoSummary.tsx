@@ -1,7 +1,7 @@
 "use client";
 
 import { plural } from "@/lib/format";
-import { callSummary, languageRows } from "@/lib/repository";
+import { callSummary, languageRows, sourceNote } from "@/lib/repository";
 import type { RepoAnalysis } from "@/lib/types";
 import { Badge, Card } from "../ui";
 
@@ -15,8 +15,16 @@ export function RepoSummary({ analysis: a }: { analysis: RepoAnalysis }) {
     <Card className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold break-all">{a.name}</h2>
-        {a.focus && <Badge tone="info" title="Only this folder of the repository was read">focus: {a.focus}</Badge>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {a.source.kind === "github" && <Badge tone="info" title="Downloaded from a public GitHub repository">from GitHub</Badge>}
+          {a.focus && <Badge tone="info" title="Only this folder of the repository was read">focus: {a.focus}</Badge>}
+        </div>
       </div>
+      {sourceNote(a.source).map((line) => (
+        <p key={line} className="mt-1 text-xs text-muted">
+          {line}
+        </p>
+      ))}
       <p className="mt-1 text-sm text-muted">
         {plural(a.stats.files, "file")} ({a.stats.test_files} of them tests), {a.stats.lines.toLocaleString()} lines, {plural(functions, "function")} and methods,{" "}
         {a.stats.commits_read === null ? "no git history" : plural(a.stats.commits_read, "commit") + " read"}.

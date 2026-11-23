@@ -7,7 +7,7 @@ import { RepoSummary } from "@/components/repository/RepoSummary";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, PageHeader, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { plural, relativeTime } from "@/lib/format";
-import { buildRequest, canBuild, ideaGroups, ideaKey, loadRemembered, pathProblem, remember, runInfo, workingRun } from "@/lib/repository";
+import { buildRequest, canBuild, ideaGroups, ideaKey, isLinkLike, loadRemembered, pathProblem, remember, runInfo, workingRun } from "@/lib/repository";
 import type { Idea, RepoAnalysis } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 import { useSuggestRun } from "@/lib/useSuggestRun";
@@ -114,26 +114,30 @@ export default function RepositoryPage() {
     <>
       <PageHeader
         title="Repository"
-        subtitle="Point SkillForge at a folder on this computer. It reads the code into a graph (no model, nothing is run), and can then ask a model for ideas that must cite code that really exists. A skill built from an idea records those places as evidence."
+        subtitle="Point SkillForge at a folder on this computer, or at a public GitHub repository. It reads the code into a graph (no model, nothing is run), and can then ask a model for ideas that must cite code that really exists. A skill built from an idea records those places as evidence."
       />
       <div className="space-y-6">
         <Card className="p-5">
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); void read(); }} className="space-y-3">
             <div>
               <label htmlFor={pathId} className="font-semibold">
-                Folder of the repository
+                Folder or GitHub link
               </label>
               <input
                 id={pathId}
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                placeholder="C:\code\shop-api"
+                placeholder="C:\code\shop-api   or   https://github.com/owner/repo"
                 autoComplete="off"
                 spellCheck={false}
                 className="mt-1.5 block w-full rounded-md border border-border bg-bg px-3 py-2 font-mono text-sm"
               />
               {problem && <p className="mt-1 text-sm text-warn">{problem}</p>}
-              <p className="mt-1 text-xs text-muted">The path stays on this computer. This page remembers it in your browser only, and shows you the folder&apos;s name, never the path.</p>
+              <p className="mt-1 text-xs text-muted">
+                {isLinkLike(path)
+                  ? "A link is downloaded from GitHub into a copy on this computer: public repositories only, only source files are kept, and nothing in it is run. The first read takes a little while."
+                  : "The path stays on this computer. This page remembers it in your browser only, and shows you the folder's name, never the path."}
+              </p>
             </div>
             <div>
               <label htmlFor={focusId} className="font-semibold">
@@ -153,7 +157,11 @@ export default function RepositoryPage() {
               <Button type="submit" variant="primary" busy={reading} disabled={!path.trim() || !!problem}>
                 Read the repository
               </Button>
-              {reading && <span className="text-sm text-muted">Reading the code (a large repository can take a little while)…</span>}
+              {reading && (
+                <span className="text-sm text-muted">
+                  {isLinkLike(path) ? "Downloading from GitHub and reading the code (a large repository can take a little while)…" : "Reading the code (a large repository can take a little while)…"}
+                </span>
+              )}
             </div>
           </form>
         </Card>

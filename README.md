@@ -83,7 +83,7 @@ named the renamed function, the new caller and the changed structure (and expose
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
    ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
-4. **The Repository page and the Settings page are built** (slices W and X, below). Left of the web pages: a drawn graph (the Repository page shows numbers and lists), and reading a repository from a GitHub link.
+4. **The Repository page, the Settings page and reading a repository from a GitHub link are built** (slices W, X and Y, below). Left of the web pages: a drawn graph (the Repository page shows numbers and lists).
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
@@ -272,6 +272,10 @@ configured model showed (including a skill idea the builder refused as "an agent
 
 Until now the model and its key were set by editing the `.env` file by hand, and the server read it once. On the **Settings** page you choose the provider and the model, paste a key, add backup models and test them with **Test my models** (one tiny question to each model, so it uses a little quota). It is saved into `.env` on this computer and **used at once, with no restart**.
 A key is **never shown again and never sent back** by the API (the page learns only "Saved" or "Not set"). Only a fixed list of settings can be changed, a value may hold only safe characters, a refusal says which setting and why without repeating the value, and a setting that comes from your computer's environment is shown read-only. Off in the hosted version. Details and limits (a key in `.env` is plain text on disk): [docs/settings.md](docs/settings.md).
+
+## Reading a repository from a GitHub link (slice Y)
+
+The box on the **Repository** page now takes the link of a **public GitHub repository** as well as a folder (for example `https://github.com/owner/repo`). The repository is **downloaded as a zip** (never cloned, so nothing in it can run) and unpacked by our own code: only source files, only safe names, with limits on size and count. Then it works everywhere a folder does: the graph, ideas, a build with evidence, and the recheck. The page says where it came from, what was kept and left out, and that git history is not downloaded. Public repositories only; off in the hosted version; the command line still takes a folder. **This slice has not had an independent review yet.** Details, limits and what was checked, including a real run: [docs/github-link.md](docs/github-link.md).
 
 ## Run the local API (the web UI talks to it)
 

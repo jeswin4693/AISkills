@@ -28,8 +28,9 @@ Slice V is built too (a skill can cite code: `evidence.json` holds the files and
 Slice W is built too (the web **Repository** page: read a folder into the graph, grounded ideas as a polled run, a Builder session seeded with the idea's cited places that ends with `evidence.json`, and a recheck on the skill's page;
 every route that reads a folder is off in the hosted version; [docs/repository-page.md](docs/repository-page.md)).
 Slice X is built too (the web **Settings** page: choose the model, paste a key, add backups, test them; a key is never sent back, only a fixed list of names can be changed, values are checked, `.env` is edited atomically and the change applies at once; the model lookup re-reads `.env` each time; off in the hosted version; [docs/settings.md](docs/settings.md)).
-Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built), reading a repository from a GitHub link and a drawn architecture map
-(neither started: the Repository page takes a local folder only and shows numbers and lists), and Node servers in plugins ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
+Slice Y is built too (the Repository page's box also takes the link of a **public GitHub repository**: GitHub's zip is downloaded, never cloned, and unpacked by our own code with strict name and size rules, kept as a snapshot; it works everywhere a folder does; off in the hosted version; **no independent review yet**; [docs/github-link.md](docs/github-link.md)).
+Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built), a drawn architecture map
+(not started: the Repository page shows numbers and lists), GitHub links on the command line, and Node servers in plugins ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Commands (run from `backend/`)
 

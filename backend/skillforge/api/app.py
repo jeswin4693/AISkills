@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .. import __version__
-from ..builder import Builder, BuilderError, SessionNotFound, WrongState
+from ..builder import Builder, BuilderError, SessionNotFound, UpstreamError, WrongState
 from ..builder.repository import check_repo
 from ..evidence import EvidenceError, read_evidence
 from ..graph import languages
@@ -150,6 +150,10 @@ def create_app(
     async def wrong_state(_: Request, exc: WrongState) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=409)
 
+    @app.exception_handler(UpstreamError)  # GitHub could not be reached or refused: the request was fine
+    async def upstream_error(_: Request, exc: UpstreamError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=502)
+
     @app.exception_handler(BuilderError)  # BadRequest and anything else the person can fix
     async def builder_error(_: Request, exc: BuilderError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -273,11 +277,11 @@ def create_app(
         """What changed in the code a skill cites, against a repository on this machine. Reads the repository, changes nothing."""
         if hosted is not None:  # this would read a folder on the server, which is not where anyone's repository is
             raise HTTPException(403, "Rechecking against a folder is turned off in the hosted version: it reads a folder on the server. Use the command line on your own computer: library recheck.")
-        check_repo(body.repo)  # an absolute folder on this computer: a message never repeats the path
 
         def work() -> dict:
+            folder = check_repo(body.repo, fresh=True)  # a folder on this computer, or a GitHub link downloaded again: what changed is the point
             focus = body.focus if body.focus is not None else evidence_focus(lib, name, body.version)
-            g = build_graph(body.repo, focus=focus or None, with_history=False)
+            g = build_graph(folder, focus=focus or None, with_history=False)
             return recheck_version(lib, name, g, body.version, focus=focus or None).to_dict()
 
         return await run_in_threadpool(work)

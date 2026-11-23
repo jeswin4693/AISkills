@@ -1,4 +1,5 @@
-import type { EvidenceRef, Idea, IdeaCategory, RepoAnalysis, RunStatus, SuggestRunSummary, Verdict } from "./types";
+import { plural, relativeTime } from "./format";
+import type { EvidenceRef, Idea, IdeaCategory, RepoAnalysis, RepoSource, RunStatus, SuggestRunSummary, Verdict } from "./types";
 
 type Tone = "info" | "ok" | "warn" | "bad" | "neutral";
 
@@ -51,9 +52,123 @@ export function looksAbsolute(path: string): boolean {
   return !isNetworkPath(p) && (/^[A-Za-z]:[\\/]/.test(p) || p.startsWith("/"));
 }
 
-/** What to tell the person about a folder path before anything is sent, or null when it looks usable. */
+// ---- a GitHub link instead of a folder ----------------------------------------------------------------------
+// The server is the authority (builder/github.py); this only spares a round trip for the mistakes people actually make.
+
+const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const NAME = /^[A-Za-z0-9._-]{1,100}$/;
+const LINK_START = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+const GITHUB_HELP =
+  "Give the link of a public GitHub repository, such as https://github.com/owner/repo (or https://github.com/owner/repo/tree/branch). Other sites and other kinds of link are not read.";
+const FOCUS_HELP =
+  "To read one folder of the repository, use the 'Only this folder inside it' box and give the repository's own link. A branch name with a slash cannot be given in a link.";
+
+/** Whether the box holds something meant as a link (so a problem is about links) and not a folder path. */
+export function isLinkLike(text: string): boolean {
+  const t = text.trim();
+  return LINK_START.test(t) || /^(www\.)?github\.com(\/|$)/i.test(t);
+}
+
+export interface GithubRef {
+  owner: string;
+  repo: string;
+  ref: string | null;
+}
+
+type Parsed = { ref: GithubRef } | { problem: string };
+
+function parseGithub(text: string): Parsed {
+  const raw = text.trim();
+  const candidate = LINK_START.test(raw) ? raw : `https://${raw}`;
+  if ([...candidate].some((c) => c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127)) return { problem: GITHUB_HELP };
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return { problem: GITHUB_HELP };
+  }
+  const host = url.host.toLowerCase();
+  if (url.protocol === "http:" && (host === "github.com" || host === "www.github.com")) return { problem: "Use an https:// link." };
+  if (url.protocol !== "https:" || (host !== "github.com" && host !== "www.github.com") || url.username || url.password) return { problem: GITHUB_HELP };
+  if (url.pathname.includes("%")) return { problem: GITHUB_HELP };
+  const segments = url.pathname.split("/").slice(1);
+  if (segments.length && segments[segments.length - 1] === "") segments.pop();
+  if (segments.length < 2 || segments.some((s) => s === "")) return { problem: GITHUB_HELP };
+  const owner = segments[0];
+  let repo = segments[1];
+  if (repo.endsWith(".git") && repo.length > 4) repo = repo.slice(0, -4);
+  let ref: string | null = null;
+  if (segments.length > 2) {
+    if (segments[2] !== "tree") return { problem: GITHUB_HELP };
+    if (segments.length > 4) return { problem: FOCUS_HELP };
+    if (segments.length !== 4) return { problem: GITHUB_HELP };
+    ref = segments[3];
+  }
+  const dots = (s: string) => /^\.+$/.test(s);
+  if (!OWNER.test(owner) || !NAME.test(repo) || dots(repo) || (ref !== null && (!NAME.test(ref) || dots(ref)))) return { problem: GITHUB_HELP };
+  return { ref: { owner, repo, ref } };
+}
+
+/** The repository a GitHub link names, or null when the text is not a plain public repository link. */
+export function githubRef(text: string): GithubRef | null {
+  const r = parseGithub(text);
+  return "ref" in r ? r.ref : null;
+}
+
+/** What is wrong with a link, in words, or null when it is usable (or the box is empty). */
+export function githubProblem(text: string): string | null {
+  if (!text.trim()) return null;
+  const r = parseGithub(text);
+  return "problem" in r ? r.problem : null;
+}
+
+/** `owner/repo` for a GitHub link, the way the page names it, and an empty text for anything else. */
+export function repoLabel(text: string): string {
+  const r = githubRef(text);
+  return r ? `${r.owner}/${r.repo}` : "";
+}
+
+const SKIP_TEXT: [string, (n: number) => string][] = [
+  ["not_source", (n) => `${plural(n, "other file")} (docs, images, data) not read`],
+  ["ignored_dir", (n) => `${plural(n, "file")} in folders such as node_modules left out`],
+  ["too_large", (n) => `${plural(n, "file")} over 1 MB left out`],
+  ["link", (n) => `${plural(n, "symbolic link")} left out`],
+  ["unsafe_name", (n) => `${plural(n, "file")} with an unsafe name left out`],
+  ["duplicate", (n) => `${plural(n, "file")} whose name differs only in case left out`],
+  ["limit", (n) => `${plural(n, "file")} left out because of the size limits`],
+  ["path_too_long", (n) => `${plural(n, "file")} whose path is too long for this disk left out`],
+  ["unwritable", (n) => `${plural(n, "file")} that could not be written left out`],
+  ["unreadable", (n) => `${plural(n, "file")} that could not be read left out`],
+];
+
+/** What was left out of a download, one phrase for each reason that applies, in a fixed order. A reason this page does not know is not shown. */
+export function skippedSummary(skipped: Record<string, number>): string[] {
+  return SKIP_TEXT.filter(([key]) => (skipped[key] ?? 0) > 0).map(([key, say]) => say(skipped[key]));
+}
+
+function size(bytes: number): string {
+  return bytes < 1_000_000 ? `${Math.max(1, Math.round(bytes / 1000))} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** Where a repository came from, in lines for the summary: nothing for a folder; for a download, what was kept, that nothing was run, what was
+ * left out and what a download cannot know. */
+export function sourceNote(source: RepoSource, now: number = Date.now()): string[] {
+  if (source.kind !== "github") return [];
+  const which = source.ref ? `branch or tag ${source.ref}` : "default branch";
+  const when = relativeTime(source.fetched_at, now);
+  const lines = [
+    `From GitHub (${which}), ${source.reused ? "a copy downloaded" : "downloaded"} ${when}: ${plural(source.files, "source file")} kept (${size(source.bytes)}). Nothing was run.`,
+  ];
+  const left = skippedSummary(source.skipped);
+  if (left.length > 0) lines.push(`Left out: ${left.join("; ")}.`);
+  lines.push("Git history is not downloaded, so facts that come from it (how often a file changes) are missing.");
+  return lines;
+}
+
+/** What to tell the person about the box (a folder path or a GitHub link) before anything is sent, or null when it looks usable. */
 export function pathProblem(path: string): string | null {
   if (!path.trim()) return null;
+  if (isLinkLike(path)) return githubProblem(path);
   if (isNetworkPath(path)) return "Network paths are not read. Use a folder on this computer (map the share to a drive letter first).";
   return looksAbsolute(path) ? null : "Give the full path of the folder, such as C:\\code\\shop or /home/me/shop.";
 }

@@ -94,7 +94,7 @@ version (403)**. The path a person sends is never sent back, in a result or in a
 
 | Route | |
 |---|---|
-| `POST /api/repos/analyze` | `{"path": "<absolute folder>", "focus": "src"}` returns `{name, focus, stats, notes, hotspots, dead_code}`: the graph's facts (no model, nothing is run). 400 for a relative path, a missing folder or a file. |
+| `POST /api/repos/analyze` | `{"path": "<absolute folder, or the link of a public GitHub repository>", "focus": "src"}` returns `{name, source, focus, stats, notes, hotspots, dead_code}` (`source` is `{"kind": "folder"}`, or for a link what was downloaded and what was left out: [github-link.md](github-link.md); a link GitHub could not serve is a 502): the graph's facts (no model, nothing is run). 400 for a relative path, a missing folder or a file. |
 | `POST /api/suggestions` | `{"path", "focus", "with_ideas": true}` starts a run (201): the model is asked in the background, as a row in `suggest_runs`. The folder is checked before any model is asked, and a second request for the same folder and focus while that run is still working returns that run. |
 | `GET /api/suggestions` | The runs, newest first, without their results: `{id, status, repo (the folder's name), focus, ideas, error, retryable, created_at, updated_at}`. |
 | `GET /api/suggestions/{id}` | One run: `status` (`working`, `done`, `failed`) and, when done, `result`: the suggest report (`suggestions` each with `evidence_nodes`, `skill_requirement`, `unverified_numbers`; `dropped`; `notes`). 404 for an unknown id. Poll it while `working`. |

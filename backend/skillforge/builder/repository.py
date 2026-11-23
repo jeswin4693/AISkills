@@ -7,13 +7,15 @@ are shown its name only, and a build keeps the path only to record evidence when
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..evidence import EVIDENCE_FILE, MAX_REFS, collect, evidence_bytes, fit, safe
 from ..graph import query
 from ..graph.build import build_graph
-from .errors import BadRequest
+from . import github
+from .errors import BadRequest, BuilderError
 
 EVIDENCE_KINDS = ("skill", "agent")  # text about code: an MCP server or a plugin makes no claims about a repository
 MAX_NODE_TEXT = 400
@@ -27,8 +29,32 @@ def read_failure(exc: Exception) -> str:
     return f"The repository could not be read ({type(exc).__name__}{': ' + why if why else ''})."
 
 
-def check_repo(path: object) -> Path:
-    """The folder a person named, or BadRequest saying what to fix. Nothing is read yet, and no message repeats the path."""
+@dataclass(frozen=True)
+class Repo:
+    """A repository ready to read: the folder, and (for a GitHub link) the link and the snapshot it was downloaded into."""
+
+    folder: Path
+    link: github.GithubLink | None = None
+    snapshot: github.Snapshot | None = None
+
+
+def check_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL) -> Path:
+    """The folder a person named, or BadRequest saying what to fix. A GitHub link is downloaded into a snapshot folder first (see
+    builder/github.py). Nothing else is read yet, and no message repeats the path."""
+    return resolve_repo(path, fresh=fresh, max_age=max_age).folder
+
+
+def resolve_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL) -> Repo:
+    """`check_repo`, keeping what a link was and where it was downloaded to. `fresh` downloads again, `max_age` (None: any age) is how old a
+    snapshot may be and still be reused."""
+    link = github.parse_link(path)  # BadRequest for a link that is not a public GitHub repository link
+    if link is not None:
+        snapshot = github.open_snapshot(link, fresh=fresh, max_age=max_age)
+        return Repo(snapshot.path, link, snapshot)
+    return Repo(_check_folder(path))
+
+
+def _check_folder(path: object) -> Path:
     text = path.strip() if isinstance(path, str) else ""
     if text.startswith(NETWORK_PREFIXES):
         raise BadRequest("Network paths are not read: use a folder on this computer (map the share to a drive letter first).")
@@ -47,6 +73,18 @@ def folder_name(folder: Path) -> str:
     return folder.name or "repository"
 
 
+def source_of(repo: Repo) -> str:
+    """What is stored to find this repository again: the link for a GitHub repository, the folder's path otherwise. Never a path inside
+    the snapshot store."""
+    return repo.link.url if repo.link is not None else str(repo.folder)
+
+
+def display_name(source: str) -> str:
+    """What a page shows for a stored source: `owner/repo` for a link, the folder's name otherwise. Never a path."""
+    link = github.parse_link(source) if github.looks_like_link(source) else None
+    return link.name if link is not None else folder_name(Path(source))
+
+
 def clean_focus(focus: object) -> str | None:
     text = focus.strip() if isinstance(focus, str) else ""
     return text or None
@@ -54,7 +92,8 @@ def clean_focus(focus: object) -> str | None:
 
 def analyze_repo(path: object, focus: object = None) -> dict[str, Any]:
     """What the graph knows about a repository, as the Repository page shows it. No model, nothing is run."""
-    folder, focus_text = check_repo(path), clean_focus(focus)
+    repo, focus_text = resolve_repo(path), clean_focus(focus)
+    folder = repo.folder
     try:
         g = build_graph(folder, focus=focus_text)
     except (OSError, ValueError) as exc:
@@ -65,9 +104,20 @@ def analyze_repo(path: object, focus: object = None) -> dict[str, Any]:
     hot = query.hotspots(g, 10)
     dead = query.dead_candidates(g)
     return {
-        "name": folder_name(folder), "focus": focus_text, "stats": stats, "notes": notes,
+        "name": display_name(source_of(repo)), "source": source_view(repo), "focus": focus_text, "stats": stats, "notes": notes,
         "hotspots": {"core_symbols": hot["core_symbols"][:10], "risky_files": hot["risky_files"][:10], "note": hot.get("note", "")},
         "dead_code": {"internal": len(dead["internal"]), "exported": len(dead["exported"]), "note": dead.get("note", "")},
+    }
+
+
+def source_view(repo: Repo) -> dict[str, Any]:
+    """Where the repository came from, for the page: a folder says only that. A link says what was downloaded and what was left out."""
+    snap, link = repo.snapshot, repo.link
+    if snap is None or link is None:
+        return {"kind": "folder"}
+    return {
+        "kind": "github", "owner": link.owner, "repo": link.repo, "ref": link.ref, "url": link.url, "fetched_at": snap.fetched_at,
+        "files": snap.files, "bytes": snap.bytes, "skipped": snap.skipped, "reused": snap.reused,
     }
 
 
@@ -78,30 +128,30 @@ def check_seed(kind: str, repo: object, focus: object, nodes: object) -> dict[st
         return None
     if not (isinstance(repo, str) and repo.strip()):
         raise BadRequest("Evidence needs the repository the places are in: give repo.")
-    folder = check_repo(repo)
+    found = resolve_repo(repo)
     if kind not in EVIDENCE_KINDS:
         raise BadRequest("Only skills and agents can cite a repository's code.")
     if not asked:
         raise BadRequest("Say which places of the repository the idea cites (evidence_nodes).")
     if len(asked) > MAX_REFS or any(len(n) > MAX_NODE_TEXT for n in asked):
         raise BadRequest(f"A skill can cite at most {MAX_REFS} places, each named in at most {MAX_NODE_TEXT} characters.")
-    return {"repo": str(folder), "focus": clean_focus(focus), "nodes": list(dict.fromkeys(n.strip() for n in asked))}
+    return {"repo": source_of(found), "focus": clean_focus(focus), "nodes": list(dict.fromkeys(n.strip() for n in asked))}
 
 
 def seed_view(seed: dict[str, Any] | None) -> dict[str, Any] | None:
     """What a session shows of its seed: the folder's name, never its path."""
     if not seed:
         return None
-    return {"repo": folder_name(Path(seed["repo"])), "focus": seed.get("focus"), "places": len(seed["nodes"])}
+    return {"repo": display_name(seed["repo"]), "focus": seed.get("focus"), "places": len(seed["nodes"])}
 
 
 def record_evidence(seed: dict[str, Any], folder: Path, summary: dict[str, Any], notes: list[str]) -> None:
     """When a build ends: write evidence.json into the built folder from the graph as it is now, and say so in the result. A repository
     that cannot be read now, or none of whose places exist, leaves the build as it is and adds a note: the skill itself is fine."""
-    repo = Path(seed["repo"])
     try:
-        g = build_graph(repo, focus=seed.get("focus"), with_history=False)
-    except (OSError, ValueError):
+        # the snapshot the idea was made from, however old: a build can last hours, and its places must be looked up in the same code
+        g = build_graph(check_repo(seed["repo"], max_age=None), focus=seed.get("focus"), with_history=False)
+    except (OSError, ValueError, BuilderError):
         notes.append("Evidence was not recorded: the repository could not be read when the build finished (it may have been moved or deleted).")
         return
     got = collect(g, seed["nodes"], focus=seed.get("focus"))

@@ -17,3 +17,7 @@ class WrongState(BuilderError):
 
 class BadRequest(BuilderError):
     pass
+
+
+class UpstreamError(BuilderError):
+    """A service the request depends on (GitHub) could not be reached or refused. The request was fine: trying again later can help."""

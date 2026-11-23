@@ -49,7 +49,10 @@ component is refused, reserved names are refused, and the version moves only whe
 `claude plugin validate --strict`. **Phase 4a (2026-11-23) lets a plugin carry MCP servers** from your MCP library: the composer writes `servers/<name>/`, a `.mcp.json` that starts each, and one secret
 `userConfig` option for every environment variable a server reads (Claude Code asks for it when the plugin is enabled; no value is ever written to a file). What each server can do is read from its code and said plainly,
 a plugin from outside that starts anything it does not ship is warned about with the command shown, and the risk diff calls a new server or a changed start command riskier. Claude Code's own validator accepts
-such a plugin. Not yet: hooks (Phase 4b), and a real `claude plugin install` of one (it changes your settings, so you run it).
+such a plugin. **Phase 4b (2026-11-23) lets a plugin carry hooks, from a fixed catalogue only** ([docs/hook-catalogue.md](docs/hook-catalogue.md)): block secret files, block forced git pushes, log which tools were used. Nobody types a
+hook and no model writes one: each is a short script from SkillForge, shipped unchanged, with only typed options that cannot become code. It is described plainly (it runs on your machine, with your permissions), recognised only when it is exactly the catalogue's,
+and called riskier by the risk diff. **Real Claude Code ran them:** the two blocking hooks blocked a read of `.env` and a force-push, an ordinary read passed, and the log hook wrote its line. Not yet: a real `claude plugin install` (it changes your
+settings, so you run it), hook types other than commands, and an interactive-session check.
 
 **Phase 3, the MCP Builder (Python), is built too** ([docs/mcp-builder.md](docs/mcp-builder.md)): pick **MCP server** in the Builder and describe a few tools in plain words. The model drafts the tools; **code**
 writes `server.py` around them (the imports, the signatures, the tool annotations, `mcp.run()`), pins the official `mcp` SDK, writes a README with the exact `claude mcp add` command, and checks it by reading it:
@@ -63,7 +66,7 @@ builder writes may now import only an allow-list of safe standard-library module
 **What is next, in this order:**
 
 1. **Phase 3b, the MCP builder in TypeScript** (and the Streamable HTTP transport): the names of the TypeScript SDK still have to be settled with a real install, as the Python ones were.
-2. **Phase 4b, plugins that carry hooks:** a catalogue of hooks (never free text), always flagged as riskier (MCP servers inside a plugin are built: Phase 4a).
+2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
    and a behavioural canary scan (the risk diff and rescan are already built).
 4. **The remaining web pages:** the repository graph, suggestions and Settings.
@@ -81,7 +84,8 @@ AISkills/
 │   ├── skillforge/evaluate/  # the test harness: a skill's test cases run against a model, graded by code
 │   ├── skillforge/validate/  # static checks on any skill folder (run nothing)
 │   ├── skillforge/sandbox/   # the Linux Docker sandbox that generated scripts run in (fails closed)
-│   ├── skillforge/kinds/     # the kind registry: what the app builds (skill, agent and plugin) and each one's checklist
+│   ├── skillforge/kinds/     # the kind registry: what the app builds (skill, agent, plugin and MCP server) and each one's checklist
+│   ├── skillforge/hookcatalog/ # the only hooks a plugin may carry: three fixed scripts, typed options, pinned hashes
 │   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
 │   ├── skillforge/ai/        # the one model service: model by task, retries, usage, redaction, backup models
 │   ├── skillforge/providers/ # the model adapters (Gemini, OpenAI-compatible, Anthropic) and a mock for tests
@@ -181,8 +185,8 @@ DRAFT, never "ok" ([docs/mcp-builder.md](docs/mcp-builder.md)). The app never ad
 
 ## Compose a plugin
 
-Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills, agents and MCP servers to include and press **Preview the plugin**. You see its files,
-**what it can do on your machine** (every tool its parts grant, every script it ships and every program an MCP server starts, worked out by code) and every check. **Keep this plugin** stores it in the
+Open **Plugins** in the web pages, give the plugin a name and a one-line purpose, tick the skills, agents, MCP servers and hooks to include and press **Preview the plugin**. You see its files,
+**what it can do on your machine** (every tool its parts grant, every script it ships, every program an MCP server starts and every hook that runs, worked out by code) and every check. **Keep this plugin** stores it in the
 library's Plugins tab, where you can export it as a zip or install it from a folder. Its README has the two commands that add it to Claude Code:
 `claude plugin marketplace add "<folder>"` and `claude plugin install <name>@<name>-local` (and, for MCP servers, the `pip install -r` lines and the `--config` option names). The app never writes Claude's settings: adding it is your command
 ([docs/plugin-builder.md](docs/plugin-builder.md)).

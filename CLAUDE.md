@@ -20,7 +20,9 @@ The Component Factory's Phase 0 is built: a kind registry, and a library, valida
 (`skill`, `agent`, `plugin` and `mcp` are registered; Phase 1 is the Agent Builder, [docs/agent-builder.md](docs/agent-builder.md), Phase 2 the Plugin Builder, [docs/plugin-builder.md](docs/plugin-builder.md), and Phase 3 the MCP Builder (Python), [docs/mcp-builder.md](docs/mcp-builder.md): the server is started in the sandbox and called over the real MCP protocol, image built once with `python -m skillforge sandbox-build-mcp`; plan: [docs/component-factory.md](docs/component-factory.md)).
 Phase 4a is built too (a plugin can carry MCP servers from the library: `servers/<name>/`, a `.mcp.json`, one secret `userConfig` option per variable the server reads;
 [docs/plugin-builder.md](docs/plugin-builder.md)).
-Next: Phase 4b of the Component Factory (plugins that carry hooks, from a catalogue) or the TypeScript half of Phase 3, then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
+Phase 4b is built too (a plugin can carry hooks, only from the catalogue in `skillforge/hookcatalog/`: fixed scripts, typed options, recognised only when byte-identical;
+[docs/hook-catalogue.md](docs/hook-catalogue.md); real Claude Code ran them).
+Next: the TypeScript half of Phase 3 (Phase 4 of the Component Factory is built), then the next differentiator ([docs/differentiators.md](docs/differentiators.md):
 the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
 Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 

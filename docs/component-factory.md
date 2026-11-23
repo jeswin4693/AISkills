@@ -1,7 +1,7 @@
 # Component Factory: skills, agents, plugins and MCP servers from one app
 
 **Status: planned and approved by the project owner (2026-11-19). Built so far: the shared model service
-([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder), Phase 2 (the Plugin Builder) and Phase 3 (the MCP Builder, Python), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md), [phase 3](superpowers/plans/2026-11-20-mcp-builder-phase-3.md); what each did and did not do is under "Phase 0/1/2/3: what was built" below, in [agent-builder.md](agent-builder.md), [plugin-builder.md](plugin-builder.md) and [mcp-builder.md](mcp-builder.md)). Phase 4a (MCP servers inside plugins, [plan](superpowers/plans/2026-11-23-plugin-mcp-phase-4a.md)) was built on 2026-11-23. Nothing else here is built.** Next slice: Phase 4b (the hook catalogue), or the TypeScript half of Phase 3.
+([ai-engine.md](ai-engine.md)), Phase 0 (the foundation), Phase 1 (the Agent Builder), Phase 2 (the Plugin Builder) and Phase 3 (the MCP Builder, Python), all 2026-11-20 (plans: [phase 0](superpowers/plans/2026-11-20-component-factory-phase-0.md), [phase 1](superpowers/plans/2026-11-20-agent-builder-phase-1.md), [phase 2](superpowers/plans/2026-11-20-plugin-builder-phase-2.md), [phase 3](superpowers/plans/2026-11-20-mcp-builder-phase-3.md); what each did and did not do is under "Phase 0/1/2/3: what was built" below, in [agent-builder.md](agent-builder.md), [plugin-builder.md](plugin-builder.md) and [mcp-builder.md](mcp-builder.md)). Phase 4a (MCP servers inside plugins, [plan](superpowers/plans/2026-11-23-plugin-mcp-phase-4a.md)) and Phase 4b (hooks from a catalogue, [plan](superpowers/plans/2026-11-23-plugin-hooks-phase-4b.md)) were built on 2026-11-23. Nothing else here is built.** Next: the TypeScript half of Phase 3, or whatever the roadmap names.
 
 ## What
 
@@ -45,7 +45,7 @@ words -> extract -> CHECKLIST -> ask -> APPROVE -> design -> render -> CHECKS ->
 | 1 | **Agent Builder** | M |
 | 2 | Plugin Builder v1 (skills and agents) | M |
 | 3 | MCP Builder: Python first (**built**), then TypeScript (not built) | XL, then M |
-| 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind. **4a (MCP servers and `userConfig` in a plugin, and the risk diff for them) is built; 4b (the hook catalogue) is not** | L, in slices |
+| 4 | Plugin v2: MCP, a hook catalogue, `userConfig`; risk diff for every kind. **4a (MCP servers and `userConfig` in a plugin, and the risk diff for them) and 4b (hooks from a catalogue) are built** | L, in slices |
 
 Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, XL more), including tests, docs and a live check.
 
@@ -133,7 +133,23 @@ and says it in plain sentences. `library/risk.py` calls a new server, a changed 
 **Checked against the real tool (2026-11-23, Claude Code 2.1.325):** `claude plugin validate --strict` reads `.mcp.json`, refuses a `userConfig` key with a dash, dot, space or leading digit, and fails an undeclared
 `${user_config.X}`; a plugin composed from two real library servers (one reading a key) passes with exit 0. **Read from the docs by a research agent, not tried:** a plugin's MCP servers start when it is enabled with no
 per-server approval, outside the sandbox; `claude plugin install --config key=value` exists (checked in `--help`); the docs do not say a stdio server inherits Claude Code's environment, so every variable is passed explicitly.
-**Not done, on purpose:** hooks (4b), a real `claude plugin install`, a managed Python environment (the command is plain `python`), TypeScript or remote servers, and a browser run of the new page section.
+**Not done, on purpose:** hooks (4b, built after: see below), a real `claude plugin install`, a managed Python environment (the command is plain `python`), TypeScript or remote servers, and a browser run of the new page section
+(still not done for the MCP picker; the composer page as a whole was driven in a real browser in 4b).
+
+## Phase 4b: what was built (2026-11-23)
+
+Hooks inside plugins, from a catalogue only ([hook-catalogue.md](hook-catalogue.md), [plugin-builder.md](plugin-builder.md), [plan](superpowers/plans/2026-11-23-plugin-hooks-phase-4b.md)). `skillforge/hookcatalog/`: a table of three
+vetted hooks (block secret files, block forced git pushes, log tool names) and one short standard-library script each, with typed options handed to the script as separate exec-form arguments. `ComponentRef("hook", id, options=...)` and
+`"kind": "hook"` in the API: the composer writes `hooks/hooks.json` and the catalogue's script unchanged, and describes every hook plainly (when it runs, whether it can block, what its script can do, what was chosen). `validate/plugin.py`
+recognises a hook only when it is exactly a catalogue hook (event, matcher, timeout, command, arguments, and a script whose SHA-256 is the catalogue's, line endings ignored); anything else is warned about with the command shown, and a plugin
+that holds nothing it can describe has no content. `library/risk.py` calls a new hook, a changed trigger and a script that is no longer the catalogue's riskier, and now compares any code a plugin ships outside its components. `GET /api/hooks`,
+a Hooks card and a "Hooks this plugin runs" preview section on the composer page.
+
+**Checked against the real tool (2026-11-23, Claude Code 2.1.325):** `claude plugin validate --strict` accepts a plugin of all three hooks. **And the hooks were run by real Claude Code**: with the plugin loaded for one session only (`--plugin-dir`, no settings
+changed), in a scratch folder with a dummy `.env`, `block-secret-files` blocked a `Read` of `.env` and `block-force-push` blocked `git push --force`, each with its own reason shown to the model (the debug log: `Hook PreToolUse:Read error: status code 2`), an
+ordinary `Read` of `notes.txt` went through, and `log-tool-calls` ran afterwards and wrote its line to the plugin data folder. That settles what the docs left open: the exec form with `python` and `${CLAUDE_PLUGIN_ROOT}` works on Windows, exit 2 blocks and its
+stderr is the reason, `tool_input.file_path` is the field, and a plugin's hooks run without an approval prompt in a non-interactive session. The real-browser suite passes 42 of 42 (3 new composer behaviours). **Not done, on purpose:** hook types other than
+`command`, hooks inside a skill's or agent's front matter (still only listed), `SessionStart` context injection (it feeds text to the model), a real `claude plugin install`, and a managed Python.
 
 ## Decisions (approved)
 

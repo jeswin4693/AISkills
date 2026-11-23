@@ -39,3 +39,15 @@
 
 ### Task 5: API, page, docs, real check
 `GET /api/hooks`, `kind: "hook"` with `options` on the plugin routes; the composer lists hooks with their options and a plain warning; docs; the real validator on a composed plugin; full suites; push.
+
+## Result (2026-11-23)
+
+Tasks 1 to 5 done in order. 180 new backend tests (1,538 passed, 2 skipped, the two symlink skips), 6 new UI unit tests (88), a clean typecheck, and the real-browser suite passing 42 of 42 (3 new composer behaviours; the first
+time the plugin page was driven in a browser). `claude plugin validate --strict` (2.1.325) accepts a plugin of all three hooks, and **real Claude Code ran them** (a session loaded with `--plugin-dir`, no settings changed, a scratch
+folder with a dummy `.env`): `block-secret-files` blocked a `Read` of `.env`, `block-force-push` blocked `git push --force`, each reason was shown to the model, an ordinary read passed, and `log-tool-calls` wrote its line (the data folder
+under `~/.claude/plugins/data/` was removed afterwards). That settled `tool_input.file_path`, the exec form with `python` and `${CLAUDE_PLUGIN_ROOT}` on Windows, and exit 2 blocking.
+
+Changes from the plan, and what checking my own work found: the matcher has no `MultiEdit` (not a documented tool name); the log script reads `CLAUDE_PLUGIN_DATA` from the environment instead of an argument (substitution there is
+not documented for hooks); an option cannot start with a dash or be only wildcards (found by a test); a plugin with one catalogue hook beside another command is kept with a warning, one with nothing describable is refused;
+and git accepts an abbreviated long option, so the first `block-force-push` let `--forc` through (checked against the committed script) and now blocks any start of a force option. The pin test caught that edit as designed.
+**Not done:** a real `claude plugin install`, an interactive session, `NotebookEdit` and the `PowerShell` tool name, a machine without `python` on the PATH, the MCP picker in a browser, an independent review of 4a and 4b, hook types other than `command`.

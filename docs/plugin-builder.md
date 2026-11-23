@@ -1,8 +1,8 @@
 # Plugin Builder
 
 The third kind the app keeps (Phase 2 of the [Component Factory](component-factory.md)). A Claude Code **plugin** bundles skills,
-agents and (since Phase 4a) MCP servers so they can be added in one step. You do not describe a plugin in words and no model is
-involved: you **pick** skills, agents and MCP servers that are already in your library, name the plugin, look at what it can do on your
+agents, MCP servers (Phase 4a) and hooks (Phase 4b) so they can be added in one step. You do not describe a plugin in words and no model is
+involved: you **pick** skills, agents and MCP servers that are already in your library and hooks from a fixed catalogue, name the plugin, look at what it can do on your
 machine, and keep it. Everything is decided by code.
 
 ## Use it
@@ -23,7 +23,36 @@ my-plugin/
   agents/<agent>.md                 the agent's AGENT.md
   servers/<server>/...              every file of an MCP server's latest version (server.py, requirements.txt, README.md), except spec.json
   .mcp.json                         only with servers: one entry per server that starts it
+  hooks/hooks.json                  only with hooks: one group per hook, in exec form
+  hooks/<hook>.py                   the catalogue's script for each hook, unchanged
 ```
+
+## Hooks in a plugin (Phase 4b)
+
+A hook is a program that Claude Code runs on your machine, with your permissions and outside any sandbox, every time its event happens. So a plugin made here can carry **only hooks from a
+fixed catalogue** ([hook-catalogue.md](hook-catalogue.md)): nobody types a hook command and no model writes one. Each entry is a short Python script from SkillForge (standard library only),
+a fixed event, matcher and timeout, and typed **options** that are checked against a strict pattern and given to the script as separate arguments (exec form: `command` is `python`, `args` the
+script and its options, no shell), so an option can never become code.
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Read|Write|Edit|NotebookEdit",
+   "hooks": [{"type": "command", "command": "python", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/block-secret-files.py", "--also", "secrets.json"], "timeout": 10}]}]}}
+```
+
+- **The catalogue (3 hooks):** *block-secret-files* (before Read, Write, Edit or NotebookEdit: stops files that usually hold secrets; the person may add file names), *block-force-push* (before Bash or
+  PowerShell: stops `git push` with `--force`, `-f`, `--force-with-lease`, or a `+branch`), *log-tool-calls* (after every tool: one line, the time and the tool's name, never its input, in the plugin's data folder).
+- **A hook is always described plainly:** when it runs, what Claude Code hands it, whether it can stop what Claude is about to do, and what its script can do (proven by a test for each entry: none reaches
+  the network, starts a program or builds code from text; only `log-tool-calls` writes, and only its log). It is never called read-only. The preview, the README and the risk diff all say it runs on your machine.
+- **A hook is a policy aid, not a security boundary.** It matches names and text: `block-secret-files` does not see `cat .env` through the shell, and `block-force-push` reads the command as text, so an alias or a script that pushes
+  is not seen. If a script cannot understand what Claude Code sends it, it **does not block** and says so (exit 1, a non-blocking error), so a changed format is noticed and never locks you out or is silently ignored.
+- **The plugin's check recognises a hook only when it is exactly a catalogue hook:** its event, matcher, timeout, command and arguments are the ones the catalogue writes, the options are valid, and the script beside it
+  is the catalogue's own (compared by SHA-256, line endings ignored; the hashes of earlier revisions stay accepted so an older plugin does not turn unrecognised). In a plugin from outside, anything else
+  (a shell command, another script, extra keys, another hook type, a changed script) is **warned about with the command shown**. A plugin that holds nothing it can describe has no content and is refused;
+  one with a catalogue hook beside another command is kept with the warning.
+- **The risk diff:** a new hook is riskier (with when it runs and whether it can block), a removed one safer, a hook that now runs on other events is riskier, a script that is no longer the catalogue's
+  is riskier, a newer catalogue revision or changed options are something to look at, and code a plugin ships outside its components is now compared like any script.
+- **The page:** a Hooks card lists the catalogue with a "runs on your machine" badge on each, and a text box for each option (bad values are marked at once from the server's pattern, and the server still decides).
+  API: `GET /api/hooks`, and `{"kind": "hook", "name": "<id>", "options": {...}}` on the plugin routes.
 
 ## MCP servers in a plugin (Phase 4a)
 
@@ -104,10 +133,12 @@ and it fails a `${user_config.X}` that `plugin.json` does not declare. The check
   which components came or went, and reads `.mcp.json`; it reads hooks only as a key in a component's front matter (Phase 4b).
 - The version `0.1.<n>` is one above the highest version number ever stored, so a rollback can never make a number repeat; a manifest
   always names an author (the default is `me`), because `claude plugin validate --strict` wants one.
-- No hooks (Phase 4b). MCP servers and `userConfig` are in since Phase 4a, with these limits: **no real `claude plugin install` was run**, so what Claude Code does when it
+- Hooks are in since Phase 4b: see "Hooks in a plugin" above for what they do and do not do. They were **run by real Claude Code** on 2026-11-23 (the two blocking hooks blocked, an ordinary read passed, the log hook wrote its line; details and what is still
+  untried in [hook-catalogue.md](hook-catalogue.md)); a hook needs `python` on the PATH, and an interactive session was not tried. MCP servers and `userConfig` are in since Phase 4a, with these limits: **no real `claude plugin install` was run**, so what Claude Code does when it
   starts the server, asks for the options and passes them was not seen (the validator accepts the files and cross-checks `${user_config.*}` against `userConfig`); whether an
   unset optional option is an error is not in the docs, which is why every option is `required`; and the command is plain `python`, so on a machine where Python is called
   `python3` or does not have the package, the server will not start (the preview says it needs the package). Only Python servers from the MCP library, no TypeScript, no remote
   (`url`) servers. No LICENSE or icon is written: that is your choice, not the app's.
-- The plugin page was not driven in a real browser (the new picker and the "Programs this plugin starts" section are covered by the typecheck and unit tests of its logic only);
-  the 39 existing browser behaviours (skills) were not re-run for this slice.
+- The plugin page was first driven in a real browser in Phase 4b (3 new behaviours in `npm run e2e`, 42 in all, all passing): the hook catalogue, a bad option stopping the preview, keeping a plugin made of a
+  skill and a hook, and a changed form clearing the old preview. **The MCP servers picker and the "Programs this plugin starts" section have still not been exercised in a browser** (the run has no MCP
+  server in its library).

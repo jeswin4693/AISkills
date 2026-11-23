@@ -80,7 +80,7 @@ def test_a_plugin_needs_a_description_and_at_least_one_component_and_no_componen
         compose(lib, components=[])
     with pytest.raises(PluginError, match="twice"):
         compose(lib, components=[ComponentRef("skill", SKILL), ComponentRef("skill", SKILL)])
-    with pytest.raises(PluginError, match="skill or an agent"):
+    with pytest.raises(PluginError, match="skill, an agent or an MCP server"):
         compose(lib, components=[ComponentRef("plugin", "x")])
 
 

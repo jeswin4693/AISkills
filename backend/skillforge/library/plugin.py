@@ -1,9 +1,12 @@
-"""Compose a Claude Code plugin from skills and agents that are already in the library.
+"""Compose a Claude Code plugin from skills, agents and MCP servers that are already in the library.
 
 No model is involved: a plugin is an assembly, and everything about it is decided by code. Each component is read through the
 library, which proves its files against their SHA-256 manifest; the plugin's own check then runs every component through that
 kind's own checks, so a damaged or failing component fails the plugin and is refused when it is kept. What the plugin can do on the machine (the tools its skills and agents grant, the
-scripts it ships and what those can do) is computed from the files and shown before anything is kept or installed.
+scripts it ships and what those can do, the programs its MCP servers start and what they read) is computed from the files and shown before anything is kept or installed.
+
+An MCP server is shipped as `servers/<name>/` and started by a root `.mcp.json`; every environment variable its code reads becomes a
+`userConfig` option (sensitive, required) that the entry passes as a `${user_config.KEY}` reference. A value is never written.
 """
 
 from __future__ import annotations
@@ -15,13 +18,19 @@ from pathlib import PurePosixPath
 
 from ..results import FAILED, CheckResult
 from ..validate import validate_files
-from ..validate.plugin import MANIFEST, MARKETPLACE, name_problem, shipped_code
+from ..validate.mcp import analyze_server
+from ..validate.plugin import (
+    MANIFEST, MARKETPLACE, MCP_CONFIG, SERVERS_DIR, START_COMMAND, is_identifier, name_problem, server_entry, shipped_code, user_config_key,
+)
 from ..validate.static import JS_LANGS, PY_SUFFIXES, script_capabilities, split_tools
 from .package import MAX_ENTRIES, LibraryError
 from .risk import _front_matter
 from .store import Library, content_hash
 
-COMPONENT_KINDS = ("skill", "agent")
+COMPONENT_KINDS = ("skill", "agent", "mcp")
+SERVER_POWERS = {
+    "network": "reach the network", "write_files": "write or delete files", "read_files": "read files", "run_commands": "start other programs",
+}
 LEFT_OUT = {"spec.json"}  # the requester's own words stay in the library
 MAX_DESCRIPTION = 1000
 _SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)\Z")
@@ -40,7 +49,7 @@ class PluginError(LibraryError):
 
 @dataclass(frozen=True)
 class ComponentRef:
-    kind: str  # "skill" or "agent"
+    kind: str  # "skill", "agent" or "mcp"
     name: str
     version: int | None = None  # None: the latest
 
@@ -54,6 +63,7 @@ class Capabilities:
     hooks: list[str] = field(default_factory=list)  # the components that declare hooks in their front matter
     mcp_servers: list[str] = field(default_factory=list)  # the components that declare MCP servers in their front matter
     notes: list[str] = field(default_factory=list)  # the same, in plain sentences
+    servers: list[dict] = field(default_factory=list)  # each MCP server it starts: name, tools, capabilities, environment, environment_dynamic, dynamic, command
 
 
 @dataclass
@@ -82,10 +92,47 @@ def _inside(path: str) -> str:
     return path
 
 
+def _server_summary(name: str, files: dict[str, bytes]) -> dict:
+    """What an MCP server is and does, by reading its `server.py` the way the MCP checks do (by syntax; never run)."""
+    try:
+        facts = analyze_server(files["server.py"].decode("utf-8"))
+    except (KeyError, UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as exc:
+        raise PluginError(f"The MCP server '{name}' cannot be read as a Python server ({type(exc).__name__}), so it was not used.") from None
+    return {
+        "name": name, "tools": [t.name for t in facts.tools], "capabilities": sorted(facts.capabilities),
+        "environment": sorted(facts.env_names), "environment_dynamic": facts.env_dynamic, "dynamic": sorted(facts.dynamic),
+        "command": f"{START_COMMAND} {SERVERS_DIR}/{name}/server.py",
+    }
+
+
+def _server_notes(server: dict) -> list[str]:
+    """Plain sentences for one server. It is a program, so it is never called read-only, and what code can see is said to be a reading, not proof."""
+    name, tools = server["name"], server["tools"]
+    powers = ", ".join(SERVER_POWERS[c] if c in SERVER_POWERS else str(c) for c in server["capabilities"])
+    first = (
+        f"The MCP server '{name}' is a program that starts on this machine, with your permissions and outside any sandbox, whenever Claude Code loads the plugin. "
+        f"It offers {len(tools)} tool{'s' if len(tools) != 1 else ''}" + (f" ({', '.join(tools)})" if tools else "") + ". "
+        + (f"By reading its code (by syntax, not proof) it can: {powers}." if powers else "By reading its code (by syntax, not proof) it does not reach the network, start programs or write files.")
+    )
+    if server["dynamic"]:
+        first += f" It also uses {', '.join(server['dynamic'])}, which the checks cannot follow, so what it does is not fully known."
+    second = f"The server '{name}' needs Python with the package in servers/{name}/requirements.txt: run pip install -r servers/{name}/requirements.txt."
+    names = server["environment"]
+    if names:
+        second += (
+            f" It reads the environment variable{'s' if len(names) != 1 else ''} {', '.join(names)}: Claude Code asks you for "
+            f"{'each' if len(names) != 1 else 'it'} when the plugin is enabled and keeps {'them' if len(names) != 1 else 'it'} as {'secrets' if len(names) != 1 else 'a secret'}."
+        )
+    if server["environment_dynamic"]:
+        second += " It also reads environment variables by a name that is not written in the code (or all of them), so it can read any variable Claude Code gives it."
+    return [first, second]
+
+
 def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> Capabilities:
     """What the plugin can do, by reading the files. A tool is named by what comes before a bracket (`Bash(git *)` is Bash); a tool
     SkillForge cannot describe is named, never called read-only; hooks, MCP servers and a bypassed approval in a component's front
-    matter are listed; and code in ANY folder of a skill counts as shipped code, not only `scripts/`."""
+    matter are listed; code in ANY folder of a skill counts as shipped code, not only `scripts/`; and an MCP server the plugin ships is
+    read as a server (its tools, what its code can do, the variables it reads)."""
     by: list[dict] = []
     all_tools: set[str] = set()
     all_scripts: list[str] = []
@@ -95,7 +142,12 @@ def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> C
     hooks: list[str] = []
     servers: list[str] = []
     bypass: list[str] = []
+    shipped_servers: list[dict] = []
     for ref, files in kinds_files:
+        if ref.kind == "mcp":
+            shipped_servers.append(_server_summary(ref.name, files))
+            by.append({"kind": "mcp", "name": ref.name, "tools": [], "scripts": [], "script_capabilities": []})
+            continue
         definition = "SKILL.md" if ref.kind == "skill" else "AGENT.md"
         key = "allowed-tools" if ref.kind == "skill" else "tools"
         meta = _front_matter(files, definition)[0]
@@ -137,6 +189,8 @@ def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> C
     notes += [f"The {who} declares hooks: commands that run on this machine when it is used. Read them." for who in hooks]
     notes += [f"The {who} declares MCP servers: programs it starts or connects to. Read them." for who in servers]
     notes += [f"The {who} skips permission prompts (permissionMode: bypassPermissions)." for who in bypass]
+    for server in shipped_servers:
+        notes += _server_notes(server)
     if all_scripts:
         n = len(all_scripts)
         used = ", ".join(sorted(c.replace("_", " ") for c in all_caps)) or "nothing risky by syntax"
@@ -145,14 +199,37 @@ def _capabilities(kinds_files: list[tuple[ComponentRef, dict[str, bytes]]]) -> C
         notes.append("These could not be analysed, so read them: " + ", ".join(unanalysed) + ".")
     if not notes:
         notes.append("It can only read and search files.")
-    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), hooks, servers, notes)
+    return Capabilities(sorted(all_tools), by, all_scripts, sorted(all_caps), hooks, servers, notes, shipped_servers)
+
+
+def _server_config(servers: list[dict]) -> tuple[dict, dict]:
+    """(the `.mcp.json` entries, the `userConfig` options) for the servers a plugin ships. Each variable a server reads gets one option
+    of its own, so two servers never share a value; only a reference to the option is written, never a value. A variable that is not
+    a plain name, or two that would share an option, refuse the plugin."""
+    entries: dict[str, dict] = {}
+    options: dict[str, dict] = {}
+    for server in servers:
+        name, wanted = server["name"], {}
+        for variable in server["environment"]:
+            key = user_config_key(name, variable)
+            if not is_identifier(variable):
+                raise PluginError(f"The MCP server '{name}' reads the environment variable '{variable}', which is not a plain name (letters, digits and underscores), so it cannot be given as a plugin option.")
+            if key in options or key in wanted.values():
+                raise PluginError(f"The MCP server '{name}' reads two variables that would share the option '{key}' (for example '{variable}'): rename one in the server.")
+            wanted[variable] = key
+            options[key] = {
+                "type": "string", "title": f"{variable} for {name}", "sensitive": True, "required": True,
+                "description": f"Read by the MCP server {name}. Claude Code asks for it when the plugin is enabled and keeps it as a secret.",
+            }
+        entries[name] = server_entry(name, wanted)
+    return entries, options
 
 
 def _readme(name: str, description: str, version: str, plan: list[dict], caps: Capabilities) -> str:
     market = f"{name}-local"
     lines = [f"# {name.replace('-', ' ').title()}", "", description.strip(), "", f"Version {version}. Made with SkillForge from skills and agents in its library.", "",
              "## What is inside", ""]
-    lines += [f"- {c['kind']} `{c['name']}` ({c['version']})" for c in plan]
+    lines += [f"- {'MCP server' if c['kind'] == 'mcp' else c['kind']} `{c['name']}` ({c['version']})" for c in plan]
     lines += ["", "## What it can do on your machine", "", "Worked out by code from the files, never chosen by a model.", ""]
     lines += [f"- {note}" for note in caps.notes]
     lines += [
@@ -160,6 +237,18 @@ def _readme(name: str, description: str, version: str, plan: list[dict], caps: C
         "```", f'claude plugin marketplace add "<path to this folder>"', f"claude plugin install {name}@{market}", "```", "",
         "SkillForge never writes Claude's settings: adding the plugin is your command.", "",
     ]
+    if caps.servers:
+        options = [(s["name"], v, user_config_key(s["name"], v)) for s in caps.servers for v in s["environment"]]
+        lines += ["## Before the MCP servers can start", "", "Each server runs with `python` and needs its package, once, from this folder:", "", "```"]
+        lines += [f"pip install -r servers/{s['name']}/requirements.txt" for s in caps.servers]
+        lines += ["```", ""]
+        if options:
+            lines += [
+                "Claude Code asks for these options when the plugin is enabled, and keeps them as secrets. Without the dialog, give each one to the install command:", "",
+                "```", f"claude plugin install {name}@{market} " + " ".join(f"--config {key}=<value>" for _, _, key in options), "```", "",
+            ]
+            lines += [f"- `{key}`: the environment variable `{variable}` of `{server}`" for server, variable, key in options]
+            lines += ["", "No value is written in any file of this plugin.", ""]
     return "\n".join(lines)
 
 
@@ -180,14 +269,14 @@ def compose_plugin(
         except UnicodeEncodeError:
             raise PluginError(f"The {label} is not valid text: it contains a character that cannot be written to a file.") from None
     if not components:
-        raise PluginError("A plugin needs at least one skill or agent.")
+        raise PluginError("A plugin needs at least one skill, agent or MCP server.")
     seen: set[tuple[str, str]] = set()
     read: list[tuple[ComponentRef, dict[str, bytes]]] = []
     plan: list[dict] = []
     files: dict[str, bytes] = {}
     for ref in components:
         if ref.kind not in COMPONENT_KINDS:
-            raise PluginError(f"A plugin can hold a skill or an agent, not '{ref.kind}'.")
+            raise PluginError(f"A plugin can hold a skill, an agent or an MCP server, not '{ref.kind}'.")
         if (ref.kind, ref.name) in seen:
             raise PluginError(f"The {ref.kind} '{ref.name}' is listed twice.")
         seen.add((ref.kind, ref.name))
@@ -198,11 +287,20 @@ def compose_plugin(
             for rel, data in component_files.items():
                 if rel not in LEFT_OUT:
                     files[f"skills/{ref.name}/{_inside(rel)}"] = data
+        elif ref.kind == "mcp":
+            for rel, data in component_files.items():
+                if rel not in LEFT_OUT:
+                    files[f"{SERVERS_DIR}/{ref.name}/{_inside(rel)}"] = data
         else:
             files[f"agents/{ref.name}.md"] = component_files["AGENT.md"]
     caps = _capabilities(read)
+    entries, options = _server_config(caps.servers)
     owner = author.strip() or DEFAULT_AUTHOR
     manifest: dict = {"name": name, "version": version, "description": description.strip(), "author": {"name": owner}}
+    if options:
+        manifest["userConfig"] = options
+    if entries:
+        files[MCP_CONFIG] = _json({"mcpServers": entries})
     market = {
         "name": f"{name}-local", "description": description.strip(), "owner": {"name": owner},
         "plugins": [{"name": name, "source": "./", "description": description.strip()}],

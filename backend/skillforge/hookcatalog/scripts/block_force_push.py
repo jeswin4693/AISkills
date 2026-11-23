@@ -1,7 +1,8 @@
 """SkillForge hook: block-force-push.
 
 Runs before Claude's shell tools (Bash, PowerShell) and stops a `git push` that forces: --force, -f (alone or inside a group such
-as -fu), --force-with-lease, --force-if-includes, or a refspec that starts with +. It reads the command as text, one simple command
+as -fu), --force-with-lease, --force-if-includes (or the start of one of them, which git also accepts), or a refspec that starts
+with +. It reads the command as text, one simple command
 at a time (split on ; & | and new lines), so an alias, a script, or a push built from variables is not seen. It exits 2 (which
 blocks) with the reason on stderr. It does not write files, use the network or start programs. If it cannot understand the event
 it does NOT block: it exits 1, which Claude Code shows as a non-blocking error.
@@ -44,7 +45,8 @@ def forced_push(segment):
             continue
         for option in rest[rest.index("push") + 1:]:
             if option.startswith("--"):
-                if option == "--force" or option.split("=")[0] in LONG_FORCE:
+                name = option.split("=")[0]
+                if len(name) >= 4 and any(full.startswith(name) for full in LONG_FORCE):  # git accepts the start of a long option, such as --forc
                     return True
             elif option.startswith("-"):
                 if SHORT_GROUP.fullmatch(option):

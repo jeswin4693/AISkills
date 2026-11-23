@@ -94,6 +94,7 @@ def test_an_event_with_no_file_path_in_it_is_reported_not_silently_allowed(event
     "git push --force", "git push -f origin main", "git push origin +main", "cd repo && git push --force-with-lease", "git -C repo push -fu origin b",
     "echo hi; git push -f", "GIT_TRACE=1 git push --force-if-includes", "git   push   origin   main   --force", "git push origin HEAD:+main",
     "/usr/bin/git push -f", "git.exe push -f", "git add . && git commit -m x && git push -f origin b",
+    "git push --forc", "git push --for origin main", "git push --force-w", "git push --force-with-lease=main:abc123",  # git accepts an unambiguous start of a long option
 ])
 def test_a_forced_push_is_blocked(command):
     done = run("block-force-push", tool("Bash", command=command))
@@ -104,6 +105,7 @@ def test_a_forced_push_is_blocked(command):
 @pytest.mark.parametrize("command", [
     "git push", "git push -u origin feature", "git push --follow-tags", "git pull --force", "git commit -m 'fix the -f flag'", "git status",
     "echo force", "git push origin main --tags", "ls -f", "git fetch -f", "git push --set-upstream origin a+b",
+    "git push --follow", "git push --fol", "git push --f", "git push --dry-run", "git push --atomic",
 ])
 def test_an_ordinary_push_and_other_commands_are_allowed(command):
     done = run("block-force-push", tool("Bash", command=command))

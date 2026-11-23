@@ -21,12 +21,15 @@ from pydantic import BaseModel
 
 from .. import __version__
 from ..builder import Builder, BuilderError, SessionNotFound, WrongState
+from ..evidence import EvidenceError, read_evidence
 from ..graph import languages
+from ..graph.build import build_graph
 from ..kinds import UnknownKind, all_kinds, get_kind
 from ..library import (
     Conflict, Library, LibraryError, NotFound, check_source, compare_with_risk, import_source, install_skill, package_skill,
     read_zip_bytes, rescan, rollback,
 )
+from ..library.evidence import evidence_focus, recheck_version
 from ..sandbox import probe_sandbox
 from .builds import builds_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
@@ -43,6 +46,12 @@ MAX_UPLOAD = 6_000_000  # bytes of zip; the library's own limits on what it hold
 
 class RollbackBody(BaseModel):
     to: int
+
+
+class RecheckBody(BaseModel):
+    repo: str  # an absolute path of a repository on this machine
+    version: int | None = None
+    focus: str | None = None
 
 
 class InstallBody(BaseModel):
@@ -242,9 +251,38 @@ def create_app(
         version, created = rollback(lib, name, body.to)
         return {"created": created, "version": _version(version)}
 
+    @api.get("/library/{name}/evidence")
+    def evidence_of(name: str, version: int | None = None, lib: Library = Depends(library_for)) -> dict:
+        """The places in a repository that this version cites, with the facts recorded for each. Reads only what is stored."""
+        v, files = lib.read(name, version)
+        try:
+            ev = read_evidence(files)
+        except EvidenceError as exc:
+            raise LibraryError(f"{name} {v.tag}: {exc}") from exc
+        return {"name": name, "version": v.tag, "evidence": ev.model_dump(mode="json") if ev else None}
+
+    @api.post("/library/{name}/recheck")
+    async def recheck_evidence(name: str, body: RecheckBody, lib: Library = Depends(library_for)) -> dict:
+        """What changed in the code a skill cites, against a repository on this machine. Reads the repository, changes nothing."""
+        if hosted is not None:  # this would read a folder on the server, which is not where anyone's repository is
+            raise HTTPException(403, "Rechecking against a folder is turned off in the hosted version: it reads a folder on the server. Use the command line on your own computer: library recheck.")
+        if not Path(body.repo).is_absolute():
+            raise HTTPException(400, "Give repo as an absolute path of a repository on this computer.")
+        if not Path(body.repo).is_dir():
+            raise HTTPException(400, f"Not a directory: {body.repo}")
+
+        def work() -> dict:
+            focus = body.focus if body.focus is not None else evidence_focus(lib, name, body.version)
+            g = build_graph(body.repo, focus=focus or None, with_history=False)
+            return recheck_version(lib, name, g, body.version, focus=focus or None).to_dict()
+
+        return await run_in_threadpool(work)
+
     @api.get("/library/{name}/export")
-    def export(name: str, version: int | None = None, without_spec: bool = False, lib: Library = Depends(library_for)) -> Response:
-        pkg = package_skill(lib, name, version, without_spec=without_spec)
+    def export(
+        name: str, version: int | None = None, without_spec: bool = False, without_evidence: bool = False, lib: Library = Depends(library_for),
+    ) -> Response:
+        pkg = package_skill(lib, name, version, without_spec=without_spec, without_evidence=without_evidence)
         return Response(
             pkg.data, media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{pkg.filename}"', "X-Skill-Has-Scripts": str(pkg.has_scripts).lower()},

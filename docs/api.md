@@ -31,7 +31,9 @@ python -m skillforge serve              # http://127.0.0.1:8000/api/docs ; --por
 | `GET /api/rescan` | `?name=<skill>&version=N` (both optional; a version needs a name). Today's static checks on stored versions: `{ok, counts: {same, worse, failing, damaged}, versions: [{name, tag, status, findings, message}]}`. Reads only: nothing is changed or run. **404** for an unknown skill. It is `/api/rescan`, not `/api/library/rescan`, so a skill named "rescan" is never shadowed. |
 | `GET /api/library/{name}/versions/{n}/files/{path}` | One stored file's text, after the whole version was verified against its manifest. A lookup by name, never a disk path. |
 | `POST /api/library/{name}/rollback` | `{"to": N}` makes a new version with the content of vN. |
-| `GET /api/library/{name}/export` | The `.zip` (`?version=N`, `?without_spec=true`). |
+| `GET /api/library/{name}/export` | The `.zip` (`?version=N`, `?without_spec=true`, `?without_evidence=true`: `evidence.json` names the files and functions of the repository a skill cites). |
+| `GET /api/library/{name}/evidence` | `?version=N`. The places the version cites with the facts recorded for each, or `evidence: null`. Reads what is stored. See [evidence.md](evidence.md). |
+| `POST /api/library/{name}/recheck` | `{"repo": "<absolute path>", "version": N, "focus": "..."}`. What changed in the cited code: `{ok, counts, findings: [{ref, status (missing/moved/changed/edited/holds), details, candidates, not_measured}], notes, limits}`. Reads the repository, changes nothing. **403 in the hosted version** (it reads a folder on the server); **400** for a relative path, a folder that is not there, or a skill with no evidence. |
 | `POST /api/library/{name}/install` | `{"target": "personal" or "folder", "folder": "<absolute path>", "version": N, "force": false}`. **409** if the folder exists and `force` is not set. |
 
 In the **hosted version** every route under `/api/` except health and `/api/auth/*` answers **401** `{"detail": "Sign in first."}` without a

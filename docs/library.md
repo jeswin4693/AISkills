@@ -85,6 +85,15 @@ result with what the checks said at import. Each version is one of:
 It **changes nothing** (stored versions are never edited: the history only grows) and **runs nothing**. It is also
 static checks only. Exit code 1 if any version is failing or damaged; a warning alone exits 0.
 
+## Evidence: the code a skill cites, and what changed in it
+
+A skill can carry an `evidence.json`: the files and functions of a repository it names, with the facts the graph had.
+`library cite` records places (a new version, source "evidence"), `library recheck` says what changed in them (reads a
+repository, changes nothing, exit 1 on anything missing, moved or changed), `library refresh` records today's facts after you
+have read the skill against the changes. The file is versioned and hash-covered like every other file, a malformed one fails an
+import, `export --without-evidence` leaves it out because it names a private repository's code, and a plugin never ships it.
+Everything about it, including what it cannot do: [evidence.md](evidence.md).
+
 ## Where things are kept
 
 ```

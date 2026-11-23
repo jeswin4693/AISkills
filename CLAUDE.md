@@ -23,9 +23,10 @@ Phase 4a is built too (a plugin can carry MCP servers from the library: `servers
 Phase 4b is built too (a plugin can carry hooks, only from the catalogue in `skillforge/hookcatalog/`: fixed scripts, typed options, recognised only when byte-identical;
 [docs/hook-catalogue.md](docs/hook-catalogue.md); real Claude Code ran them, which found that a guard that cannot start failed open, so guards now carry `onFailure: block`; two independent reviews of Phases 4a and 4b are fixed and tested).
 Phase 3b is built too (the MCP builder for Node: its own kind `mcp-node`, a TypeScript `server.ts` run by `node --permission` in the sandbox and read by `validate/mcp_node.py`; image built once with `python -m skillforge sandbox-build-mcp-node`; [docs/mcp-builder-node.md](docs/mcp-builder-node.md); two independent reviews are fixed and tested; not in plugins yet).
-Next: the next differentiator ([docs/differentiators.md](docs/differentiators.md):
-the risk diff + rescan is built; still open are code-level evidence + drift, and a behavioural canary scan) and the other UI pages and
-Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
+Slice V is built too (a skill can cite code: `evidence.json` holds the files and functions it names with the graph's facts, `library cite|recheck|refresh` say what changed in them, deterministic, no model;
+[docs/evidence.md](docs/evidence.md); a recheck checks that cited facts still hold, not that the skill's advice is right; evidence names a private repository's code, so export can leave it out and a plugin never ships it).
+Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built) and the other UI pages
+(the repository graph, suggestions, evidence) and Settings (H5) ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Commands (run from `backend/`)
 
@@ -38,7 +39,7 @@ python -m skillforge validate <skill-folder>
 python -m skillforge eval <skill-folder> [--runs 3]   # run its test cases against a model, with and without the skill (docs/evaluate.md)
 python -m skillforge sandbox-status
 python -m skillforge sandbox-build-mcp-node           # once, needs a network: the image generated Node MCP servers are tested in
-python -m skillforge library <import|list|versions|diff|rescan|rollback|export|install> ...
+python -m skillforge library <import|list|versions|diff|rescan|rollback|export|install|cite|recheck|refresh> ...   # cite/recheck/refresh: docs/evidence.md
 python -m skillforge serve [--port 8000]              # local API, 127.0.0.1 only (hosted version: docs/hosting.md)
 python -m skillforge models [--test]                  # which models and keys are set up; --test asks each model one tiny question
 python -m skillforge plan "<task>" --repo <path> [--no-ai]   # read-only task plan (docs/task-conductor.md)

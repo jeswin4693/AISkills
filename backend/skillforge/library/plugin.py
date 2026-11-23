@@ -39,7 +39,7 @@ KIND_ORDER = {kind: i for i, kind in enumerate(COMPONENT_KINDS)}
 SERVER_POWERS = {
     "network": "reach the network", "write_files": "write or delete files", "read_files": "read files", "run_commands": "start other programs",
 }
-LEFT_OUT = {"spec.json"}  # the requester's own words stay in the library
+LEFT_OUT = {"spec.json", "evidence.json"}  # the requester's own words, and the names of a private repository's code, stay in the library
 MAX_DESCRIPTION = 1000
 _SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)\Z")
 MAX_AUTHOR = 100

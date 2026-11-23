@@ -19,9 +19,11 @@ from .build.pipeline import BuildError, BuildResult, NeedAnswers, build_skill, r
 from .build.requirements import Question
 from .conductor import PlanError
 from .evaluate import load_files, run_eval
+from .evidence import EVIDENCE_FILE, MAX_REFS, STATUSES, RecheckReport, collect, evidence_bytes, fit, safe
 from .graph import query
 from .graph.build import build_graph
 from .library import Library, LibraryError, compare_with_risk, export_skill, import_skill, install_skill, rescan, rollback
+from .library.evidence import CiteReport, RefreshReport, cite, evidence_focus, recheck_version, refresh
 from .ai import service_from_env
 from .ai.doctor import check_models, describe
 from .providers import LLMProvider, ProviderError
@@ -298,6 +300,44 @@ def _description_from_args(args: argparse.Namespace) -> str:
     return args.description
 
 
+def _chosen_idea(args: argparse.Namespace) -> dict | None:
+    """The idea of the suggest report that --pick chose (the description step has already checked the choice), or None."""
+    if not args.from_suggestions:
+        return None
+    data = json.loads(Path(args.from_suggestions).read_text(encoding="utf-8"))
+    ideas = [s for s in data.get("suggestions", []) if str(s.get("skill_requirement", "")).strip()]
+    return ideas[args.pick - 1] if args.pick and 1 <= args.pick <= len(ideas) else None
+
+
+def _evidence_lines(args: argparse.Namespace, idea: dict | None, graph, out_dir: Path) -> list[str]:
+    """Record the chosen idea's cited places as the new skill's evidence (the facts the graph has now), and say what happened."""
+    if idea is None:
+        return ["note: --repo only applies to --from-suggestions, so nothing was cited."] if args.repo else []
+    nodes = [n for n in idea.get("evidence_nodes", []) if isinstance(n, str)]
+    if not nodes:
+        return []
+    if graph is None:
+        return [
+            f"Evidence was not recorded: the idea cites {len(nodes)} place(s) in the repository. "
+            f"Give --repo PATH to record them with the facts the graph has, so `library recheck` can say later what changed."
+        ]
+    got = collect(graph, nodes[:MAX_REFS], focus=args.focus or None)
+    ev, too_big = fit(got.evidence)  # nothing is written that the next import would refuse for its size
+    lines = []
+    if ev.refs:
+        (out_dir / EVIDENCE_FILE).write_bytes(evidence_bytes(ev))
+        lines.append(
+            f"Evidence: the skill cites {len(ev.refs)} place(s) in '{safe(ev.repo)}' ({EVIDENCE_FILE} in its folder). "
+            f"After importing it, `library recheck NAME --repo PATH` says what changed in that code."
+        )
+    lines += [f"  not in the graph, so not recorded: {safe(text)}" for text, _ in got.skipped]
+    if len(nodes) > MAX_REFS:
+        lines.append(f"  only the first {MAX_REFS} of {len(nodes)} places were recorded.")
+    if too_big:
+        lines.append(f"  only the first {len(ev.refs)} of the places were recorded: the file would be too large to read back ({too_big} left out).")
+    return lines
+
+
 def _sandbox_note() -> str:
     """What the report says about the sandbox on this machine. A failed probe must never stop a build."""
     return sandbox_note(probe_sandbox)  # looked up here, so a test can replace cli.probe_sandbox
@@ -306,6 +346,8 @@ def _sandbox_note() -> str:
 def _run_build(args: argparse.Namespace) -> int:
     load_dotenv(REPO_ROOT / ".env")
     description = _description_from_args(args)
+    idea = _chosen_idea(args)
+    graph = build_graph(args.repo, focus=args.focus, with_history=False) if args.repo and idea is not None else None  # a bad path stops here, before a model is asked
     provider = provider_from_env()
     result = build_skill(
         description, provider,
@@ -316,6 +358,8 @@ def _run_build(args: argparse.Namespace) -> int:
         evaluate=args.eval, eval_runs=args.eval_runs,
     )
     print(_render_build(result))
+    for line in _evidence_lines(args, idea, graph, Path(result.out_dir)):
+        print(line)
     return 0 if result.status == "ok" else 1
 
 
@@ -607,9 +651,103 @@ def _render_import(r) -> str:
     return "\n".join(lines)
 
 
+def _render_cite(r: CiteReport, repo_arg: str) -> str:
+    head = f"Recorded {len(r.added)} place(s) as evidence of '{r.name}' ({r.version.tag}, from '{r.evidence.repo}')." if r.created else (
+        f"Nothing new: those places were already recorded for '{r.name}', so no new version was made."
+    )
+    lines = [head]
+    lines += [f"  + {i}" for i in r.added]
+    if r.kept:
+        lines.append(f"  already recorded, facts left as they were (use `library refresh` to record today's): {', '.join(r.kept)}")
+    lines += [f"Not recorded: {text} ({why})" for text, why in r.skipped]
+    lines += [
+        f"Could mean more than one place, so none was chosen: {text} -> {', '.join(options)} (use --ref FILE::NAME)"
+        for text, options in r.ambiguous
+    ]
+    lines.append(f"Later, `library recheck {r.name} --repo {repo_arg}` says what changed in the code these places name.")
+    return "\n".join(lines)
+
+
+def _render_recheck(r: RecheckReport) -> str:
+    return "\n".join(safe(line) for line in _recheck_lines(r).split("\n"))  # names from a repository are never shown raw
+
+
+def _recheck_lines(r: RecheckReport) -> str:
+    when = f"recorded {r.taken_at[:10]}" + (f" at commit {r.recorded_commit}" if r.recorded_commit else "") + (
+        " plus uncommitted changes" if r.recorded_commit and r.recorded_dirty else "")
+    now = f"; the repository is now at commit {r.current_commit}" + (" plus uncommitted changes" if r.current_dirty else "") if (
+        r.current_commit and (r.current_commit != r.recorded_commit or r.current_dirty != r.recorded_dirty)) else ""
+    lines = [f"{r.skill} {r.version}: {len(r.findings)} place(s) cited from '{r.repo}' ({when}{now})"]
+    lines.append("Result: " + ", ".join(f"{n} {s}" for s, n in r.counts.items()) if r.counts else "Result: nothing is cited")
+    for status in STATUSES[:-1]:
+        for f in (x for x in r.findings if x.status == status):
+            lines.append(f"  {status.upper():8} {f.ref}" + (f"   (recorded {f.recorded})" if f.recorded else ""))
+            lines += [f"      - {d}" for d in f.details]
+            if f.candidates and len(f.candidates) > 1:
+                lines.append(f"      places that look like it: {', '.join(f.candidates)}")
+            lines += [f"      not compared: {n}" for n in f.not_measured]
+    holding = [f for f in r.findings if f.status == "holds"]
+    if holding:
+        lines.append("  holds: " + ", ".join(f.ref for f in holding))
+        lines += [f"      {f.ref}: not compared: {n}" for f in holding for n in f.not_measured]
+    lines += [f"note: {n}" for n in r.notes]
+    lines.append(r.limits)
+    return "\n".join(lines)
+
+
+def _render_refresh(r: RefreshReport, repo_arg: str) -> str:
+    lines = []
+    if r.created:
+        lines.append(f"Recorded today's facts for '{r.name}' as {r.version.tag}: {len(r.updated)} updated, {len(r.unchanged)} unchanged.")
+        lines += [f"  updated: {i}" for i in r.updated]
+    else:
+        lines.append(f"Nothing changed: every place that still exists has the facts that were recorded, so no new version was made.")
+    if r.dropped:
+        lines.append(f"Dropped (they were gone): {', '.join(r.dropped)}")
+    if r.kept_missing:
+        lines.append(
+            f"Gone from the repository, still recorded and still flagged by `library recheck`: {', '.join(r.kept_missing)}. "
+            f"After you have updated the skill, `library refresh {r.name} --repo {repo_arg} --drop-missing` removes them."
+        )
+    lines.append("Refresh records today's facts as the new baseline: do it after you have read the skill against the changed code.")
+    return "\n".join(lines)
+
+
+def _focus_of(args: argparse.Namespace, lib: Library, version: int | None = None) -> str | None:
+    """The folder to read: the one asked for (an empty one clears it), else the one the evidence was recorded with, so everything
+    recorded together is read the same way."""
+    return args.focus if args.focus is not None else evidence_focus(lib, args.name, version)
+
+
+def _run_evidence(args: argparse.Namespace, lib: Library) -> int:
+    cmd = args.command
+    if cmd == "cite":
+        if not args.ref and not args.from_text:
+            raise LibraryError("Say what to cite: --ref FILE_OR_FUNCTION (repeat it for more places) or --from-text (the places the skill's own text names).")
+        focus = _focus_of(args, lib)
+        g = build_graph(args.repo, focus=focus or None, with_history=False)
+        print(_render_cite(cite(lib, args.name, g, args.ref or [], from_text=args.from_text, focus=focus or None, note=args.note or ""), args.repo))
+        return 0
+    if cmd == "recheck":
+        focus = _focus_of(args, lib, args.version)
+        g = build_graph(args.repo, focus=focus or None, with_history=False)
+        report = recheck_version(lib, args.name, g, args.version, focus=focus or None)
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(_render_recheck(report))
+        return 0 if report.ok else 1
+    focus = _focus_of(args, lib)
+    g = build_graph(args.repo, focus=focus or None, with_history=False)
+    print(_render_refresh(refresh(lib, args.name, g, drop_missing=args.drop_missing, focus=focus or "", note=args.note or ""), args.repo))
+    return 0
+
+
 def _run_library(args: argparse.Namespace) -> int:
     lib = Library()
     cmd = args.command
+    if cmd in ("cite", "recheck", "refresh"):
+        return _run_evidence(args, lib)
     if cmd == "import":
         report = import_skill(Path(args.source), lib, test_scripts=args.test_scripts, note=args.note or "")
         print(_render_import(report))
@@ -659,12 +797,17 @@ def _run_library(args: argparse.Namespace) -> int:
             print(f"Nothing to do: the latest version of '{args.name}' already has the content of v{args.to}.")
         return 0
     if cmd == "export":
-        r = export_skill(lib, args.name, args.version, Path(args.out) if args.out else None, without_spec=args.without_spec, force=args.force)
+        r = export_skill(
+            lib, args.name, args.version, Path(args.out) if args.out else None, without_spec=args.without_spec,
+            without_evidence=args.without_evidence, force=args.force,
+        )
         print(f"Exported '{args.name}' {r.version.tag} ({r.files} file(s)) to {r.path}")
         if r.dropped:
             print(f"Left out on request: {', '.join(r.dropped)}")
-        elif "spec.json" in r.version.files:
+        if "spec.json" in r.version.files and "spec.json" not in r.dropped:
             print("It includes spec.json, which holds the words of the person who asked for the skill. Use --without-spec to leave it out.")
+        if EVIDENCE_FILE in r.version.files and EVIDENCE_FILE not in r.dropped:
+            print(f"It includes {EVIDENCE_FILE}, which names the files and functions of the repository the skill cites. Use --without-evidence to leave it out.")
         if r.has_scripts:
             print("This skill has scripts. Whoever uses it should read them first: an agent runs them on that machine, not in a sandbox.")
         return 0
@@ -672,6 +815,8 @@ def _run_library(args: argparse.Namespace) -> int:
     skills_dir = Path.home() / ".claude" / "skills" if args.personal else Path.cwd() / ".claude" / "skills" if args.project else Path(args.to)
     r = install_skill(lib, args.name, args.version, skills_dir, force=args.force)
     print(f"Installed '{args.name}' {r.version.tag} to {r.path}")
+    if r.left_out:
+        print(f"{', '.join(r.left_out)} stays in the library: it names the files and functions of the repository the skill cites.")
     if r.backup:
         print(f"The folder that was there was copied to {r.backup} first.")
     if r.has_scripts:
@@ -743,6 +888,8 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--scripts", action="store_true", help="also write helper scripts and test them in the sandbox (needs a Linux sandbox)")
     b.add_argument("--eval", action="store_true", help="also run the skill's own test cases against the model, with and without the skill (text-only skills; about 2 model calls per test)")
     b.add_argument("--eval-runs", type=int, default=1, metavar="N", help="with --eval: repeat each test N times, because models vary")
+    b.add_argument("--repo", metavar="PATH", help="with --from-suggestions: the repository the idea is about; the places the idea cites are recorded as the skill's evidence (evidence.json)")
+    b.add_argument("--focus", help="with --repo: only read this folder of the repository")
 
     ev = area.add_parser("eval", help="run a skill's own test cases against a model, with and without the skill (text-only skills)")
     ev.add_argument("folder", nargs="?", help="a skill folder (the one with SKILL.md)")
@@ -801,6 +948,25 @@ def _parser() -> argparse.ArgumentParser:
     p = ops.add_parser("rescan", help="check the stored versions again with today's checks and say which are now worse (changes nothing)")
     p.add_argument("name", nargs="?", help="one skill; default: every skill in the library")
     p.add_argument("--version", type=int, metavar="N", help="only this version (needs the name)")
+    for name, helptext in (
+        ("cite", "record places in a repository (files, functions) as the skill's evidence, with the facts the graph has now (a new version)"),
+        ("recheck", "say what changed in the code a skill cites (reads the repository, changes nothing, exit 1 if anything is gone, moved or changed)"),
+        ("refresh", "record today's facts for the cited places that still exist, after you have read the skill against the changed code (a new version)"),
+    ):
+        p = ops.add_parser(name, help=helptext)
+        p.add_argument("name")
+        p.add_argument("--repo", required=True, metavar="PATH", help="the repository the skill's evidence is about")
+        p.add_argument("--focus", help="only read this folder of the repository (default: the one the evidence was recorded with)")
+        if name == "cite":
+            p.add_argument("--ref", action="append", metavar="FILE_OR_FUNCTION", help="a place to cite: a file, a function name, or FILE::NAME (repeat for more)")
+            p.add_argument("--from-text", action="store_true", help="also cite the files and functions the skill's own text names (an ambiguous name is listed, never picked)")
+        if name == "recheck":
+            p.add_argument("--version", type=int, metavar="N", help="default: the latest")
+            p.add_argument("--json", action="store_true", help="print the result as JSON")
+        if name == "refresh":
+            p.add_argument("--drop-missing", action="store_true", help="also remove the places that are gone from the repository")
+        if name != "recheck":
+            p.add_argument("--note", help="a short note stored with the new version")
     p = ops.add_parser("rollback", help="make a new version with the content of an old one (nothing is deleted)")
     p.add_argument("name")
     p.add_argument("--to", type=int, required=True, metavar="N", help="the version whose content to restore")
@@ -809,6 +975,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--version", type=int, metavar="N", help="default: the latest")
     p.add_argument("--out", help="the .zip to write (default: NAME-vN.zip in the current folder)")
     p.add_argument("--without-spec", action="store_true", help="leave out spec.json, which holds the requester's own words")
+    p.add_argument("--without-evidence", action="store_true", help="leave out evidence.json, which names the files and functions of the repository the skill cites")
     p.add_argument("--force", action="store_true", help="replace an existing .zip")
     p = ops.add_parser("install", help="copy a version to a skills folder where an agent reads it (checked again first)")
     p.add_argument("name")

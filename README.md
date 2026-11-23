@@ -71,13 +71,19 @@ reader (programs, code built from text, network, file writes, a key in pieces, i
 refuses file writes through `fs`, starting programs and reads outside the folder, with known gaps such as `node:sqlite`) and called over the real MCP protocol. The README it writes has a `claude mcp add` command that starts the server the same way;
 real Claude Code accepted that command and called a tool of the generated server. **Two independent reviews then attacked it** and found a Critical hole (destructuring reached `Function` and a build said "ok") and many reader gaps; they are fixed test-first, and the generated file now also removes `constructor` from every function as a second line of defence. It cannot be put in a plugin yet (a plugin cannot run `npm ci`).
 
+**Skills can now cite code and be rechecked against it** (slice V, [docs/evidence.md](docs/evidence.md)): a skill carries an `evidence.json` listing the files and functions it names, with the facts the graph had
+(structure, resolved callers and callees, a file's symbols and importers, the commit and whether the tree had uncommitted changes). `library recheck NAME --repo PATH` later says, with names, what is **missing**, **moved** (one candidate, never applied for you),
+**changed** (a new caller, a changed structure) or only **edited**; `library refresh` records today's facts after you have read the skill against the changed code. It is deterministic (no model, nothing is run) and checks that cited facts still hold,
+**not that the skill's advice is right**. A skill built from a suggestion with `build --from-suggestions ... --repo PATH` carries the idea's cited places from the start. A real build with the configured model did that end to end, and a recheck on a changed clone of this repository
+named the renamed function, the new caller and the changed structure (and exposed a flaw that is now fixed: a commit id alone hid uncommitted changes). **One independent review** found four wrong "holds" (a removed decorator, a class whose bases or methods changed, a file whose function bodies were all rewritten, a caller swapped inside a long list), escape sequences from a hostile file reaching the terminal and a privacy claim that was false for `install`; they are fixed test-first and the report now says what a place records and what it does not check. Evidence names a private repository's code, so `export --without-evidence` leaves it out, `install` keeps it in the library and a plugin never ships it. Not yet: a web page for it, and the Builder page records none (it has no repository input).
+
 **What is next, in this order:**
 
 1. **Phase 3b, the MCP builder in TypeScript, is built.** What is left of it: Node servers inside plugins and the Streamable HTTP transport.
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
-3. **More differentiators** ([docs/differentiators.md](docs/differentiators.md)): code-level evidence with drift detection,
-   and a behavioural canary scan (the risk diff and rescan are already built).
-4. **The remaining web pages:** the repository graph, suggestions and Settings.
+3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
+   ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
+4. **The remaining web pages:** the repository graph, suggestions and Settings (and a page for evidence).
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
@@ -94,7 +100,8 @@ AISkills/
 │   ├── skillforge/sandbox/   # the Linux Docker sandbox that generated scripts run in (fails closed)
 │   ├── skillforge/kinds/     # the kind registry: what the app builds (skill, agent, plugin and MCP server) and each one's checklist
 │   ├── skillforge/hookcatalog/ # the only hooks a plugin may carry: three fixed scripts, typed options, pinned hashes
-│   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install (no AI)
+│   ├── skillforge/library/   # versions per kind: import (checked), diff + risk diff, rescan, rollback, export, install, cite/recheck/refresh (no AI)
+│   ├── skillforge/evidence/  # the places a skill cites + the graph's facts about them, and the recheck (docs/evidence.md; no AI)
 │   ├── skillforge/ai/        # the one model service: model by task, retries, usage, redaction, backup models
 │   ├── skillforge/providers/ # the model adapters (Gemini, OpenAI-compatible, Anthropic) and a mock for tests
 │   ├── skillforge/api/       # local HTTP API (FastAPI), localhost only; the hosted mode adds a sign-in
@@ -245,7 +252,10 @@ python -m skillforge library list
 python -m skillforge library diff my-skill                       # what changed since the version before, and what got riskier
 python -m skillforge library rescan                              # today's checks on every stored version: which are now worse?
 python -m skillforge library rollback my-skill --to 1            # a new version with the content of v1
-python -m skillforge library export my-skill --out my-skill.zip
+python -m skillforge library cite my-skill --repo C:\code\repo --from-text   # record the code the skill names, with the graph's facts (docs/evidence.md)
+python -m skillforge library recheck my-skill --repo C:\code\repo            # what changed in that code? (exit 1 if anything is gone, moved or changed)
+python -m skillforge library refresh my-skill --repo C:\code\repo            # after you read the skill against the changes: record today's facts
+python -m skillforge library export my-skill --out my-skill.zip              # add --without-evidence to leave out the names of a private repository's code
 python -m skillforge library install my-skill --project          # or --personal, or --to <skills folder>
 ```
 

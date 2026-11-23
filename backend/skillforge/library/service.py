@@ -200,16 +200,19 @@ class Package:
         return f"{self.version.name}-{self.version.tag}.zip"
 
 
-def package_skill(library: Library, name: str, version: int | None, *, without_spec: bool = False) -> Package:
+def package_skill(
+    library: Library, name: str, version: int | None, *, without_spec: bool = False, without_evidence: bool = False,
+) -> Package:
     """One version as a zip with a single `<name>/` folder, ready to share. It is checked again first."""
     v, files = library.read(name, version)
     failed = _failed(_gate(files, name, kind=library.kind))
     if failed:
         raise LibraryError(f"{name} {v.tag} no longer passes the checks ({failed[0].name}), so it was not exported.")
     dropped: list[str] = []
-    if without_spec and "spec.json" in files:  # spec.json holds the requester's own words
-        files = {rel: d for rel, d in files.items() if rel != "spec.json"}
-        dropped.append("spec.json")
+    for rel, wanted in (("spec.json", without_spec), ("evidence.json", without_evidence)):
+        if wanted and rel in files:  # spec.json holds the requester's own words; evidence.json names a repository's code
+            files = {r: d for r, d in files.items() if r != rel}
+            dropped.append(rel)
     return Package(v, zip_bytes(name, files), len(files), dropped, any(rel.startswith("scripts/") for rel in files))
 
 
@@ -223,10 +226,11 @@ class ExportReport:
 
 
 def export_skill(
-    library: Library, name: str, version: int | None, out: Path | None, *, without_spec: bool = False, force: bool = False,
+    library: Library, name: str, version: int | None, out: Path | None, *, without_spec: bool = False,
+    without_evidence: bool = False, force: bool = False,
 ) -> ExportReport:
     """Write one version as a zip file. Never overwrites a file unless force is given."""
-    pkg = package_skill(library, name, version, without_spec=without_spec)
+    pkg = package_skill(library, name, version, without_spec=without_spec, without_evidence=without_evidence)
     target = Path(out) if out else Path.cwd() / pkg.filename
     if target.exists() and not force:
         raise Conflict(f"{target} already exists. Use --force to replace it, or choose another --out.")
@@ -244,6 +248,7 @@ class InstallReport:
     version: Version
     backup: Path | None
     has_scripts: bool
+    left_out: list[str] = field(default_factory=list)  # files of the version that were not copied (evidence.json stays in the library)
 
 
 def _unused(path: Path) -> Path:
@@ -300,6 +305,8 @@ def install_skill(
     kind = get_kind(library.kind)
     if kind.install_file:  # an agent is installed as one file, not as a folder
         return _install_file(library, v, files[kind.install_file], name, Path(kind.install_file).suffix, skills_dir, force=force, now=now)
+    left_out = [rel for rel in ("evidence.json",) if rel in files]  # it names a private repository's code: the agent does not need it
+    files = {rel: data for rel, data in files.items() if rel not in left_out}
     target = skills_dir / name
     backup: Path | None = None
     if target.is_symlink():
@@ -320,4 +327,4 @@ def install_skill(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return InstallReport(target, v, backup, any(rel.startswith("scripts/") for rel in files))
+    return InstallReport(target, v, backup, any(rel.startswith("scripts/") for rel in files), left_out)

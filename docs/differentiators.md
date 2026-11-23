@@ -25,6 +25,11 @@ Two cautions from those same results: skills made from **one** successful sessio
 
 ### 1. Skills with proof behind every claim, and drift checks at the code level (the strongest bet)
 
+**Built on 2026-11-23** (slice V): see [evidence.md](evidence.md). What was built is narrower than the sketch below: places
+are cited and their graph facts recorded, and `library recheck` reports what is missing, moved, changed or edited. A claim in
+prose such as "only called from `main`" is **not** parsed; the cited place and its callers are checked instead. The text below
+is the original idea.
+
 The drift tools above check that a path exists, an npm script exists, a version matches. None that I found checks
 **what the code does**. This project already has a deterministic graph of functions, calls and imports, where every link
 is `resolved` or a labelled `guess`.
@@ -84,7 +89,7 @@ that was changed. The next step costs little:
 ## Suggested order
 
 1. ~~**Risk diff + `library rescan`**~~ (small): **built.** Immediately visible in the Library page, and it answers a real, documented attack.
-2. **Evidence-linked skills + `library recheck`** (medium): the identity of the project. Needs a way to attach graph references to a skill.
+2. ~~**Evidence-linked skills + `library recheck`**~~ (medium): **built** (slice V, [evidence.md](evidence.md)).
 3. **Canary behavioural scan** (large, experimental): a research spike with measured results before it becomes a feature.
 
 Decision still needed from you: which of the remaining two is the headline. (Evidence-linked skills with code-level drift

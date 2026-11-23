@@ -16,6 +16,7 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from ..evidence.model import EVIDENCE_FILE, EvidenceError, read_evidence
 from ..graph import languages
 from ..results import FAILED, NOT_RUN, PASSED, WARNING, CheckResult
 from .formats import SKILL_FORMAT_CHECKED_ON, SKILL_FRONT_MATTER_KEYS
@@ -249,6 +250,20 @@ def _check_json(files: Mapping[str, bytes]) -> CheckResult:
     return CheckResult(name, FAILED, "; ".join(problems)) if problems else CheckResult(name, PASSED, f"{count} JSON file(s)")
 
 
+def _check_evidence(files: Mapping[str, bytes]) -> list[CheckResult]:
+    """Only for a folder that has an evidence.json (a row for every skill would change every report): it must be data that
+    the strict reader accepts. What it says about a repository is not checked here: that is `library recheck`."""
+    if EVIDENCE_FILE not in files:
+        return []
+    name = f"{EVIDENCE_FILE} is well-formed evidence"
+    try:
+        ev = read_evidence(files)
+    except EvidenceError as exc:
+        return [CheckResult(name, FAILED, str(exc))]
+    count = len(ev.refs) if ev else 0
+    return [CheckResult(name, PASSED, f"{count} place{'' if count == 1 else 's'} cited from '{ev.repo if ev else ''}'")]
+
+
 def _scripts(files: Mapping[str, bytes]) -> dict[str, bytes]:
     return {rel: data for rel, data in files.items() if rel.startswith("scripts/")}
 
@@ -457,6 +472,7 @@ def validate_files(
     results.append(_check_hidden_characters(files))
     results += _check_markup_and_wording(files)
     results.append(_check_json(files))
+    results += _check_evidence(files)
     shared = [_check_scripts_parse(files), _check_script_references(files), _check_capabilities(files)]
     if kind in CODE_IN_COMPONENTS:  # these three read a top-level scripts/ folder only: they must not claim a pass for code they never saw
         shared = [CheckResult(c.name, NOT_RUN, "this kind keeps its code inside its components, whose own checks read it") for c in shared]

@@ -71,7 +71,9 @@ def test_every_case_of_a_version_is_listed_with_what_the_editor_needs(make):
         "checks": [{"kind": "first_line_max_chars", "value": "50", "why": "rule"}, {"kind": "regex", "value": "^[A-Z][a-z]+ ", "why": "rule"}],
     }
     assert [c["name"] for c in doc["cases"]] == ["short change", "no description", "many changes"]
-    assert doc["limits"] == {"max_cases": 30, "max_checks": 3, "max_name": 80, "max_message": 4000, "max_value": 500, "max_why": 200}
+    assert doc["limits"] == {
+        "max_cases": 30, "max_checks": 3, "max_name": 80, "max_message": 4000, "max_value": 500, "max_why": 200, "max_covers": 100, "max_cover": 120,
+    }
 
 
 def test_a_case_saved_before_cases_could_be_run_is_listed_as_not_runnable_so_it_can_be_fixed(make):
@@ -289,7 +291,9 @@ def test_every_problem_is_listed_not_only_the_first_so_one_save_can_fix_them_all
     [draft(kind="surprising")],
     [draft(checks=[{"kind": "judge_by_model", "value": "good", "why": ""}])],
     [draft(checks=[{"kind": "contains", "value": "x" * 501, "why": ""}])],
-    [draft(covers=["AC" + str(i) for i in range(21)])],
+    [draft(covers=["AC" + str(i) for i in range(101)])],
+    [draft(covers=["A" * 121])],
+    [draft(checks=[{"kind": "contains", "value": "x", "why": "w" * 201}])],
 ])
 def test_the_size_of_what_can_be_sent_is_bounded_before_anything_is_read(make, cases):
     env = make(replier())

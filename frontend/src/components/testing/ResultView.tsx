@@ -1,7 +1,7 @@
 "use client";
 
 import { Alert, Badge, Button, Card } from "@/components/ui";
-import { checkWords, failureLines, outcomeInfo, progressText, repeatNote, sideSummary, staleNote } from "@/lib/testing";
+import { checkWords, failureLines, outcomeInfo, progressText, repeatNote, sideSummary, staleNote, uniqueKeys } from "@/lib/testing";
 import type { EvalAttempt, EvalCase, EvalRun } from "@/lib/types";
 
 const SIDE_TONE = { ok: "ok", warn: "warn", bad: "bad", none: "neutral" } as const;
@@ -140,8 +140,8 @@ export function ResultView({
       <section>
         <h3 className="mb-2 font-semibold">Case by case</h3>
         <ol className="space-y-3">
-          {r.cases.map((c) => (
-            <CaseRow key={c.name} c={c} />
+          {r.cases.map((c, i) => (
+            <CaseRow key={uniqueKeys(r.cases.map((x) => x.name))[i]} c={c} />
           ))}
         </ol>
         {r.skipped.length > 0 && (

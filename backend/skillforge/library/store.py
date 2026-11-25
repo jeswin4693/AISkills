@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -99,6 +100,9 @@ def diff_files(old: Mapping[str, bytes], new: Mapping[str, bytes]) -> list[FileC
     return out
 
 
+_ADD_LOCK = threading.RLock()  # one writer at a time in this process: the look at the latest version and the store are one step
+
+
 class Library:
     """The versions of one kind of thing (skills, and later agents and the rest). Each kind has its own root, so names
     never collide across kinds. The skill library stays exactly where it always was."""
@@ -179,11 +183,28 @@ class Library:
 
     def add(
         self, name: str, files: Mapping[str, bytes], *, source_kind: str, source_label: str, note: str = "",
-        skill_version: str = "", checks: Sequence[CheckResult] = (), now: datetime | None = None,
+        skill_version: str = "", checks: Sequence[CheckResult] = (), now: datetime | None = None, expect_latest: int | None = None,
     ) -> tuple[Version, bool]:
-        """Store files as the next version. Returns (version, created); identical content makes no new version."""
+        """Store files as the next version. Returns (version, created); identical content makes no new version.
+
+        `expect_latest` is for a change made FROM a version (editing its test cases): the number of the version the change was made on. If another
+        version was stored while it was being checked, nothing is stored and `Conflict` says so, so a newer change is never overwritten. The look at
+        the latest version and the store happen together, one writer at a time within this process."""
+        with _ADD_LOCK:
+            return self._add(name, files, source_kind, source_label, note, skill_version, checks, now, expect_latest)
+
+    def _add(
+        self, name: str, files: Mapping[str, bytes], source_kind: str, source_label: str, note: str, skill_version: str,
+        checks: Sequence[CheckResult], now: datetime | None, expect_latest: int | None,
+    ) -> tuple[Version, bool]:
         skill = self._skill_dir(name)
         existing = self.versions(name)
+        if expect_latest is not None and (existing[-1].version if existing else 0) != expect_latest:
+            now_latest = existing[-1].tag if existing else "no version"
+            raise Conflict(
+                f"The version you edited ({name} v{expect_latest}) is not the latest: {name} is now at {now_latest}, which was stored while this was being "
+                f"checked. Open {now_latest} and make the change there, so nothing newer is lost. Nothing was saved."
+            )
         digest = content_hash(files)
         if existing and existing[-1].content_hash == digest:
             return existing[-1], False

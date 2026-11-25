@@ -885,6 +885,8 @@ export interface CasesView {
   latest: boolean; // only the latest version can be edited
   needs_tools: string; // why the Lab cannot run these cases ("" when it can); they are still the person's to edit
   unreadable: number; // entries of tests/cases.json that could not be read: a save drops them
-  limits: { max_cases: number; max_checks: number; max_name: number; max_message: number; max_value: number; max_why: number };
+  limits: {
+    max_cases: number; max_checks: number; max_name: number; max_message: number; max_value: number; max_why: number; max_covers: number; max_cover: number;
+  };
   cases: CaseDoc[];
 }

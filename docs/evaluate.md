@@ -51,9 +51,12 @@ A test passes only when **all** its checks pass. No check asks a model whether a
 a judge can be talked into anything by the text it is judging. The cost: only what those seven can say is checked. Tone,
 correctness of facts and "is this a good summary" are not.
 
-A pattern written by a model and run on text written by a model could hang the program (`(a+)+$` on a long run of `a`).
-Python's `re` has no time limit, so a pattern is refused when it is longer than 80 characters or repeats a repeat, and
-only the first 20,000 characters of a reply are searched. A refused check counts as failed and says why.
+A pattern written by a person or a model and run on text written by a model could hang the program (`(a+)+$`, or `(a|aa)+$`, on a
+long run of `a`). Python's `re` has no time limit and holds the interpreter while it runs, so a pattern is refused up front when it is
+longer than 80 characters or when a repeat contains another repeat or a choice between alternatives (read from the parsed pattern), and
+**every accepted pattern runs in a child process that is killed after 1.5 seconds**, because no rule about a pattern's text can see every
+slow one. Only the first 20,000 characters of a reply are searched. A refused or stopped check counts as failed and says why; a check that
+could not be judged never passes.
 
 ## How the builder uses it
 

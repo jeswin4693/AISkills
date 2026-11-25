@@ -1,7 +1,7 @@
 "use client";
 
 import { Alert, Badge, Card } from "@/components/ui";
-import { blockerAdvice, checkWords } from "@/lib/testing";
+import { blockerAdvice, checkWords, uniqueKeys } from "@/lib/testing";
 import type { EvalPreview } from "@/lib/types";
 
 /** What a run would do: the test cases and their checks. Or, for a skill that cannot be run, why not and what a person can do. */
@@ -30,8 +30,8 @@ export function PreviewPanel({ preview, canEdit }: { preview: EvalPreview; canEd
         Each test is a message sent to a model that has the skill, and again to one that does not. Code (not a model) then checks every reply.
       </p>
       <ol className="mt-3 space-y-3">
-        {preview.cases.map((c) => (
-          <li key={c.name} className="rounded-lg border border-border p-3">
+        {preview.cases.map((c, i) => (
+          <li key={uniqueKeys(preview.cases.map((x) => x.name))[i]} className="rounded-lg border border-border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{c.name}</span>
               <Badge>{c.kind}</Badge>

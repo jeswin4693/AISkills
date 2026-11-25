@@ -36,13 +36,24 @@ def _cut(text: str, limit: int) -> tuple[str, bool]:
     return (text[:limit], True) if len(text) > limit else (text, False)
 
 
+CHECK_TEXT_CAP = 300  # a check's value, reason and detail: a skill saved before the editor can hold a value of any size, and a result must stay small
+NOT_RETRYABLE = {"refused", "bad_request", "invalid_output", "too_long", "input_too_large", "budget"}  # asking again cannot help; fixing a key or a setting can
+
+
+def _short(text: str) -> str:
+    """A check's text for a view, with a mark where it was cut."""
+    return text if len(text) <= CHECK_TEXT_CAP else text[:CHECK_TEXT_CAP] + "…"
+
+
 def _attempt_view(attempt: Attempt) -> dict:
     tries = []
     for reply, results in zip(attempt.replies, attempt.results):
         text, cut = _cut(reply, REPLY_CAP)
         tries.append({
             "reply": text, "cut": cut, "passed": all(r.passed for r in results),
-            "checks": [{"kind": r.kind, "value": r.value, "why": r.why, "passed": r.passed, "detail": r.detail} for r in results],
+            "checks": [
+                {"kind": r.kind, "value": _short(r.value), "why": _short(r.why), "passed": r.passed, "detail": _short(r.detail)} for r in results
+            ],
         })
     return {"passed": attempt.passed, "runs": attempt.runs, "tries": tries}
 
@@ -116,7 +127,7 @@ class EvalRuns:
             message, message_cut = _cut(t.run_input, MESSAGE_CAP)
             cases.append({
                 "name": t.name, "kind": t.kind, "message": message, "message_cut": message_cut,
-                "checks": [{"kind": x.kind, "value": x.value, "why": x.why} for x in t.assertions],
+                "checks": [{"kind": x.kind, "value": _short(x.value), "why": _short(x.why)} for x in t.assertions],
             })
         return {
             "name": v.name, "kind": kind, "version": v.version, "tag": v.tag, "content_hash": v.content_hash,
@@ -173,8 +184,15 @@ class EvalRuns:
             return [run_view(r, full=False) for r in s.execute(query).scalars().all()]
 
     def retry(self, rid: str) -> dict:
-        with self.db.session() as s:
-            self._row(s, rid)
+        with _START, self.db.session() as s:  # the same lock as start(): a retry is a run of that version, so it counts for "one run at a time"
+            row = self._row(s, rid)
+            going = s.execute(
+                select(EvalRun).where(
+                    EvalRun.status == "working", EvalRun.kind == row.kind, EvalRun.name == row.name, EvalRun.version == row.version, EvalRun.id != rid,
+                )
+            ).scalars().first()
+            if going is not None and row.status == "failed":
+                raise WrongState("A run of this version is already going. Wait for it to finish, or open it from the list of earlier runs.")
             claimed = s.execute(
                 update(EvalRun).where(EvalRun.id == rid, EvalRun.status == "failed")
                 .values(status="working", error="", retryable=False, cases_done=0, result=None, updated_at=now_text())
@@ -208,8 +226,8 @@ class EvalRuns:
             _, skill = self._load(name, version, kind)
             report = run_eval(provider, skill, baseline=baseline, runs=runs, on_case=lambda done, total: self._progress(rid, done, total))
             self._finish(rid, "done", result=report_view(report))
-        except ProviderError as exc:  # no model set up, a bad key, an unreachable model: fixing that and running again can help
-            self._finish(rid, "failed", error=str(exc), retryable=True)
+        except ProviderError as exc:  # no model set up, a bad key, a busy or unreachable model: fixing that and running again can help; a refusal cannot
+            self._finish(rid, "failed", error=str(exc), retryable=exc.kind not in NOT_RETRYABLE)
         except (BuilderError, LibraryError, NotFound) as exc:  # the version is gone or was changed on disk: said as the library says it
             self._finish(rid, "failed", error=str(exc))
         except Exception as exc:  # noqa: BLE001 - recorded without its text (it could hold a path), and logged for whoever runs the server

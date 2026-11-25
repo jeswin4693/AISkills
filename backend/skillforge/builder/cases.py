@@ -31,10 +31,11 @@ MAX_NAME = 80
 MAX_MESSAGE = 4000
 MAX_VALUE = 500
 MAX_WHY = 200
-MAX_COVERS = 20
-MAX_COVER = 40
+MAX_COVERS = 100  # the criteria a case cites are not edited here, only kept: a limit a built skill could already exceed would make it impossible to save
+MAX_COVER = 120
 LIMITS = {
     "max_cases": MAX_CASES, "max_checks": MAX_CHECKS, "max_name": MAX_NAME, "max_message": MAX_MESSAGE, "max_value": MAX_VALUE, "max_why": MAX_WHY,
+    "max_covers": MAX_COVERS, "max_cover": MAX_COVER,
 }
 
 
@@ -167,4 +168,6 @@ def save_cases(
         if "tests" in definition:  # only a definition that already holds its tests gets them updated: nothing is added to one that has none
             definition["tests"] = payload
             new_files[DEFINITION_FILE] = _json(definition).encode("utf-8")
-    return import_source(SkillSource(new_files, [], SOURCE_KIND, SOURCE_LABEL, None), library, note=note, now=now)
+    # The latest was looked at above, but the static checks inside the import take a moment: expect_latest makes the store itself refuse if another
+    # version arrived in between (two saves from one version cannot both win, and a newer one is never overwritten).
+    return import_source(SkillSource(new_files, [], SOURCE_KIND, SOURCE_LABEL, None), library, note=note, now=now, expect_latest=latest.version)

@@ -83,7 +83,10 @@ export function caseProblems(cases: DraftCase[], limits: Limits): string[] {
     else if (message.length > limits.max_message) issues.push(`its message is longer than ${limits.max_message} characters`);
     if (c.checks.length === 0) issues.push("it needs at least one check the reply must pass");
     else if (c.checks.length > limits.max_checks) issues.push(`it can have at most ${limits.max_checks} checks`);
+    if (c.covers.length > limits.max_covers) issues.push(`it cites too many criteria: at most ${limits.max_covers} criteria are kept`);
+    if (c.covers.some((id) => id.length > limits.max_cover)) issues.push(`a criterion it cites is longer than ${limits.max_cover} characters`);
     for (const k of c.checks) {
+      if (k.why.trim().length > limits.max_why) issues.push(`a check's reason is longer than ${limits.max_why} characters: shorten it`);
       const value = k.value.trim();
       if (!value) issues.push(`${k.kind} has no value`);
       else if (value.length > limits.max_value) issues.push(`a check's value is longer than ${limits.max_value} characters`);

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Alert, Button, Card, ErrorBox, Loading } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import {
-  blankCase, blankCheck, CASE_KINDS, CHECK_KINDS, caseProblems, fromServer, isNumericKind, sameCases, toBody, type DraftCase, type DraftCheck,
+  blankCase, blankCheck, CASE_KINDS, CHECK_KINDS, caseProblems, fromServer, isNumericKind, sameCases, toBody, type DraftCase, type DraftCheck, type Limits,
 } from "@/lib/cases";
 import type { ImportResult } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
@@ -22,7 +22,9 @@ function Labelled({ id, label, children }: { id: string; label: string; children
   );
 }
 
-function CheckRow({ id, check, onChange, onRemove, canRemove }: { id: string; check: DraftCheck; onChange: (c: DraftCheck) => void; onRemove: () => void; canRemove: boolean }) {
+function CheckRow({
+  id, check, onChange, onRemove, canRemove, maxValue, maxWhy,
+}: { id: string; check: DraftCheck; onChange: (c: DraftCheck) => void; onRemove: () => void; canRemove: boolean; maxValue: number; maxWhy: number }) {
   const kind = CHECK_KINDS.find((k) => k.kind === check.kind);
   return (
     <li className="grid gap-2 sm:grid-cols-[19rem_1fr_1fr_auto] sm:items-end">
@@ -37,12 +39,12 @@ function CheckRow({ id, check, onChange, onRemove, canRemove }: { id: string; ch
       </Labelled>
       <Labelled id={`${id}-value`} label={kind?.numeric ? "Number" : "Text or pattern"}>
         <input
-          id={`${id}-value`} className={INPUT} value={check.value} placeholder={kind?.hint} inputMode={isNumericKind(check.kind) ? "numeric" : undefined}
+          id={`${id}-value`} className={INPUT} value={check.value} placeholder={kind?.hint} maxLength={maxValue} inputMode={isNumericKind(check.kind) ? "numeric" : undefined}
           onChange={(e) => onChange({ ...check, value: e.target.value })}
         />
       </Labelled>
       <Labelled id={`${id}-why`} label="Why (optional)">
-        <input id={`${id}-why`} className={INPUT} value={check.why} placeholder="the rule it checks" onChange={(e) => onChange({ ...check, why: e.target.value })} />
+        <input id={`${id}-why`} className={INPUT} value={check.why} placeholder="the rule it checks" maxLength={maxWhy} onChange={(e) => onChange({ ...check, why: e.target.value })} />
       </Labelled>
       <Button variant="ghost" onClick={onRemove} disabled={!canRemove} aria-label="Remove this check">
         Remove
@@ -52,10 +54,11 @@ function CheckRow({ id, check, onChange, onRemove, canRemove }: { id: string; ch
 }
 
 function CaseCard({
-  c, index, maxChecks, maxName, maxMessage, onChange, onRemove,
+  c, index, limits, onChange, onRemove,
 }: {
-  c: DraftCase; index: number; maxChecks: number; maxName: number; maxMessage: number; onChange: (c: DraftCase) => void; onRemove: () => void;
+  c: DraftCase; index: number; limits: Limits; onChange: (c: DraftCase) => void; onRemove: () => void;
 }) {
+  const { max_checks: maxChecks, max_name: maxName, max_message: maxMessage } = limits;
   return (
     <li className="rounded-xl border border-border p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -92,7 +95,7 @@ function CaseCard({
         <ul className="mt-2 space-y-3">
           {c.checks.map((k, i) => (
             <CheckRow
-              key={i} id={`${c.key}-check${i}`} check={k} canRemove={c.checks.length > 1}
+              key={i} id={`${c.key}-check${i}`} check={k} canRemove={c.checks.length > 1} maxValue={limits.max_value} maxWhy={limits.max_why}
               onChange={(next) => onChange({ ...c, checks: c.checks.map((x, j) => (j === i ? next : x)) })}
               onRemove={() => onChange({ ...c, checks: c.checks.filter((_, j) => j !== i) })}
             />
@@ -185,7 +188,7 @@ export function CaseEditor({ name, version, onSaved }: { name: string; version: 
       <ol className="mt-4 space-y-4">
         {cases.map((c, i) => (
           <CaseCard
-            key={c.key} c={c} index={i} maxChecks={view.limits.max_checks} maxName={view.limits.max_name} maxMessage={view.limits.max_message}
+            key={c.key} c={c} index={i} limits={view.limits}
             onChange={(next) => edit(cases.map((x) => (x.key === c.key ? next : x)))}
             onRemove={() => edit(cases.filter((x) => x.key !== c.key))}
           />

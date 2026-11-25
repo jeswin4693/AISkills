@@ -167,7 +167,11 @@ export const api = {
     const res = await send(`/api/library/${encodeURIComponent(name)}/tests`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    return json<ImportResult>(res, [422]);
+    // FastAPI also answers 422 for a request it could not read ({detail: [...]}): that is not an import report, and treated as one it would be shown as
+    // "Nothing changed". Only a body that is a report (it has `refused`) is returned as one.
+    const result = await json<ImportResult | { detail: unknown }>(res, [422]);
+    if (!("refused" in result)) throw new ApiError(res.status, detailOf(result, "The request could not be read."));
+    return result;
   },
 
   // ---- evidence: the code a stored skill cites, and what changed in it ----

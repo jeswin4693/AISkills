@@ -138,9 +138,10 @@ def import_skill(
 
 def import_source(
     src: SkillSource, library: Library, *, test_scripts: bool = False, runner: ScriptRunner | None = None,
-    note: str = "", now: datetime | None = None,
+    note: str = "", now: datetime | None = None, expect_latest: int | None = None,
 ) -> ImportReport:
-    """The same as import_skill, for a source that is already in memory (an upload)."""
+    """The same as import_skill, for a source that is already in memory (an upload). `expect_latest` is the version a change was made from (see
+    `Library.add`): another version stored in the meantime makes it a `Conflict` instead of a version on top of one the person never saw."""
     checks = check_source(src, library.kind)
     name = get_kind(library.kind).name_of(src.files)
     has_scripts = any(rel.startswith("scripts/") for rel in src.files)
@@ -156,7 +157,7 @@ def import_source(
     sdm = _definition(src.files)
     version, created = library.add(
         name, src.files, source_kind=src.kind, source_label=src.label, note=note,
-        skill_version=sdm.version if sdm else "", checks=checks, now=now,
+        skill_version=sdm.version if sdm else "", checks=checks, now=now, expect_latest=expect_latest,
     )
     changes: list[FileChange] = []
     risk: RiskDiff | None = None

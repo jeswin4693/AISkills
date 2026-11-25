@@ -37,7 +37,7 @@ function LabFor({ name, version, latest, onSaved }: { name: string; version: num
   const history = useAsync(() => api.evalRuns(name, version), `testing-history/${name}/${version}`);
   const provider = useAsync(api.provider, "testing-provider");
   const [runId, setRunId] = useState<string | null>(null);
-  const { run, error: runError, adopt } = useEvalRun(runId);
+  const { run, error: runError, adopt, stalled, check } = useEvalRun(runId);
   const [repeats, setRepeats] = useState(1);
   const [baseline, setBaseline] = useState(true);
   const [busy, setBusy] = useState<"start" | "retry" | null>(null);
@@ -154,6 +154,14 @@ function LabFor({ name, version, latest, onSaved }: { name: string; version: num
         </Card>
       )}
       {runId && runError && !run && <ErrorBox error={runError} />}
+      {stalled && run?.status === "working" && (
+        <Alert tone="warn" title="This page lost touch with the server">
+          <p>The run may well still be going: it is kept on the server. {runError?.message}</p>
+          <div className="mt-2">
+            <Button onClick={check}>Check again</Button>
+          </div>
+        </Alert>
+      )}
       {run && <ResultView run={run} latestVersion={latest} onRetry={() => void retry()} retrying={busy === "retry"} />}
       {history.error ? <ErrorBox error={history.error} onRetry={history.reload} /> : <RunHistory runs={history.data ?? []} openId={runId} onOpen={setRunId} />}
     </div>

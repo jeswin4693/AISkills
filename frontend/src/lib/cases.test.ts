@@ -4,7 +4,7 @@ import {
 } from "./cases";
 import type { CaseDoc, CasesView } from "./types";
 
-const LIMITS: CasesView["limits"] = { max_cases: 30, max_checks: 3, max_name: 80, max_message: 4000, max_value: 500, max_why: 200 };
+const LIMITS: CasesView["limits"] = { max_cases: 30, max_checks: 3, max_name: 80, max_message: 4000, max_value: 500, max_why: 200, max_covers: 100, max_cover: 120 };
 
 const good = (over: Partial<DraftCase> = {}): DraftCase => ({
   key: "k1", name: "short change", kind: "positive", message: "fixed the login button", covers: [],
@@ -77,6 +77,19 @@ describe("caseProblems", () => {
     expect(caseProblems([good({ checks: [{ kind: "contains", value: "x".repeat(500), why: "" }] })], LIMITS)).toEqual([]);
     const thirty = Array.from({ length: 30 }, (_, i) => good({ key: `k${i}`, name: `case ${i}` }));
     expect(caseProblems(thirty, LIMITS)).toEqual([]);
+  });
+
+  it("says when a reason for a check is longer than the server keeps, instead of letting the save fail with no explanation", () => {
+    expect(caseProblems([good({ checks: [{ kind: "contains", value: "x", why: "w".repeat(200) }] })], LIMITS)).toEqual([]);
+    const [p] = caseProblems([good({ checks: [{ kind: "contains", value: "x", why: "w".repeat(201) }] })], LIMITS);
+    expect(p).toContain("reason");
+    expect(p).toContain("200 characters");
+  });
+
+  it("says when the criteria a case cites (which the editor cannot change) are more than the server keeps", () => {
+    expect(caseProblems([good({ covers: Array.from({ length: 100 }, (_, i) => `AC${i}`) })], LIMITS)).toEqual([]);
+    expect(caseProblems([good({ covers: Array.from({ length: 101 }, (_, i) => `AC${i}`) })], LIMITS)[0]).toContain("at most 100 criteria");
+    expect(caseProblems([good({ covers: ["A".repeat(121)] })], LIMITS)[0]).toContain("120 characters");
   });
 
   it("keeps to the server's sizes", () => {

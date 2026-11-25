@@ -143,6 +143,19 @@ export function failureLines(a: EvalAttempt | null): string[] {
   return out;
 }
 
+/** Polling a run: how long to wait before asking again after an answer (null: stop, the run is over). */
+export const pollAfterAnswer = (status: "working" | "done" | "failed"): number | null => (status === "working" ? 1500 : null);
+
+/**
+ * After an answer that did not come: ask again a little slower, and after five misses in a row stop and say so. The page then shows that it lost
+ * touch with the server and offers to check again, instead of showing "working" for ever as if nothing were wrong.
+ */
+export const pollAfterMiss = (misses: number): { delay: number | null; stalled: boolean } =>
+  misses < 5 ? { delay: 3000, stalled: false } : { delay: null, stalled: true };
+
+/** A key for each row of a list that is not unique by name: a stored skill can hold two cases with the same name. */
+export const uniqueKeys = (names: string[]): string[] => names.map((n, i) => `${i}-${n}`);
+
 export function progressText(p: { done: number; total: number }): string {
   return p.total > 0 ? `Running test ${Math.min(p.done + 1, p.total)} of ${p.total}` : "Starting";
 }

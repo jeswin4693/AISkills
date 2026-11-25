@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  blockerAdvice, callsFor, checkWords, costText, failureLines, outcomeInfo, outcomeLabel, parseVersion, pickVersion, progressText, repeatNote,
-  runChoices, runLine, sideSummary, staleNote,
+  blockerAdvice, callsFor, checkWords, costText, failureLines, outcomeInfo, outcomeLabel, parseVersion, pickVersion, pollAfterAnswer, pollAfterMiss,
+  progressText, repeatNote, runChoices, runLine, sideSummary, staleNote, uniqueKeys,
 } from "./testing";
 import type { EvalAttempt, EvalCheckResult, EvalRunSummary, EvalTry } from "./types";
 
@@ -148,6 +148,32 @@ describe("failureLines", () => {
   it("is empty when everything passed or there is no attempt", () => {
     expect(failureLines(attempt([true, true]))).toEqual([]);
     expect(failureLines(null)).toEqual([]);
+  });
+});
+
+describe("uniqueKeys", () => {
+  it("gives every row its own key even when two cases of a stored skill have the same name", () => {
+    const keys = uniqueKeys(["same", "same", "other"]);
+    expect(new Set(keys).size).toBe(3);
+    expect(keys.map((k) => k.endsWith("same"))).toEqual([true, true, false]);
+  });
+
+  it("is empty for nothing", () => {
+    expect(uniqueKeys([])).toEqual([]);
+  });
+});
+
+describe("polling a run", () => {
+  it("polls again every second and a half while the run is working, and stops when it is done or failed", () => {
+    expect(pollAfterAnswer("working")).toBe(1500);
+    expect(pollAfterAnswer("done")).toBeNull();
+    expect(pollAfterAnswer("failed")).toBeNull();
+  });
+
+  it("tries again after a missed answer, a little slower, and after five misses stops and says the page lost touch", () => {
+    for (const misses of [1, 2, 3, 4]) expect(pollAfterMiss(misses)).toEqual({ delay: 3000, stalled: false });
+    expect(pollAfterMiss(5)).toEqual({ delay: null, stalled: true });
+    expect(pollAfterMiss(9)).toEqual({ delay: null, stalled: true });
   });
 });
 

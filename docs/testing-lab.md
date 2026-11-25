@@ -107,6 +107,9 @@ The Lab's main limit was that the model that wrote a skill also wrote its tests.
 * **Only what the seven checks can say** is checked (text, a pattern, length). Not facts, not tone, not "is this a good summary".
 * **A run spends the model's quota**, and the page says how much before it starts. Nothing is counted in tokens per run (the AI engine's usage table is per builder session).
 * The result of a run is kept forever (no clean-up yet); a run that was working when the server stopped is marked failed.
+* **Lab runs and builder jobs share one two-worker pool**: a third background job waits for a free worker, and the Lab shows it as "Running test 1 of N" because it cannot tell waiting from running.
+* **A pattern is judged in a child process** (about 70 ms each, killed after 1.5 s), so a run with many pattern checks takes a little longer. A repeated group that contains its own repeat, such as `(\n\s*[-*] .+)*$`, is refused even when it is safe (the message says to write it more simply).
+* **Keys the harness does not know are dropped** when a person saves the cases of a skill (a case's `priority` or `owner`), with no warning.
 
 ## Checked (2026-11-25)
 
@@ -151,7 +154,30 @@ it was rewritten to really ignore order and caught.
 
 **Not verified:** the editor against a very large library or 30 cases of 4,000 characters (bounded, not timed); two people saving at once (the second is refused as stale, which is the rule, but a simultaneous race at the file level was not provoked); a screen reader beyond native controls and labels tied by id; any browser but Edge.
 
+## The independent review of AD and AE (2026-11-25)
+
+One fresh reader (an agent that had no part in writing the code: 72 tool calls, about 13 minutes) read both slices, wrote probes and ran them. It found **no Critical issue, 5 Important and 9 Minor**, and was told not to report the limits already documented. Every finding below was **reproduced by a test that failed on the old code** before it was fixed: until then it was only a claim.
+It also checked and found sound: the hosted sign-in covers all seven new routes and CORS allows the save; a save never writes to another skill, a hidden character is refused, a double save never corrupts; runs are pinned to a version and its hash and a later version does not change them; nothing in the new components renders a reply as markup (no `dangerouslySetInnerHTML`); hostile sizes, lone surrogates and a 200,000-deep body are refused with a 4xx; 1,500 stored cases are listed in 0.27 s.
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 Important | **A "regex" check could freeze the whole server.** The guard missed `(a|aa)+$`, `(a|a)*b` and `(\d|\d\d)+x` (34 characters took 1.2 s, each extra character 1.5 times longer, 60 would take hours, and `re` holds the interpreter so everything stops) and refused harmless ones like `(\d+)?kg`. A person can now write the pattern (slice AE), and hosted, anyone signed in could freeze everyone. | **Fixed twice over.** The guard now reads the parsed pattern (a repeat that can repeat, containing another repeat or a choice between alternatives, is refused; `(\d+)?kg` and `^[A-Z]\w+( \w+)?$` are not). And **every pattern runs in a child process that is killed after 1.5 seconds** (about 70 ms to start), because no rule about a pattern's text can see every slow one (`\w*\w*\w*\w*x` has no nesting at all). A stopped pattern fails its check and says so; one that cannot be started fails too, and never passes. |
+| 2 Important | **"Run it again" could run a second copy of the same version** (the "one run at a time" rule only covered starting). | Fixed: a retry counts under the same lock, and is a 409 when another run of that version is going. |
+| 3 Important | **A request the server could not read (422) was shown as "Nothing changed"**, and a long reason for a check had no limit on the page, so a built skill with one could never be saved. | Fixed: only a body that is an import report is treated as one; the page checks the reason's and the criteria's length and the inputs carry the real limits; the criteria limits were raised (100 of 120 characters) so a built skill's own data never blocks a save. |
+| 4 Important | **A skill that declares its tools only in the `allowed-tools` line of SKILL.md was run as text-only** (an imported skill has no definition file). | Fixed: the front matter counts (a string or a list); a built skill that says both is described once. |
+| 5 Important | **A stale save could overwrite a newer version**: the "is this still the latest?" look and the store were not one step (reproduced by slowing the checks by half a second). | Fixed: `Library.add(expect_latest=...)` checks it inside the same lock as the store; the second save is a 409 and the newer version stands. |
+| 6 | A unicode digit (`²`, `①`) or 5,000 digits crashed a check (a 500, or a run that fails for good). | Fixed: ASCII digits, at most seven. |
+| 7 | A case with a check that cannot be run (a bad pattern, `max_chars 0`) looked runnable, spent every call, then showed "No difference: 0 of 3 and 0 of 3". | Fixed: `plan_cases` skips it with the reason, so the preview and the run agree and no call is spent on it. |
+| 8 | A stored result is not small: three 90 KB check values made a 16 MB run. | Fixed: a check's value, reason and detail are cut at 300 characters, marked "…". |
+| 9 | "Run it again" was offered for an error it cannot help (a model's refusal, a bad request, an answer in the wrong format, a budget stop). | Fixed: those kinds are not retryable; a bad key, no model and quota still are (the person fixes it, then runs again). |
+| 10 | The polling hook could show "A run is going…" for ever after five missed answers. | Fixed: it stops, says the page **lost touch with the server** (the run is kept there) and offers "Check again". |
+| 11 | A skill with no cases that also needs tools got the editor ("Write some below") although its cases could never be run. | Fixed: needing tools is said first. |
+| 12 | **Lab runs and builder jobs share one two-worker pool**: a third simultaneous run waits and shows "Running test 1 of N". | **Not fixed, documented** (see Limits). A separate pool is easy but would still make a third run wait, and the page cannot yet tell "waiting" from "running". |
+| 13 | A key of a case that the harness does not know (`priority`, `owner`) is dropped when the cases are saved, with no warning. | **Not fixed, documented.** |
+| 14 | Two cases with the same name in a stored skill shared one React key. | Fixed. |
+
+**Verified after the fixes:** 13 backend rules and 6 page rules were each broken once on purpose, and every break was caught (19). The review also remarked that the earlier fix to `test_the_same_conversation_works_on_real_threads_with_the_browser_poll` waits for the second of two database updates and so leaves a harmless race in the product (the session reads `done` a moment before its job reads `succeeded`). That is true, and was not changed.
+
 ## Next
 
-* **AF: the Quality Report page**: it gathers a version's checks, token cost, which criteria have tests (now including a person's own cases, which carry no criteria unless they were kept) and the latest Lab result, and had little to show before the Lab kept results.
-* An **independent review** of slices AD and AE together is still owed (earlier slices W, X, Y, Z and AB each had one and each found real bugs).
+* **AF: the Quality Report page.** It gathers a version's checks, token cost, which criteria have tests and the latest Lab result, and had little to show before the Lab kept results.

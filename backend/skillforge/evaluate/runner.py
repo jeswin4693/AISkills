@@ -28,7 +28,7 @@ from ..providers.base import LLMProvider
 from ..providers.retry import generate_with_retry
 from ..ai.tasks import Task
 from ..results import NOT_RUN, PASSED, WARNING, CheckResult
-from .grade import AssertionResult, grade
+from .grade import AssertionResult, assertion_problem, grade
 
 MIN_CASES = 3  # fewer runnable cases than this say too little to call a skill helpful or not
 MAX_CASES = 12  # a run asks the model about at most this many cases
@@ -59,11 +59,14 @@ class LoadedSkill:
     needs_tools: str = ""  # why it cannot be run here ("" when it is text only)
 
 
-def needs_tools_reason(permissions: list[str], has_scripts: bool) -> str:
-    """Why a skill cannot be run by a model with no tools ("" when it is text only)."""
+def needs_tools_reason(permissions: list[str], has_scripts: bool, allowed_tools: list[str] | None = None) -> str:
+    """Why a skill cannot be run by a model with no tools ("" when it is text only). `permissions` are what a built skill's definition asks for;
+    `allowed_tools` is what its SKILL.md front matter declares, which is all an imported skill has. A built skill says both, so it is described once."""
     why = []
     if permissions:
         why.append("it asks for " + ", ".join(permissions))
+    elif allowed_tools:
+        why.append("it declares allowed-tools: " + ", ".join(allowed_tools))
     if has_scripts:
         why.append("it has scripts")
     return " and ".join(why)
@@ -124,8 +127,10 @@ def load_files(files: Mapping[str, str | bytes]) -> LoadedSkill:
         name = front["name"]
     perms = _sdm_of(files).get("permissions", [])
     permissions = [str(p) for p in perms] if isinstance(perms, list) else []
+    declared = front.get("allowed-tools") if isinstance(front, dict) else None  # "Bash, Read" or a list; an empty one asks for nothing
+    allowed = [declared.strip()] if isinstance(declared, str) and declared.strip() else [str(t) for t in declared if str(t).strip()] if isinstance(declared, list) else []
     tests, _ = tests_of(files)
-    return LoadedSkill(name or "skill", skill_md, tests, needs_tools_reason(permissions, any(r.startswith("scripts/") for r in files)))
+    return LoadedSkill(name or "skill", skill_md, tests, needs_tools_reason(permissions, any(r.startswith("scripts/") for r in files), allowed))
 
 
 @dataclass
@@ -244,10 +249,10 @@ def _ask(provider: LLMProvider, system: str, message: str) -> tuple[str, int]:
 def blocker(skill: LoadedSkill) -> tuple[str, str]:
     """Why nothing can be run for this skill at all, as (code, words); ("", "") when something can. The code lets a page offer the right next
     step (a skill with no cases can be given some; one that needs tools cannot be helped here), the words are for the person."""
+    if skill.needs_tools:  # first: more test cases would not make a skill that needs tools runnable, so it is never told to write some
+        return "needs_tools", f"{skill.name} needs tools ({skill.needs_tools}), and a model with no tools cannot stand in for an agent that has them"
     if not skill.tests:
         return "no_cases", "this skill has no test cases (tests/cases.json), so there is nothing to run"
-    if skill.needs_tools:
-        return "needs_tools", f"{skill.name} needs tools ({skill.needs_tools}), and a model with no tools cannot stand in for an agent that has them"
     return "", ""
 
 
@@ -259,6 +264,9 @@ def plan_cases(skill: LoadedSkill, max_cases: int = MAX_CASES) -> tuple[list[Ski
     for test in skill.tests:
         if not test.run_input.strip() or not test.assertions:
             skipped.append(f"{test.name}: it has no message to send or no check to run")
+        elif problem := next((p for a in test.assertions if (p := assertion_problem(a))), None):
+            # A case with a check that cannot be run would spend model calls and then report a verdict that includes a check that never ran.
+            skipped.append(f"{test.name}: a check cannot be run ({problem})")
         elif len(runnable) >= max_cases:
             skipped.append(f"{test.name}: only the first {max_cases} cases are run")
         else:

@@ -100,6 +100,11 @@ def _reads_imports(lang: str) -> bool:
     return level == "full" or (level == "standard" and languages.info(lang).import_style != "none")
 
 
+def reads_imports(lang: str) -> bool:
+    """Public name of `_reads_imports`: the guide asks it too, so a hop it cannot confirm is said to be "not measured", not "not imported"."""
+    return _reads_imports(lang)
+
+
 def _summary(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
     recs = [g.files[p] for p in paths]
     langs: dict[str, int] = {}

@@ -14,6 +14,7 @@ def test_tasks_map_to_tiers():
     assert TIER_OF[Task.EXTRACT] is Tier.FAST and TIER_OF[Task.SELECT] is Tier.FAST
     assert TIER_OF[Task.DESIGN] is Tier.DESIGN and TIER_OF[Task.SUGGEST] is Tier.DESIGN
     assert TIER_OF[Task.CODE] is Tier.CODE and TIER_OF[Task.ACT] is Tier.ACTOR
+    assert TIER_OF[Task.GUIDE] is Tier.DESIGN  # reading documents and drafting parts and routes, like a suggestion
     assert set(TIER_OF) == set(Task) and {t.value for t in Tier} == {"fast", "design", "code", "actor"}
 
 

@@ -120,6 +120,7 @@ def source_view(repo: Repo) -> dict[str, Any]:
     return {
         "kind": "github", "owner": link.owner, "repo": link.repo, "ref": link.ref, "url": link.url, "fetched_at": snap.fetched_at,
         "files": snap.files, "bytes": snap.bytes, "skipped": snap.skipped, "reused": snap.reused,
+        "docs": snap.docs,  # README and doc files kept next to the source (None: a copy made before they were kept)
     }
 
 

@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, EvidenceDoc, FileText, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
   SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -137,6 +137,8 @@ export const api = {
 
   // ---- a repository: read on this computer (the hosted version refuses all of these) ----
   analyzeRepo: (path: string, focus?: string) => post<RepoAnalysis>("/api/repos/analyze", { path, focus: focus || null }),
+  /** How the project works, from its README and docs. One model call: this waits for it (up to a minute or so) and nothing is saved. */
+  guideRepo: (path: string, focus?: string) => post<Guide>("/api/repos/guide", { path, focus: focus || null }),
   startSuggest: (path: string, focus: string | undefined, withIdeas: boolean) =>
     post<SuggestRun>("/api/suggestions", { path, focus: focus || null, with_ideas: withIdeas }),
   suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),

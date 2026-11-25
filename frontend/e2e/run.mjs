@@ -724,6 +724,94 @@ try {
     await page.setViewportSize({ width: 1280, height: 900 });
   });
 
+  console.log("How it works (the guide)");
+  // The sentences the fake model quotes (mock_server.py, guide_draft). The real checking code looks each one up in this README.
+  const GUIDE_README = [
+    "# Shop map", "",
+    "The web page sends every price request to the API.",
+    "The API asks the pricing engine for the price.",
+    "The pricing engine works out the tax for the price.",
+    "Payments are taken by an outside payment provider.",
+    "A cache for prices is planned but does not exist yet.", "",
+  ].join("\n");
+  const guideButton = () => page.getByRole("button", { name: /^(Show how it works|Draw it again)$/ });
+  const action = (name) => page.getByRole("group", { name: "Actions" }).getByRole("button", { name }); // one button per action the docs describe
+  const part = (band, name) => page.locator(`section[aria-label="${band}"]`).getByRole("button", { name: new RegExp(name) });
+  await step("with no README the guide says there is nothing to read, and no model is asked", async () => {
+    await guideButton().click();
+    await page.getByText("There is no README or docs to read").waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the guide must not show the folder's path");
+  });
+  await step("with a README the guide draws the layers and a numbered route, and says which hops the code confirms", async () => {
+    writeMap("README.md", GUIDE_README);
+    await guideButton().click();
+    await page.getByText(/Reading the docs and asking the model/).waitFor();
+    await action("Show a price").waitFor();
+    await page.getByText(/Drawn for\s+shop-map/).waitFor(); // the page says which repository the guide is for
+    await page.getByText("The route: Show a price").waitFor();
+    await page.getByText("1 file pair, for example web/app.py imports api/routes.py").waitFor(); // what stands behind a confirmed hop
+    await page.getByText("1 file pair one way, 1 file pair the other").waitFor(); // api and pricing import each other in this repository: said, not hidden behind "confirmed"
+    for (const band of ["What people use", "The doors in", "The workers", "Shared services", "The outside world"]) {
+      await page.getByRole("heading", { name: band, level: 3 }).waitFor();
+    }
+    assert.equal(await page.getByText("Confirmed by the code", { exact: true }).count(), 1, "web imports api: that hop is confirmed");
+    assert.equal(await page.getByText("Imports both ways", { exact: true }).count(), 1, "api imports pricing and pricing imports api: that hop says both ways");
+    await page.getByText(/README\.md \(8 lines\)/).first().waitFor(); // the page says what it read
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the guide must not show the folder's path");
+    await shot(page, "34g-guide");
+  });
+  await step("a part the docs name but the code lacks, and one outside the repository, are said plainly", async () => {
+    await part("Shared services", "Price cache").click();
+    const panel = page.getByRole("region", { name: "Price cache in detail" });
+    await panel.getByText("In the docs, not found in the code").waitFor();
+    await panel.getByText("There is nothing to read: the code has no folder for this part.").waitFor();
+    await part("The outside world", "Payment provider").click();
+    await page.getByRole("region", { name: "Payment provider in detail" }).getByText("Outside this repository").waitFor();
+  });
+  await step("a click on a part shows where to start reading, the sentence the docs gave, and that the plain words are not checked", async () => {
+    await part("The workers", "Pricing engine").click();
+    const panel = page.getByRole("region", { name: "Pricing engine in detail" });
+    await panel.getByText("Folder found in the code").waitFor(); // what was checked: the folder is there, which is not the same as "the part lives there"
+    await panel.getByText("Read these first").waitFor();
+    await panel.getByText("pricing/core.py").first().waitFor();
+    await panel.getByText("The pricing engine works out the tax for the price.").waitFor(); // the quote, as found in the README
+    await panel.getByText(/Quote found: README\.md, line 5/).waitFor();
+    await panel.getByText("model's words, not checked").waitFor();
+    await shot(page, "34h-guide-part");
+  });
+  await step("another action shows its own route, and a hop only the docs describe is not called confirmed", async () => {
+    await action("Skip the API").click();
+    await page.getByText("The route: Skip the API").waitFor();
+    await page.getByText("From the docs only", { exact: true }).first().waitFor();
+    assert.equal(await page.getByText("Confirmed by the code", { exact: true }).count(), 0, "web does not import pricing directly");
+    assert.equal(await action("Skip the API").getAttribute("aria-pressed"), "true");
+    assert.equal(await action("Show a price").getAttribute("aria-pressed"), "false");
+  });
+  await step("the guide never makes the page scroll sideways at phone width", async () => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the guide makes the page scroll sideways by ${overflow}px`);
+    await action("Show a price").scrollIntoViewIfNeeded();
+    await shot(page, "34i-guide-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+  await step("the guide is drawn for the repository that was read, not for what the box says now", async () => {
+    await folderBox().fill(path.join(scratch, "nowhere")); // typing another path after reading must not change which repository the guide is for
+    await guideButton().click();
+    await page.getByText(/Reading the docs and asking the model/).waitFor();
+    await action("Show a price").waitFor();
+    await page.getByText(/Drawn for\s+shop-map/).waitFor();
+    assert.equal(await page.getByText("It could not be drawn").count(), 0, "the guide used the box's new text instead of the repository that was read");
+    await folderBox().fill(mapDir);
+  });
+  await step("reading a repository again clears the guide, which belonged to the one before", async () => {
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "How the code is laid out" }).waitFor();
+    assert.equal(await page.getByRole("group", { name: "Actions" }).count(), 0);
+    await page.getByRole("button", { name: "Show how it works" }).waitFor();
+  });
+
   console.log("The settings");
   const envFile = path.join(scratch, "data", "e2e.env"); // the throwaway file the test server's Settings page writes (never the real .env)
   const KEY = "AIzaSyE2E-SECRET_0123456789abcdef";

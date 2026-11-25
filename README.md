@@ -146,6 +146,7 @@ The model only sees facts computed from the graph, and a suggestion that cites n
 cd backend
 python -m skillforge suggest C:\path\to\repo --facts-only   # no AI, no key: just the facts
 python -m skillforge suggest C:\path\to\repo                # refactor / test / risk findings + skill ideas
+python -m skillforge guide C:\path\to\repo                  # how the project works, from its README and docs (parts, layers, routes; every quote checked)
 ```
 
 ## Build a skill
@@ -288,6 +289,16 @@ code that was just reviewed). Details and limits: [docs/cli-github-links.md](doc
 ## The architecture map (slice Z)
 
 Under the numbers, the **Repository** page now draws the repository: its **folders as boxes** and the **proven imports between them as arrows** (thicker means more files import across; dashed means an import that points back against the main direction and closes a loop). Click a box to light its arrows and see its biggest files and functions; **The arrows as a list** says the same in words. It is worked out by code from the graph (no model, nothing is run) and drawn as plain SVG (no new library), and it works for a folder and for a GitHub link. A guess is never drawn, imports written by test files are left out (and counted), a repository with fewer than six top folders is shown one level deeper, and a language whose imports are not read is said to be "not measured", never shown as depending on nothing. The first real runs on this project found three things no mock showed (a three-box map with no arrows, one giant cycle that made a hairball, and arrows lying on top of each other); all are fixed, and the page says how many weaker arrows it does not draw. **The same independent review covered this slice: no Critical problem and one Important one, fixed (C#, whose imports are never turned into links between files, had been drawn as folders that depend on nothing; it is now said to be "not measured").** Details, rules, limits and what was checked: [docs/architecture-map.md](docs/architecture-map.md).
+
+## How it works: a guide for new developers (slice AB)
+
+Under the map, the **Repository** page has a **Show how it works** button. A model reads the project's **README and docs** and proposes its **parts**, the **layers** they sit in (what people use, the doors in, the workers, shared services, the outside world)
+and the **routes** an action takes through them ("build a skill": the page, the API, the builder, the AI engine, the sandbox, the library). Then **code decides what is kept**: a part or a step stays only if the sentence it quotes is found, word for word, inside one
+paragraph of the docs. Each step of a route says whether the code **confirms** it (a proven import, with the number of file pairs and an example), imports **both ways** or the other way, or whether **only the docs say so** (a web request is not an import). Click a
+part to see what it does, **the files and functions to read first**, the quote and where it is, and a plain-words picture that is labelled as the model's own. A part the docs name but the code lacks is shown as such. It works for a folder and for a public
+GitHub link (a downloaded copy now also keeps README and doc files, best first), and on the command line: `python -m skillforge guide <repo>`. One model call, nothing saved; a repository with no README gets that said and no model is asked.
+**One independent review** (no Critical, 3 Important and 5 Minor findings, all fixed), **57 deliberate breaks, all caught**, and **real runs with a real model on this repository** that found three defects no mock showed (a hop "confirmed" by the browser test's fake server,
+a hop with 1 import one way and 6 the other shown as plain "confirmed", and documents chosen alphabetically). Details, rules and limits: [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Run the local API (the web UI talks to it)
 

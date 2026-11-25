@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 from ..graph.files import MAX_BYTES, PACKAGE_NAMED, SKIP_DIRS
 from ..graph.languages import language_of_path
 from ..graph.store import data_dir
+from ..guide.docs import is_doc_path, sort_key
 from .errors import BadRequest, UpstreamError
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,9 @@ MAX_ENTRIES = 200_000  # members of the archive, before any is read
 MAX_FILES = 20_000  # source files written
 MAX_UNPACKED = 200_000_000  # bytes written
 MAX_FILE = MAX_BYTES  # the graph reads no file over this, so none is written
+MAX_DOCS = 60  # README and doc files kept (they are text for the guide to read, and the graph ignores them)
+MAX_DOC_FILE = 200_000  # bytes of one of them
+MAX_DOC_BYTES = 3_000_000  # bytes of all of them together
 MAX_PATH = 200  # characters of a file's path below the repository's folder
 # Characters of a whole path on this disk. Windows refuses a path of 260 (and a folder of about 248), so a file that would not fit is
 # skipped by name instead of failing half way. The temporary folder is never shorter than the final one, so fitting there means fitting here.
@@ -284,17 +288,19 @@ def unsafe_part(part: str) -> bool:
 
 @dataclass
 class Extracted:
-    files: int
-    bytes: int
+    files: int  # source files (the ones the graph reads)
+    bytes: int  # bytes of source files and documents
     skipped: dict[str, int]
+    docs: int = 0  # README and doc files kept next to them (see skillforge.guide.docs)
 
 
 LAYOUT = "The download does not have the layout of a GitHub archive (one folder holding the repository), so it was not unpacked."
 
 
 def extract_sources(data: bytes, dest: Path) -> Extracted:
-    """Write the source files of the archive under `dest` and nothing else, anywhere. Raises BadRequest, before writing anything, for an
-    archive that is not one folder or has too many members; and when no source file is left."""
+    """Write the source files of the archive under `dest`, and the README and doc files that explain them (`guide.docs.is_doc_path`, with limits
+    of their own), and nothing else, anywhere. Raises BadRequest, before writing anything, for an archive that is not one folder or has too many
+    members; and when no source file is left (documents alone are not a repository that can be read)."""
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except (zipfile.BadZipFile, ValueError, OSError):
@@ -312,10 +318,23 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
         # the top folder is dropped, never written, so only its shape matters (a long branch name makes a long one)
         if len(tops) != 1 or next(iter(tops)) in ("", ".", "..") or any("/" not in info.filename and not info.filename.endswith("/") for info in infos):
             raise BadRequest(LAYOUT)
+
+        def doc_order(info: zipfile.ZipInfo) -> tuple[int, int, str, str] | None:
+            """Where a document stands among the others, or None for a file that is not one."""
+            if info.filename.endswith("/"):
+                return None
+            parts = info.filename.split("/")[1:]
+            return sort_key(parts) if parts and language_of_path(parts[-1]) is None and is_doc_path(parts) else None
+
+        # Documents are looked at first, best first (the README before a pile of doc pages, however the archive happens to order them), so that
+        # their cap cuts the least useful ones. They are small and limited apart from the source, so they cannot use up its room. The source files
+        # keep the archive's own order.
+        keyed = [(doc_order(info), n, info) for n, info in enumerate(infos)]
+        infos = [info for _, _, info in sorted((k for k in keyed if k[0] is not None), key=lambda k: (k[0], k[1]))] + [info for key, _, info in keyed if key is None]
         dest.mkdir(parents=True, exist_ok=True)
         base = dest.resolve()
         seen: set[str] = set()
-        files = written = read_bytes = 0  # written: bytes kept; read_bytes: every byte decompressed, kept or not
+        files = written = read_bytes = docs = doc_bytes = 0  # written: bytes kept; read_bytes: every byte decompressed, kept or not
         for info in infos:
             if info.filename.endswith("/"):
                 continue  # a folder entry
@@ -330,17 +349,21 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
             if kind not in (0, stat.S_IFREG):  # a symbolic link, a device, a pipe
                 skip("link")
                 continue
+            doc = False  # a README or a doc file: kept for the guide, counted and limited apart from the source
             if language_of_path(parts[-1]) is None:
-                skip("not_source")
-                continue
-            if info.file_size > MAX_FILE:
+                if not is_doc_path(parts):
+                    skip("not_source")
+                    continue
+                doc = True
+            cap = MAX_DOC_FILE if doc else MAX_FILE
+            if info.file_size > cap:
                 skip("too_large")
                 continue
             key = "/".join(parts).lower()
             if key in seen:  # a disk that ignores case would make these one file
                 skip("duplicate")
                 continue
-            if files >= MAX_FILES:
+            if (docs >= MAX_DOCS or doc_bytes >= MAX_DOC_BYTES) if doc else files >= MAX_FILES:
                 skip("limit")
                 continue
             if read_bytes >= MAX_UNPACKED:  # decompressing is the cost, and it counts for entries that are then skipped too: stop reading
@@ -349,15 +372,15 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
             room = MAX_UNPACKED - written
             try:
                 with archive.open(info) as handle:
-                    body = handle.read(min(MAX_FILE, room) + 1)  # what the header says is not trusted; and never more than there is room for
+                    body = handle.read(min(cap, room) + 1)  # what the header says is not trusted; and never more than there is room for
             except (zipfile.BadZipFile, RuntimeError, OSError, EOFError):
                 skip("unreadable")
                 continue
             read_bytes += len(body)
-            if len(body) > MAX_FILE:
+            if len(body) > cap:
                 skip("too_large")
                 continue
-            if len(body) > room:
+            if len(body) > room or (doc and doc_bytes + len(body) > MAX_DOC_BYTES):
                 skip("limit")
                 continue
             target = dest.joinpath(*parts)
@@ -378,11 +401,15 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
                 skip("unwritable")
                 continue
             seen.add(key)
-            files += 1
+            if doc:
+                docs += 1
+                doc_bytes += len(body)
+            else:
+                files += 1
             written += len(body)
     if files == 0:
         raise BadRequest("No source files in a language SkillForge reads were found in this repository.")
-    return Extracted(files, written, skipped)
+    return Extracted(files, written, skipped, docs)
 
 
 # ---- snapshots ------------------------------------------------------------------------------------------------------
@@ -399,6 +426,7 @@ class Snapshot:
     skipped: dict[str, int]
     reused: bool
     stamp: str = ""  # this copy's own name: a later request can ask for exactly this one (open_snapshot's `stamp`)
+    docs: int | None = None  # README and doc files kept; None for a copy made before they were kept (it has none, and does not know)
 
 
 _GUARD = threading.Lock()
@@ -459,7 +487,7 @@ def _stamps(key_dir: Path) -> list[Path]:
 def _snapshot(stamp_dir: Path, link: GithubLink, meta: dict, reused: bool) -> Snapshot:
     return Snapshot(
         stamp_dir / _inner(link), link, meta["fetched_at"], float(meta["epoch"]), meta["files"], meta["bytes"], dict(meta["skipped"]), reused,
-        stamp_dir.name,
+        stamp_dir.name, meta["docs"] if isinstance(meta.get("docs"), int) and not isinstance(meta.get("docs"), bool) else None,
     )
 
 
@@ -555,8 +583,9 @@ def open_snapshot(
             partial.mkdir(parents=True, exist_ok=True)
             got = extract_sources(data, partial / _inner(link))
             meta = {
-                "v": 1, "owner": link.owner, "repo": link.repo, "ref": link.ref, "epoch": epoch,
+                "v": 2, "owner": link.owner, "repo": link.repo, "ref": link.ref, "epoch": epoch,
                 "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch)), "files": got.files, "bytes": got.bytes, "skipped": got.skipped,
+                "docs": got.docs,
             }
             (partial / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
             if final.exists() and _read_meta(final, link) is not None:  # the same bytes in the same millisecond: what is there is what this would be

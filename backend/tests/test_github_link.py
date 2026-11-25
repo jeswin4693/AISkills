@@ -277,8 +277,8 @@ def tree(dest: Path) -> list[str]:
 
 def test_only_source_files_are_written_and_the_top_folder_is_dropped(tmp_path):
     out = gh.extract_sources(zip_of({**SRC, "src/b.ts": "export const b = 1;\n", ".git/config": "x", "node_modules/m/i.js": "x", "__pycache__/a.py": "x"}), tmp_path / LEAF)
-    assert tree(tmp_path / LEAF) == ["src/a.py", "src/b.ts"] and out.files == 2 and out.bytes > 0
-    assert out.skipped["not_source"] == 2 and out.skipped["ignored_dir"] == 3 and sorted(p.name for p in tmp_path.iterdir()) == [LEAF]
+    assert tree(tmp_path / LEAF) == ["README.md", "src/a.py", "src/b.ts"] and out.files == 2 and out.docs == 1 and out.bytes > 0  # README.md is a document
+    assert out.skipped["not_source"] == 1 and out.skipped["ignored_dir"] == 3 and sorted(p.name for p in tmp_path.iterdir()) == [LEAF]  # docs/logo.png is not
 
 
 def test_a_folder_that_the_graph_decides_about_is_kept(tmp_path):
@@ -414,7 +414,7 @@ def test_the_first_read_downloads_and_the_folder_is_named_for_the_repository(tmp
     fetch = Fetcher()
     s = snap(tmp_path, fetch=fetch)
     assert s.path.name == LEAF and s.path.is_dir() and (s.path / "src" / "a.py").is_file() and s.reused is False
-    assert s.files == 1 and s.skipped["not_source"] == 2 and s.fetched_at.endswith("Z") and fetch.calls == [LINK]
+    assert s.files == 1 and s.docs == 1 and s.skipped["not_source"] == 1 and s.fetched_at.endswith("Z") and fetch.calls == [LINK]
     assert (tmp_path / "snaps") in s.path.parents
 
 

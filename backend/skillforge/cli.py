@@ -291,6 +291,71 @@ def _run_suggest(args: argparse.Namespace) -> int:
     return 0
 
 
+_HOP_WORDS = {
+    "confirmed": "the code imports it", "both_ways": "the code imports both ways", "reversed": "the code imports the other way",
+    "same_folder": "one folder, so imports cannot tell", "not_measured": "imports are not read for this language", "docs_only": "only the docs say so",
+    "step_dropped": "a step between these two could not be checked, so they are not joined",
+}
+_WHERE = {"in_code": "folder found in the code", "docs_only": "in the docs, not found in the code", "external": "outside this repository"}
+
+
+def _hop_line(hop: dict[str, Any]) -> str:
+    text = _HOP_WORDS[hop["status"]]
+    if hop["status"] == "both_ways":
+        return f"{text} ({hop['forward']} file pairs one way, {hop['reverse']} the other)"
+    if hop["status"] in ("confirmed", "reversed"):
+        n = hop["forward"] or hop["reverse"]
+        return f"{text} ({n} file pair{'s' if n != 1 else ''}, for example {hop['evidence'][0]['importer']} imports {hop['evidence'][0]['imported']})"
+    return text
+
+
+def _render_guide(r: dict[str, Any]) -> str:
+    """The guide as an outline: layers, parts with the quote that proves each, and the routes with what is known about every hop."""
+    if r["status"] == "no_docs":
+        return "\n".join([f"No README or docs found for {r['name']}.", *r["notes"]])
+    lines = [f"How {r['name']} works, read from {', '.join(d['path'] for d in r['docs'])} ({r['provider']}/{r['model']})"]
+    if r["status"] == "thin":
+        return "\n".join([*lines, "", *r["notes"][:1]])
+    named = {p["id"]: p for p in r["parts"]}
+    for layer in r["layers"]:
+        here = [p for p in r["parts"] if p["layer"] == layer["id"]]
+        if not here:
+            continue
+        lines += ["", layer["label"].upper()]
+        for p in here:
+            place = _WHERE[p["status"]] + (f": {p['folder']} ({p['files']} file{'s' if p['files'] != 1 else ''})" if p["status"] == "in_code" else "")
+            lines += [f"  {p['name']}: {p['summary']}", f"      {place}", f"      docs say: \"{p['quote']['text']}\" ({p['quote']['source']}:{p['quote']['line']})"]
+            if not p["quote"]["on_topic"]:
+                lines.append("      (the quote does not mention this part)")
+            if p["read_first"]["files"]:
+                lines.append("      read first: " + ", ".join(f["path"] for f in p["read_first"]["files"][:2]))
+    for j in r["journeys"]:
+        lines += ["", f"JOURNEY: {j['title']}"]
+        for i, s in enumerate(j["steps"]):
+            lines.append(f"  {i + 1}. {named[s['part']]['name']}: {s['does']}")
+            if i < len(j["hops"]):
+                lines.append(f"       -> {_hop_line(j['hops'][i])}")
+    if r["dropped"]:
+        lines += ["", f"{len(r['dropped'])} item(s) were dropped: the quote was not in the docs, or a limit was reached."]
+    return "\n".join([*lines, "", *r["notes"]])
+
+
+def _run_guide(args: argparse.Namespace) -> int:
+    load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
+    from .builder.errors import BuilderError
+    from .builder.guides import guide_repo
+
+    try:
+        answer = guide_repo(args.repo, args.focus, lambda: provider_from_env())  # looked up by name when called, so a test can replace it
+    except BuilderError as exc:
+        raise RepoError(str(exc)) from None
+    if answer["source"]["kind"] == "github":
+        for line in _source_lines(answer["source"]):
+            print(line, file=sys.stderr)
+    print(json.dumps(answer, indent=2) if args.json else _render_guide(answer))
+    return 0
+
+
 def _render_spec(spec: RequirementSpec) -> str:
     lines = ["Requirement (in your words, as I understood them):"]
     lines.append(f"  Goal:        {spec.goal}")
@@ -970,6 +1035,11 @@ def _parser() -> argparse.ArgumentParser:
     sg.add_argument("--facts-only", action="store_true", help="print the facts and stop: no AI, no key")
     sg.add_argument("--save", help="also write the JSON report to this file")
 
+    gd = area.add_parser("guide", help="how a project works, read from its README and docs: parts, layers and routes, each checked (needs a provider key)")
+    gd.add_argument("repo", help="path of the repository, or the link of a public GitHub repository (https://github.com/owner/repo)")
+    gd.add_argument("--focus", help="only this folder of the repository")
+    gd.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
     b = area.add_parser("build", help="turn a requirement into a skill folder (needs a provider key)")
     b.add_argument("description", nargs="?", help="what the skill should do, in plain English")
     b.add_argument("--from-suggestions", metavar="REPORT.json", help="start from a skill idea in a suggest report")
@@ -1091,9 +1161,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "build", "render", "validate", "sandbox-status", "sandbox-build-mcp", "sandbox-build-mcp-node", "languages", "library", "serve", "plan", "eval", "models"):
+    if args.area in ("suggest", "guide", "build", "render", "validate", "sandbox-status", "sandbox-build-mcp", "sandbox-build-mcp-node", "languages", "library", "serve", "plan", "eval", "models"):
         handler = {
-            "suggest": _run_suggest, "build": _run_build, "render": _run_render,
+            "suggest": _run_suggest, "guide": _run_guide, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "sandbox-build-mcp": _run_sandbox_build_mcp, "sandbox-build-mcp-node": _run_sandbox_build_mcp_node, "languages": _run_languages,
             "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval, "models": _run_models,
         }[args.area]

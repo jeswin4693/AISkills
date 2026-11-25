@@ -27,6 +27,7 @@ from skillforge.build.models import Extraction, IOField, SkillDraft, SkillTest, 
 from skillforge.builder import Builder, JobRunner
 from skillforge.builder import github
 from skillforge.db import Database
+from skillforge.guide.models import GuideDraft, JourneyDraft, PartDraft, StepDraft
 from skillforge.library import Library
 from skillforge.providers import MockProvider, ProviderError
 from skillforge.settings import EnvSettings
@@ -115,10 +116,37 @@ def suggestions(system) -> SuggestionSet:
     )])
 
 
+def guide_draft() -> GuideDraft:
+    """What the guide's model says about the `shop-map` test repository. The quotes are sentences of the README the browser test writes there
+    (run.mjs, GUIDE_README): the real checking code looks every one up, so only what is really in that README survives, as in production."""
+    def part(id, name, layer, folder, quote, summary):
+        return PartDraft(id=id, name=name, layer=layer, folder=folder, quote=quote, summary=summary, takes_in="a request", gives_out="an answer",
+                         plain="Like the desk where an order is taken.")
+
+    web = part("web", "Web page", "use", "web", "The web page sends every price request to the API.", "Where a person asks for a price.")
+    api = part("api", "API", "door", "api", "The API asks the pricing engine for the price.", "The one door into the shop.")
+    pricing = part("pricing", "Pricing engine", "work", "pricing", "The pricing engine works out the tax for the price.", "Works out what a price is.")
+    cache = part("cache", "Price cache", "shared", "cache", "A cache for prices is planned but does not exist yet.", "Remembers prices.")
+    pay = part("pay", "Payment provider", "outside", "", "Payments are taken by an outside payment provider.", "Takes the money.")
+
+    def step(p):
+        return StepDraft(part=p.id, does=f"{p.name} does its part.", quote=p.quote)
+
+    return GuideDraft(
+        parts=[web, api, pricing, cache, pay],
+        journeys=[
+            JourneyDraft(title="Show a price", steps=[step(web), step(api), step(pricing)]),
+            JourneyDraft(title="Skip the API", steps=[step(web), step(pricing)]),
+        ],
+    )
+
+
 def respond(schema, prompt, system):
     time.sleep(DELAY)
     if schema is Ping:  # the Settings page's "Test my models"
         return Ping(reply="ok")
+    if schema is GuideDraft:
+        return guide_draft()
     if schema is Extraction:
         return extraction(prompt)
     if schema is SkillDraft:

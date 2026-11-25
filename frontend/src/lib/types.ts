@@ -478,6 +478,8 @@ export type RepoSource =
       skipped: Record<string, number>;
       /** True when a copy downloaded a little earlier was used instead of downloading again. */
       reused: boolean;
+      /** README and doc files kept next to the source (the guide reads them). null for a copy made before they were kept. */
+      docs?: number | null;
     };
 
 // ---- the architecture map (docs/architecture-map.md): folders as boxes, proven imports as arrows -----------------
@@ -563,6 +565,85 @@ export interface RepoAnalysis {
   dead_code: { internal: number; exported: number; note: string };
   /** Optional so an answer from an older server cannot break the page. */
   architecture?: Architecture;
+}
+
+// ---- the guide: how a project works, read from its README and docs (every quote checked by code) ----
+
+/**
+ * What is known about one step of a route: the code imports from the first part into the second (confirmed), only the other way (reversed), or each way
+ * (both_ways); the two are one folder; the language has no import links (not_measured); a step between them was dropped (step_dropped); or only the docs say so.
+ */
+export type HopStatus = "confirmed" | "both_ways" | "reversed" | "same_folder" | "not_measured" | "step_dropped" | "docs_only";
+/** Whether the folder a part names is in the code, only the docs mention the part, or the part is outside the repository by nature. */
+export type PartStatus = "in_code" | "docs_only" | "external";
+
+/** A sentence found word for word in one paragraph of a document, and where. `on_topic` is false when it does not even mention the part it is given for. */
+export interface GuideQuote {
+  text: string;
+  source: string;
+  line: number;
+  on_topic: boolean;
+}
+
+export interface GuidePart {
+  id: string;
+  name: string;
+  /** One of the guide's layer ids. */
+  layer: string;
+  /** The next five are the model's own words and are not checked; the quote and the folder are. */
+  summary: string;
+  takes_in: string;
+  gives_out: string;
+  plain: string;
+  folder: string;
+  status: PartStatus;
+  files: number;
+  lines: number;
+  read_first: { files: { path: string; lines: number }[]; functions: { name: string; file: string; line: number }[] };
+  quote: GuideQuote;
+}
+
+export interface GuideStep {
+  part: string;
+  does: string;
+  quote: GuideQuote;
+}
+
+export interface GuideHop {
+  from: string;
+  to: string;
+  status: HopStatus;
+  /** Distinct file pairs in which the first part imports the second, and the other way round. */
+  forward: number;
+  reverse: number;
+  /** A few of the pairs of the stronger direction (importer imports imported): so a reader can judge whether they are the real link. */
+  evidence: { importer: string; imported: string }[];
+}
+
+export interface GuideJourney {
+  title: string;
+  steps: GuideStep[];
+  /** One between each pair of steps, so one fewer than the steps. */
+  hops: GuideHop[];
+}
+
+export interface Guide {
+  /** ok: drawn. thin: too little could be checked, nothing is drawn. no_docs: there was no README or docs, and no model was asked. */
+  status: "ok" | "thin" | "no_docs";
+  name: string;
+  focus: string | null;
+  source: RepoSource;
+  provider: string;
+  model: string;
+  attempts: number;
+  /** The documents that were read, relative to the repository. */
+  docs: { path: string; lines: number; chars: number; truncated: boolean }[];
+  docs_skipped: Record<string, number>;
+  layers: { id: string; label: string }[];
+  parts: GuidePart[];
+  journeys: GuideJourney[];
+  dropped: { what: string; name: string; reason: string }[];
+  notes: string[];
 }
 
 export type IdeaCategory = "refactor" | "test" | "cleanup" | "risk" | "skill" | "automation";

@@ -1,6 +1,6 @@
-"""A repository over HTTP: what its graph says, and ideas for it asked of a model in the background.
+"""A repository over HTTP: what its graph says, ideas for it asked of a model in the background, and a guide to how it works read from its docs.
 
-Both read a folder on the machine the server runs on, so both are off in the hosted version (the folder would be the server's, not
+All of them read a folder on the machine the server runs on, so all are off in the hosted version (the folder would be the server's, not
 the person's), like installing into a folder. The path a person types is never sent back: pages are shown the folder's name.
 """
 
@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
+from ..builder.guides import guide_repo
 from ..builder.repository import analyze_repo
 from .builds import get_builder
 
@@ -40,6 +41,13 @@ def repos_router() -> APIRouter:
         """The graph's facts about a folder: size, languages and their honest levels, hotspots, dead-code candidates. No model."""
         local_only(request)
         return await run_in_threadpool(analyze_repo, body.path, body.focus)
+
+    @r.post("/repos/guide")
+    async def guide(body: AnalyzeBody, request: Request) -> dict:
+        """How the project works, drawn from its README and docs: parts in layers and the routes an action takes through them. One model call,
+        asked now (this request waits for it) and not saved. Every quote is checked against the documents by code. No README: no model is asked."""
+        local_only(request)
+        return await run_in_threadpool(guide_repo, body.path, body.focus, get_builder(request.app).provider_factory)
 
     @r.post("/suggestions", status_code=201)
     def start(body: SuggestBody, request: Request) -> dict:

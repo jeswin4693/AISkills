@@ -1,15 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArchitectureMap } from "@/components/repository/ArchitectureMap";
+import { HowItWorks } from "@/components/repository/HowItWorks";
 import { IdeaCard } from "@/components/repository/IdeaCard";
 import { RepoSummary } from "@/components/repository/RepoSummary";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, PageHeader, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { plural, relativeTime } from "@/lib/format";
 import { buildRequest, canBuild, ideaGroups, ideaKey, isLinkLike, loadRemembered, pathProblem, remember, runInfo, workingRun } from "@/lib/repository";
-import type { Idea, RepoAnalysis } from "@/lib/types";
+import type { Guide, Idea, RepoAnalysis } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 import { useSuggestRun } from "@/lib/useSuggestRun";
 
@@ -31,6 +32,12 @@ export default function RepositoryPage() {
   const [edits, setEdits] = useState<Record<string, string>>({}); // the person's own wording of an idea, by run and position
   const [building, setBuilding] = useState<number | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
+  const [guide, setGuide] = useState<Guide | null>(null);
+  const [guiding, setGuiding] = useState(false);
+  const [guideError, setGuideError] = useState<string | null>(null);
+  // What was last read: the guide is drawn for that, not for whatever the box says now. The counter lets an answer that comes back after another read be ignored.
+  const [lastRead, setLastRead] = useState<{ path: string; focus: string } | null>(null);
+  const guideSeq = useRef(0);
 
   useEffect(() => {
     // after mount, so the first render matches the server's: what the browser remembers appears a moment later
@@ -55,15 +62,36 @@ export default function RepositoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.status]);
 
+  async function explain() {
+    if (!lastRead) return;
+    const mine = ++guideSeq.current;
+    setGuiding(true);
+    setGuideError(null);
+    try {
+      const answer = await api.guideRepo(lastRead.path, lastRead.focus);
+      if (mine === guideSeq.current) setGuide(answer);
+    } catch (err) {
+      if (mine === guideSeq.current) setGuideError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (mine === guideSeq.current) setGuiding(false);
+    }
+  }
+
   async function read() {
     setReading(true);
     setReadError(null);
+    guideSeq.current += 1; // a guide still being drawn belonged to the repository before this one: its answer will be ignored
+    setGuiding(false);
+    setGuide(null); // a guide belongs to the repository it was drawn for: reading another one clears it
+    setGuideError(null);
     try {
       const a = await api.analyzeRepo(path.trim(), focus.trim());
       remember({ path: path.trim(), focus: focus.trim() });
       setAnalysis(a);
+      setLastRead({ path: path.trim(), focus: focus.trim() });
     } catch (err) {
       setAnalysis(null);
+      setLastRead(null);
       setReadError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setReading(false);
@@ -115,7 +143,7 @@ export default function RepositoryPage() {
     <>
       <PageHeader
         title="Repository"
-        subtitle="Point SkillForge at a folder on this computer, or at a public GitHub repository. It reads the code into a graph (no model, nothing is run), and can then ask a model for ideas that must cite code that really exists. A skill built from an idea records those places as evidence."
+        subtitle="Point SkillForge at a folder on this computer, or at a public GitHub repository. It reads the code into a graph (no model, nothing is run), can explain how the project works from its README and docs, and can ask a model for ideas that must cite code that really exists. A skill built from an idea records those places as evidence."
       />
       <div className="space-y-6">
         <Card className="p-5">
@@ -136,7 +164,7 @@ export default function RepositoryPage() {
               {problem && <p className="mt-1 text-sm text-warn">{problem}</p>}
               <p className="mt-1 text-xs text-muted">
                 {isLinkLike(path)
-                  ? "A link is downloaded from GitHub into a copy on this computer: public repositories only, only source files are kept, and nothing in it is run. The first read takes a little while."
+                  ? "A link is downloaded from GitHub into a copy on this computer: public repositories only, only source files and README and doc files are kept, and nothing in it is run. The first read takes a little while."
                   : "The path stays on this computer. This page remembers it in your browser only, and shows you the folder's name, never the path."}
               </p>
             </div>
@@ -170,6 +198,42 @@ export default function RepositoryPage() {
         {readError && <ErrorBox error={readError} onRetry={() => void read()} />}
         {analysis && <RepoSummary analysis={analysis} />}
         {analysis && <ArchitectureMap architecture={analysis.architecture} />}
+
+        {analysis && (
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-lg font-semibold">How it works</h2>
+              <p className="mt-0.5 max-w-prose text-sm text-muted">
+                For someone new to the project: a model reads the README and docs and draws the main parts, the layers they sit in, and the route an action takes through them. Every
+                quote is checked by code against the documents, and each step of the route says whether the code confirms it. That proves the quotes are real, not that the docs are
+                up to date.
+              </p>
+            </div>
+            {provider.data && !provider.data.configured && (
+              <Alert tone="warn" title="No AI model is set up yet">
+                <p>{provider.data.detail}</p>
+                <p className="mt-1">This needs a model. Put its settings in the Settings page or the <code className="font-mono">.env</code> file, then reload this page.</p>
+              </Alert>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="primary" busy={guiding} disabled={!modelReady || !lastRead} onClick={() => void explain()}>
+                {guide ? "Draw it again" : "Show how it works"}
+              </Button>
+              {modelReady && provider.data && <span className="text-sm text-muted">Model: {provider.data.model}. One model call; this uses a little of its quota and nothing is saved.</span>}
+            </div>
+            {guiding && (
+              <p role="status" className="flex items-center gap-2 text-sm text-muted">
+                <Spinner /> Reading the docs and asking the model. This takes a few seconds to a minute.
+              </p>
+            )}
+            {guideError && (
+              <Alert tone="bad" title="It could not be drawn">
+                {guideError}
+              </Alert>
+            )}
+            {guide && <HowItWorks guide={guide} />}
+          </section>
+        )}
 
         {(analysis || run) && (
           <section className="space-y-4">

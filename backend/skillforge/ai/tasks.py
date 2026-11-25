@@ -20,6 +20,7 @@ class Task(StrEnum):
     SELECT = "select"  # rule selection
     DESIGN = "design"  # skill and agent drafts
     SUGGEST = "suggest"  # suggest: review and ideas
+    GUIDE = "guide"  # the guide: parts and journeys read out of a README and docs (every quote is then checked by code)
     CODE = "code"  # helper scripts (later: MCP tool bodies, hook scripts)
     ACT = "act"  # eval replies
 
@@ -29,6 +30,7 @@ TIER_OF: dict[Task, Tier] = {
     Task.SELECT: Tier.FAST,
     Task.DESIGN: Tier.DESIGN,
     Task.SUGGEST: Tier.DESIGN,
+    Task.GUIDE: Tier.DESIGN,
     Task.CODE: Tier.CODE,
     Task.ACT: Tier.ACTOR,
 }

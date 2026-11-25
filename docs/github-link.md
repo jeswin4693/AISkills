@@ -36,7 +36,7 @@ where, and how many.** No `git` program is run and no key is needed.
   (the message points at the **Only this folder inside it** box). Owner and repository names are checked with GitHub's own rules.
 * **Public repositories only.** A private one needs a token, which would be one more key to store and protect. GitHub answers "not found" for a private repository and the message says so.
 * **The download goes to `codeload.github.com` over https and nowhere else.** A redirect anywhere else is refused. At most **80 MB**, **120 seconds**, and the zip must really be a zip.
-* **Unpacking is ours, and fails closed.** Only files in a language the graph reads, at most 1 MB each (the graph's own limit), at most 20,000 files and 200 MB. Skipped, never written: symbolic links and devices;
+* **Unpacking is ours, and fails closed.** Only files in a language the graph reads (and, since slice AB, README and doc files for the guide, kept under limits of their own and the same name rules: [how-it-works.md](how-it-works.md)), at most 1 MB each (the graph's own limit), at most 20,000 files and 200 MB. Skipped, never written: symbolic links and devices;
   names that could leave the folder or that this disk cannot hold (see `unsafe_part` in `builder/github.py`); folders the graph ignores (`.git`, `node_modules`, ...); a second name that differs only in case;
   anything over the limits. Every file is created without overwriting, and its resolved place must be inside the snapshot, or it is skipped. The archive must be one folder (GitHub's layout) and have at most 200,000 members, or nothing is unpacked.
 * **Nothing is run.** The graph reads the files; nothing in the repository is executed, imported or built.

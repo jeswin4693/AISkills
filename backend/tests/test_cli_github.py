@@ -12,10 +12,14 @@ from pathlib import Path
 
 import pytest
 from test_github_link import LINK, REPO, served, zip_of  # noqa: F401  (served is a pytest fixture: the archive GitHub 'serves')
+from test_library import NAME, write_skill
+from test_skill_build import ANSWERS, FIRST, draft, round_one, round_two
 
 from skillforge import cli
 from skillforge.builder import UpstreamError
 from skillforge.builder import github as gh
+from skillforge.evidence import EVIDENCE_FILE, read_evidence
+from skillforge.providers import MockProvider
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -136,3 +140,69 @@ def test_source_lines_say_what_was_left_out_in_words():
     left_out = next(line for line in lines if line.startswith("Left out:"))
     assert "2 files in languages or formats the graph does not read" in left_out and "1 file over 1 MB" in left_out and "3 paths too long for this disk" in left_out
     assert not any(line.startswith("Left out:") for line in cli._source_lines(view(skipped={}), now=1_800_000_000))
+
+
+# ---- plan, build and the evidence commands -----------------------------------------------------------------------------
+
+
+def test_plan_on_a_link_says_the_rules_files_are_not_downloaded(served, capsys):
+    """A copy holds only source files, so a repository's CLAUDE.md and AGENTS.md are not in it: the plan must not quietly report 'no rules'."""
+    code, out, err = run(capsys, "plan", "rename the function shared in core.py to shared_value", "--repo", LINK, "--no-ai")
+    assert code == 0 and "Read acme/shop-api from GitHub" in err
+    assert "CLAUDE.md" in err and "not downloaded" in err and "core.py" in out
+
+
+@pytest.fixture
+def skill_in_library(tmp_path, capsys):
+    skill = write_skill(tmp_path / NAME, "Use `core.py::shared`.\n")
+    assert run(capsys, "library", "import", str(skill))[0] == 0
+
+
+def test_cite_recheck_and_refresh_download_a_fresh_copy_each_time_and_graph_does_not(served, skill_in_library, capsys):
+    run(capsys, "graph", "stats", LINK, "--no-history")
+    run(capsys, "graph", "stats", LINK, "--no-history")
+    assert served["calls"] == 1  # a young copy is reused
+    code, out, err = run(capsys, "library", "cite", NAME, "--repo", LINK, "--ref", "core.py::shared")
+    assert code == 0 and served["calls"] == 2 and "downloaded just now" in err and f"--repo {LINK}" in out  # what changed is asked of the code as it is now
+    code, _, err = run(capsys, "library", "recheck", NAME, "--repo", LINK)
+    assert code == 0 and served["calls"] == 3 and "downloaded just now" in err
+    code, _, _ = run(capsys, "library", "refresh", NAME, "--repo", LINK)
+    assert code == 0 and served["calls"] == 4
+
+
+def test_recheck_of_a_link_names_what_changed(served, skill_in_library, capsys):
+    run(capsys, "library", "cite", NAME, "--repo", LINK, "--ref", "core.py::shared")
+    served["files"] = {**REPO, "core.py": "def other():\n    return 1\n"}
+    code, out, _ = run(capsys, "library", "recheck", NAME, "--repo", LINK)
+    assert code == 1 and "MISSING" in out and "core.py::shared" in out
+
+
+@pytest.fixture
+def link_idea(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"repo": "shop-api", "suggestions": [{
+        "title": "Duplicate finder", "skill_requirement": FIRST, "evidence_nodes": ["core.py::shared", "a.py", "gone.py"],
+    }]}), encoding="utf-8")
+    answers = tmp_path / "a.json"
+    answers.write_text(json.dumps(ANSWERS), encoding="utf-8")
+    return report, answers
+
+
+def test_build_with_a_link_records_the_ideas_evidence(served, link_idea, monkeypatch, capsys, tmp_path):
+    report, answers = link_idea
+    monkeypatch.setattr(cli, "provider_from_env", lambda: MockProvider([round_one(), round_two(), draft()]))
+    code, out, err = run(capsys, "build", "--from-suggestions", str(report), "--pick", "1", "--answers", str(answers), "--yes",
+                         "--out", str(tmp_path / "skills"), "--repo", LINK)
+    assert code == 0 and "evidence.json" in out and "2 place" in out and "gone.py" in out and "Read acme/shop-api" in err
+    folder = tmp_path / "skills" / "duplicate-function-finder"
+    ev = read_evidence({EVIDENCE_FILE: (folder / EVIDENCE_FILE).read_bytes()})
+    assert [r.id for r in ev.refs] == ["core.py::shared", "a.py"] and ev.repo == "acme__shop-api"
+
+
+def test_a_refused_link_stops_build_before_a_model_is_asked(served, link_idea, monkeypatch, capsys, tmp_path):
+    report, answers = link_idea
+    mock = MockProvider([round_one(), round_two(), draft()])
+    monkeypatch.setattr(cli, "provider_from_env", lambda: mock)
+    code, _, err = run(capsys, "build", "--from-suggestions", str(report), "--pick", "1", "--answers", str(answers), "--yes",
+                       "--out", str(tmp_path / "s"), "--repo", "https://gitlab.com/a/b")
+    assert code == 2 and "error:" in err and "gitlab" not in err and mock.calls == [] and served["calls"] == 0

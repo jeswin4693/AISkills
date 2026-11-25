@@ -439,7 +439,7 @@ def _run_build(args: argparse.Namespace) -> int:
     load_dotenv(REPO_ROOT / ".env")
     description = _description_from_args(args)
     idea = _chosen_idea(args)
-    graph = build_graph(args.repo, focus=args.focus, with_history=False) if args.repo and idea is not None else None  # a bad path stops here, before a model is asked
+    graph = build_graph(_repo_arg(args.repo), focus=args.focus, with_history=False) if args.repo and idea is not None else None  # a bad path or link stops here, before a model is asked
     provider = provider_from_env()
     result = build_skill(
         description, provider,
@@ -550,6 +550,8 @@ def _run_plan(args: argparse.Namespace) -> int:
     text = Path(args.file).read_text(encoding="utf-8") if args.file else args.prompt
     if not text:
         raise ValueError("Give the task in words, or with --file FILE.")
+    # a copy of a GitHub repository holds only source files: its CLAUDE.md and AGENTS.md are not in it, and the plan must say so
+    folder = _repo_arg(args.repo, extra="CLAUDE.md and AGENTS.md are not downloaded, so the rules they hold are not read.")
     provider = None
     if not args.no_ai:
         load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
@@ -560,7 +562,7 @@ def _run_plan(args: argparse.Namespace) -> int:
             + " Use --no-ai to send nothing.", file=sys.stderr,
         )
     plan = make_plan(
-        text, provider=provider, repo=args.repo, task_type=args.type, tier=args.tier, allow_lower=args.allow_lower,
+        text, provider=provider, repo=folder, task_type=args.type, tier=args.tier, allow_lower=args.allow_lower,
         budget=args.budget, sensitive=tuple(args.sensitive or ()),
     )
     out = json.dumps(plan.model_dump(), indent=2) if args.json else render_markdown(plan)
@@ -817,12 +819,12 @@ def _run_evidence(args: argparse.Namespace, lib: Library) -> int:
         if not args.ref and not args.from_text:
             raise LibraryError("Say what to cite: --ref FILE_OR_FUNCTION (repeat it for more places) or --from-text (the places the skill's own text names).")
         focus = _focus_of(args, lib)
-        g = build_graph(args.repo, focus=focus or None, with_history=False)
+        g = build_graph(_repo_arg(args.repo, fresh=True), focus=focus or None, with_history=False)  # fresh: what is cited is the code as it is now
         print(_render_cite(cite(lib, args.name, g, args.ref or [], from_text=args.from_text, focus=focus or None, note=args.note or ""), args.repo))
         return 0
     if cmd == "recheck":
         focus = _focus_of(args, lib, args.version)
-        g = build_graph(args.repo, focus=focus or None, with_history=False)
+        g = build_graph(_repo_arg(args.repo, fresh=True), focus=focus or None, with_history=False)  # fresh: what changed is the point
         report = recheck_version(lib, args.name, g, args.version, focus=focus or None)
         if args.json:
             print(json.dumps(report.to_dict(), indent=2))
@@ -830,7 +832,7 @@ def _run_evidence(args: argparse.Namespace, lib: Library) -> int:
             print(_render_recheck(report))
         return 0 if report.ok else 1
     focus = _focus_of(args, lib)
-    g = build_graph(args.repo, focus=focus or None, with_history=False)
+    g = build_graph(_repo_arg(args.repo, fresh=True), focus=focus or None, with_history=False)  # fresh: today's facts are recorded
     print(_render_refresh(refresh(lib, args.name, g, drop_missing=args.drop_missing, focus=focus or "", note=args.note or ""), args.repo))
     return 0
 
@@ -980,7 +982,7 @@ def _parser() -> argparse.ArgumentParser:
     b.add_argument("--scripts", action="store_true", help="also write helper scripts and test them in the sandbox (needs a Linux sandbox)")
     b.add_argument("--eval", action="store_true", help="also run the skill's own test cases against the model, with and without the skill (text-only skills; about 2 model calls per test)")
     b.add_argument("--eval-runs", type=int, default=1, metavar="N", help="with --eval: repeat each test N times, because models vary")
-    b.add_argument("--repo", metavar="PATH", help="with --from-suggestions: the repository the idea is about; the places the idea cites are recorded as the skill's evidence (evidence.json)")
+    b.add_argument("--repo", metavar="PATH_OR_LINK", help="with --from-suggestions: the repository the idea is about (a folder, or the link of a public GitHub repository); the places the idea cites are recorded as the skill's evidence (evidence.json)")
     b.add_argument("--focus", help="with --repo: only read this folder of the repository")
 
     ev = area.add_parser("eval", help="run a skill's own test cases against a model, with and without the skill (text-only skills)")
@@ -1010,7 +1012,7 @@ def _parser() -> argparse.ArgumentParser:
     pl = area.add_parser("plan", help="plan a task before doing it: scope, size, process, rules, token use (reads and changes nothing)")
     pl.add_argument("prompt", nargs="?", help="the task, in your own words")
     pl.add_argument("--file", help="read the task from a text file")
-    pl.add_argument("--repo", help="the repository the task is about: measures the size of the change and finds its rules")
+    pl.add_argument("--repo", help="the repository the task is about, a folder or the link of a public GitHub repository: measures the size of the change and finds its rules (a link has no CLAUDE.md or AGENTS.md: only source files are downloaded)")
     pl.add_argument("--no-ai", action="store_true", help="send nothing to a model: plan only what code can measure")
     pl.add_argument("--type", choices=["feature", "bugfix", "refactor", "migration", "docs", "investigation", "other"], help="the kind of task (needed with --no-ai; otherwise the model reads it)")
     pl.add_argument("--tier", type=int, choices=[0, 1, 2, 3], help="ask for at least this much process (it can only raise the tier)")
@@ -1047,7 +1049,7 @@ def _parser() -> argparse.ArgumentParser:
     ):
         p = ops.add_parser(name, help=helptext)
         p.add_argument("name")
-        p.add_argument("--repo", required=True, metavar="PATH", help="the repository the skill's evidence is about")
+        p.add_argument("--repo", required=True, metavar="PATH_OR_LINK", help="the repository the skill's evidence is about: a folder, or the link of a public GitHub repository (downloaded fresh each time)")
         p.add_argument("--focus", help="only read this folder of the repository (default: the one the evidence was recorded with)")
         if name == "cite":
             p.add_argument("--ref", action="append", metavar="FILE_OR_FUNCTION", help="a place to cite: a file, a function name, or FILE::NAME (repeat for more)")

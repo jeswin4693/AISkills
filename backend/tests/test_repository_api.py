@@ -51,6 +51,22 @@ def test_analyze_gives_the_facts_the_graph_computed(make, root):
     assert doc["dead_code"]["internal"] >= 1 and isinstance(doc["notes"], list) and not leaks(root, doc)
 
 
+def test_analyze_includes_the_architecture_map(make, repo):
+    folder = repo({
+        "pricing/__init__.py": "",
+        "pricing/core.py": "def tax():\n    return 1\n",
+        "api/__init__.py": "",
+        "api/routes.py": "from pricing.core import tax\n\n\ndef route():\n    return tax()\n",
+        "web/app.py": "from api.routes import route\n\n\ndef page():\n    return route()\n",
+    })
+    doc = make([]).client.post("/api/repos/analyze", json={"path": str(folder)}).json()
+    arch = doc["architecture"]
+    names = {m["id"]: m["label"] for m in arch["modules"]}
+    assert sorted(names.values()) == ["api", "pricing", "web"]
+    arrows = {(names[a["from"]], names[a["to"]]) for a in arch["arrows"]}
+    assert ("web", "api") in arrows and ("api", "pricing") in arrows and not leaks(folder, doc)
+
+
 @pytest.mark.parametrize("path, why", [("relative/path", "absolute"), ("", "absolute")])
 def test_analyze_wants_an_absolute_path(make, path, why):
     r = make([]).client.post("/api/repos/analyze", json={"path": path})

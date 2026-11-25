@@ -13,6 +13,7 @@ from typing import Any
 
 from ..evidence import EVIDENCE_FILE, MAX_REFS, collect, evidence_bytes, fit, safe
 from ..graph import query
+from ..graph.architecture import architecture
 from ..graph.build import build_graph
 from . import github
 from .errors import BadRequest, BuilderError
@@ -107,6 +108,7 @@ def analyze_repo(path: object, focus: object = None) -> dict[str, Any]:
         "name": display_name(source_of(repo)), "source": source_view(repo), "focus": focus_text, "stats": stats, "notes": notes,
         "hotspots": {"core_symbols": hot["core_symbols"][:10], "risky_files": hot["risky_files"][:10], "note": hot.get("note", "")},
         "dead_code": {"internal": len(dead["internal"]), "exported": len(dead["exported"]), "note": dead.get("note", "")},
+        "architecture": architecture(g),  # folders as boxes, proven imports as arrows; repository-relative names only
     }
 
 

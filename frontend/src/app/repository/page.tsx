@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { ArchitectureMap } from "@/components/repository/ArchitectureMap";
 import { IdeaCard } from "@/components/repository/IdeaCard";
 import { RepoSummary } from "@/components/repository/RepoSummary";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, PageHeader, Spinner } from "@/components/ui";
@@ -168,6 +169,7 @@ export default function RepositoryPage() {
 
         {readError && <ErrorBox error={readError} onRetry={() => void read()} />}
         {analysis && <RepoSummary analysis={analysis} />}
+        {analysis && <ArchitectureMap architecture={analysis.architecture} />}
 
         {(analysis || run) && (
           <section className="space-y-4">

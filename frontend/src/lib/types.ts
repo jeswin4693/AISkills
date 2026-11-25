@@ -519,6 +519,8 @@ export interface ArchArrow {
   from: string;
   to: string;
   count: number;
+  /** Points against the main left-to-right direction: the weaker way of a pair that imports each other, the arrow that closes a loop. */
+  back: boolean;
 }
 
 export interface Architecture {

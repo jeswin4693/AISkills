@@ -9,7 +9,7 @@ const box = (id: string, label: string, column: number, over: Partial<ArchModule
 
 const arch = (over: Partial<Architecture> = {}): Architecture => ({
   base: "", modules: [box("m0", "api", 1), box("m1", "pricing", 2), box("m2", "web", 0)],
-  arrows: [{ from: "m2", to: "m0", count: 3 }, { from: "m0", to: "m1", count: 1 }],
+  arrows: [{ from: "m2", to: "m0", count: 3, back: false }, { from: "m0", to: "m1", count: 1, back: false }],
   cycles: [], columns: 3, measured: true, language_levels: { python: "full" }, left_out: { guess: 0, from_tests: 0 }, notes: [], ...over,
 });
 
@@ -33,8 +33,9 @@ describe("layoutMap", () => {
   it("stays inside its frame, even with 14 boxes over 6 columns and arrows that go sideways", () => {
     const modules = Array.from({ length: 14 }, (_, i) => box(`m${i}`, `folder${i}`, i % 6, { files: 1 + i * 7 }));
     const arrows = [
-      { from: "m0", to: "m1", count: 9 }, { from: "m1", to: "m2", count: 1 }, { from: "m6", to: "m12", count: 40 }, // same column: arcs on the right
-      { from: "m5", to: "m0", count: 2 }, // backwards
+      { from: "m0", to: "m1", count: 9, back: false }, { from: "m1", to: "m2", count: 1, back: false },
+      { from: "m6", to: "m12", count: 40, back: false }, // same column: arcs on the right
+      { from: "m5", to: "m0", count: 2, back: true }, // backwards
     ];
     const l = layoutMap(arch({ modules, arrows, columns: 6 }));
     for (const b of l.boxes) {
@@ -66,21 +67,24 @@ describe("layoutMap", () => {
     expect(n[7]).toBeCloseTo(at("m0").y + at("m0").h / 2, 1);
   });
 
-  it("still draws an arrow that goes sideways or backwards, and flags it as a cycle only when both ends are in one cycle group", () => {
+  it("still draws an arrow that goes sideways or backwards, and marks as a cycle arrow exactly the ones the answer says point back", () => {
     const modules = [box("m0", "a", 0), box("m1", "b", 0), box("m2", "c", 1)];
-    const arrows = [{ from: "m0", to: "m1", count: 1 }, { from: "m1", to: "m0", count: 1 }, { from: "m2", to: "m0", count: 1 }, { from: "m0", to: "m2", count: 1 }];
-    const l = layoutMap(arch({ modules, arrows, cycles: [["m0", "m1"]], columns: 2 }));
+    const arrows = [
+      { from: "m0", to: "m1", count: 1, back: false }, { from: "m1", to: "m0", count: 1, back: true },
+      { from: "m2", to: "m0", count: 1, back: true }, { from: "m0", to: "m2", count: 1, back: false },
+    ];
+    const l = layoutMap(arch({ modules, arrows, cycles: [["m0", "m1", "m2"]], columns: 2 }));
     const arrow = (from: string, to: string) => l.arrows.find((a) => a.from === from && a.to === to)!;
     expect(l.arrows).toHaveLength(4);
     for (const a of l.arrows) expect(a.d.startsWith("M")).toBe(true);
-    expect(arrow("m0", "m1").cycle).toBe(true);
+    expect(arrow("m0", "m1").cycle).toBe(false); // inside the cycle group, but it follows the main direction
     expect(arrow("m1", "m0").cycle).toBe(true);
-    expect(arrow("m2", "m0").cycle).toBe(false);
+    expect(arrow("m2", "m0").cycle).toBe(true);
     expect(arrow("m0", "m2").cycle).toBe(false);
   });
 
   it("makes an arrow thicker as its count grows, but never thinner than 1.5 or thicker than 8", () => {
-    const widthOf = (count: number) => layoutMap(arch({ arrows: [{ from: "m2", to: "m0", count }] })).arrows[0].width;
+    const widthOf = (count: number) => layoutMap(arch({ arrows: [{ from: "m2", to: "m0", count, back: false }] })).arrows[0].width;
     expect(widthOf(1)).toBe(1.5);
     expect(widthOf(2)).toBeGreaterThan(widthOf(1));
     expect(widthOf(16)).toBeGreaterThan(widthOf(4));
@@ -108,9 +112,16 @@ describe("shortLabel", () => {
     expect(shortLabel("abcdefgh", 5)).toBe("abcd…");
   });
 
+  it("shortens a long folder path from the front, because the last folder is the informative part", () => {
+    expect(shortLabel("skillforge/validate")).toBe("…/validate");
+    expect(shortLabel("skillforge/graph")).toBe("skillforge/graph"); // fits: kept whole
+    expect(shortLabel("a/" + "x".repeat(60))).toBe("…/" + "x".repeat(15) + "…");
+    expect(Array.from(shortLabel("a/b/" + "y".repeat(40))).length).toBeLessThanOrEqual(18);
+  });
+
   it("leaves markup-like text as plain text (the page escapes it, this does not rewrite it)", () => {
     expect(shortLabel("<b>x</b>")).toBe("<b>x</b>");
-    expect(shortLabel("<script>alert(1)</script>").startsWith("<script>alert")).toBe(true);
+    expect(Array.from(shortLabel("<script>alert(1)</script>")).length).toBeLessThanOrEqual(18);
   });
 });
 
@@ -125,6 +136,12 @@ describe("the words under the picture", () => {
     expect(line).toContain("pricing");
     expect(line).toContain("each other");
     expect(cycleSentences(arch())).toEqual([]);
+  });
+
+  it("does not list a long cycle group in full: the first six names, then how many more", () => {
+    const modules = Array.from({ length: 9 }, (_, i) => box(`m${i}`, `folder${i}`, 0));
+    const [line] = cycleSentences(arch({ modules, arrows: [], cycles: [modules.map((m) => m.id)] }));
+    expect(line).toBe("folder0, folder1, folder2, folder3, folder4, folder5 and 3 more import each other (directly or through one another).");
   });
 
   it("describes a box in numbers, and says when it is only tests or its imports are not measured", () => {
@@ -151,6 +168,12 @@ describe("the words under the picture", () => {
     expect(mixed.join("\n")).toContain("folders inside src/");
     const none = mapNotes(arch({ measured: false, language_levels: { swift: "basic" }, notes: ["Imports are not measured for any language here (swift), so no arrows are drawn."] }));
     expect(none.filter((n) => n.includes("not measured"))).toHaveLength(1);
+  });
+
+  it("explains dashed arrows only when there are some", () => {
+    expect(mapNotes(arch()).join("\n")).not.toContain("Dashed");
+    const back = arch({ arrows: [{ from: "m0", to: "m2", count: 1, back: true }] });
+    expect(mapNotes(back).join("\n")).toContain("Dashed arrows point back against the main direction");
   });
 
   it("always ends with what the picture cannot say", () => {

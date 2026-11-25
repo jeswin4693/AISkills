@@ -7,7 +7,7 @@ const BOX_W = 168;
 const COLUMN_GAP = 96; // room between columns for the arrows
 const ROW_GAP = 18;
 const PAD = 16;
-const BOX_MIN_H = 52;
+const BOX_MIN_H = 64; // room for the name, the counts and, when it has one, a line saying "tests" or "imports not measured"
 const BOX_EXTRA_H = 28; // a box with many files is taller, up to this much more
 const FILES_FOR_FULL_HEIGHT = 40;
 const ARC = 48; // how far an arrow between two boxes of one column bulges out to the right
@@ -29,7 +29,7 @@ export interface DrawnArrow {
   /** An SVG path: "M sx sy C c1x c1y, c2x c2y, ex ey". */
   d: string;
   width: number;
-  /** Both ends are in one group of folders that import each other. */
+  /** Points back against the main direction: an import that closes a loop. Drawn dashed. */
   cycle: boolean;
   /** Where to write the count. */
   x: number;
@@ -93,8 +93,6 @@ export function layoutMap(arch: Architecture): MapLayout {
     return placed;
   });
   const byId = new Map(boxes.map((b) => [b.id, b]));
-  const groupOf = new Map<string, number>();
-  arch.cycles.forEach((group, i) => group.forEach((id) => groupOf.set(id, i)));
 
   const arrows: DrawnArrow[] = [];
   let sideways = false;
@@ -103,8 +101,7 @@ export function layoutMap(arch: Architecture): MapLayout {
     const t = byId.get(a.to);
     if (!s || !t) continue;
     sideways = sideways || s.x === t.x;
-    const g = groupOf.get(a.from);
-    arrows.push({ from: a.from, to: a.to, count: a.count, ...curve(s, t), width: arrowWidth(a.count), cycle: g !== undefined && g === groupOf.get(a.to) });
+    arrows.push({ from: a.from, to: a.to, count: a.count, ...curve(s, t), width: arrowWidth(a.count), cycle: a.back });
   }
   return {
     width: PAD * 2 + columns * BOX_W + (columns - 1) * COLUMN_GAP + (sideways ? ARC : 0),
@@ -114,10 +111,17 @@ export function layoutMap(arch: Architecture): MapLayout {
   };
 }
 
-/** A box's name as drawn: long folder names are shortened (the full name stays in the box's tooltip and panel). Whole characters, not code units. */
+/** A box's name as drawn: a long name is shortened (the full name stays in the box's tooltip and panel). A folder path loses its front, because the
+ * last folder is the informative part. Whole characters, not code units. */
 export function shortLabel(label: string, max = 18): string {
   const chars = Array.from(label);
-  return chars.length <= max ? label : chars.slice(0, max - 1).join("") + "…";
+  if (chars.length <= max) return label;
+  const slash = label.lastIndexOf("/");
+  if (slash > 0 && slash < label.length - 1) {
+    const tail = Array.from(label.slice(slash + 1));
+    return tail.length + 2 <= max ? `…/${tail.join("")}` : `…/${tail.slice(0, max - 3).join("")}…`;
+  }
+  return chars.slice(0, max - 1).join("") + "…";
 }
 
 export function boxSubtitle(m: Architecture["modules"][number]): string {
@@ -136,7 +140,10 @@ export function arrowSentences(arch: Architecture): string[] {
   return arch.arrows.map((a) => `${name.get(a.from) ?? a.from} imports ${name.get(a.to) ?? a.to} (${plural(a.count, "file pair")})`);
 }
 
+const NAMES_SHOWN = 6; // a loop through most of a repository would otherwise be a wall of names
+
 function joinNames(names: string[]): string {
+  if (names.length > NAMES_SHOWN) return `${names.slice(0, NAMES_SHOWN).join(", ")} and ${names.length - NAMES_SHOWN} more`;
   return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
@@ -161,6 +168,9 @@ export function mapNotes(arch: Architecture): string[] {
   const unread = Object.entries(arch.language_levels).filter(([, level]) => level === "basic").map(([lang]) => lang).sort();
   if (arch.measured && unread.length > 0) {
     notes.push(`Imports are not measured for ${unread.join(", ")} (read for definitions only), so a folder holding only those files shows no arrows.`);
+  }
+  if (arch.arrows.some((a) => a.back)) {
+    notes.push("Dashed arrows point back against the main direction (right to left, or inside one column): they are the imports that close a loop.");
   }
   notes.push(LIMIT);
   return notes;

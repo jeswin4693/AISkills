@@ -55,8 +55,10 @@ The user approved A, and the "no library, hand-written SVG" call, in the convers
 **Backend.** A pure function `architecture(g)` in a new file `backend/skillforge/graph/architecture.py` (kept out of `query.py`, which is
 already long) and a field `architecture` in the `analyze` answer (`builder/repository.py`, `analyze_repo`).
 
-- A *module* is a file's first path segment; files at the repository root form one module shown as `(root)`. If every file sits inside
-  one folder (a `src/` or a `focus` folder), that common folder is stripped and reported as `base`, so the picture is not one box.
+- A *module* is a file's folder, cut to the first level (`api`); files at the repository root form one module shown as `(root)`. If every
+  file sits inside one folder (a `src/` or a `focus` folder), that common folder is stripped and reported as `base`, so the picture is not
+  one box. **If that gives fewer than six boxes, the map goes one level deeper (`skillforge/api`), up to three levels**: found by the first
+  real run, where this repository's `backend` folder was three boxes (`scripts`, `skillforge`, `tests`) and no arrows.
   Each box has an **id that is its position after sorting, not its name**, so a real folder called `(root)` or `(other)` cannot collide
   with the synthetic boxes.
 - Per module: file count, lines, test-file share, languages with their level (full, standard, basic), symbol count, and whether any of
@@ -64,11 +66,13 @@ already long) and a field `architecture` in the `analyze` answer (`builder/repos
 - Arrows: for each `resolved` import edge between files of two different modules, one count per (from, to) of distinct file pairs.
   `guess` edges are not drawn; **imports written by a test file are not drawn either** (a tests folder would otherwise point at every
   box); the answer says how many of each were left out. A box whose files are all tests is marked `tests_only`.
-- Cycles: a *cycle* is a group of folders that import each other, directly or through others (a strongly connected group, found by
-  code). The answer names each group (the page shows a warning) and the group's members share a column.
-- Columns: code assigns each module a column so most arrows point the same way: folders nothing imports are on the left, the ones
-  everything depends on on the right (longest chain of arrows, cycles collapsed first); ties broken by name, so the answer is the same
-  every time.
+- Cycles: a *cycle group* is folders that import each other, directly or through others (a strongly connected group, found by code). The
+  answer names each group (the page shows a warning).
+- Columns and back arrows: one left-to-right order. Cycle groups come in topological order, and inside a group the box that mostly imports
+  comes before the one that is mostly imported (imports out minus imports in, within the group). An arrow against that order is a **back
+  arrow** (drawn dashed): the weaker direction of a pair, the import that closes a loop; with no cycle there are none. A box's column is
+  the longest chain of forward arrows that reaches it. Ties are broken by name, so the answer is the same every time. (The first design
+  put a whole cycle group in one column; the first real run showed 11 of 14 boxes in one group, which made one column and a hairball.)
 - A cap (about 14 boxes): the smallest modules beyond it fold into one `(other)` box that says what it holds.
 - A repository where no language has measured imports returns the boxes without arrows and says "imports not measured".
 

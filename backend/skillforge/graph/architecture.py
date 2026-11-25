@@ -12,6 +12,8 @@ from typing import Any
 from . import languages
 from .model import RepoGraph
 
+MIN_BOXES = 6  # fewer top folders than this: look one level deeper, so the picture shows structure and not just "backend" and "tests"
+MAX_LEVELS = 3  # folder levels a box name may have (a/b/c)
 MAX_BOXES = 14  # more folders than this: the smallest fold into one "other" box
 MAX_FILES_LISTED = 12  # files a box names (the biggest by lines)
 MAX_FUNCTIONS_LISTED = 3  # functions a box names (the biggest by size)
@@ -24,14 +26,17 @@ def architecture(g: RepoGraph, max_boxes: int = MAX_BOXES) -> dict[str, Any]:
     called "(root)" or "(other)" cannot be mistaken for a box the code made."""
     paths = sorted(g.files)
     depth = _base_depth(paths)
+    levels = _levels(paths, depth)
     groups: dict[str | None, list[str]] = {}
     for path in paths:
-        groups.setdefault(_folder_of(path, depth), []).append(path)
+        groups.setdefault(_folder_of(path, depth, levels), []).append(path)
 
     boxes = _boxes(g, groups, max(2, max_boxes))
     owner = {p: box["id"] for box in boxes for key in box["_keys"] for p in groups[key]}
     arrows, guesses, from_tests = _arrows(g, owner, {box["id"]: i for i, box in enumerate(boxes)})
-    cycles, column, columns = _layout([box["id"] for box in boxes], arrows)
+    cycles, column, columns, back = _layout([box["id"] for box in boxes], arrows)
+    for a in arrows:
+        a["back"] = (a["from"], a["to"]) in back
 
     levels = {lang: languages.level_of(lang) for lang in sorted({r.lang for r in g.files.values()})}
     modules = [
@@ -63,10 +68,24 @@ def _base_depth(paths: list[str]) -> int:
     return depth
 
 
-def _folder_of(path: str, depth: int) -> str | None:
-    """The folder a file belongs to (the first one below the shared base); None for a file directly in the base."""
-    rest = path.split("/")[depth:]
-    return rest[0] if len(rest) > 1 else None
+def _folder_of(path: str, base: int, levels: int) -> str | None:
+    """The box a file belongs to: its folder, cut to `levels` folders below the shared base (a file deeper than that stays in the box at the
+    cut). None for a file directly in the base."""
+    folders = path.split("/")[base:-1]
+    return "/".join(folders[:levels]) if folders else None
+
+
+def _levels(paths: list[str], base: int) -> int:
+    """How many folder levels name a box: the fewest that give at least MIN_BOXES boxes. A repository whose top is just `backend` and `tests`
+    is drawn one level down, or the map would be two boxes and no arrows. If no level gets there, the one with the most boxes (the first, on a tie)."""
+    best, most = 1, 0
+    for levels in range(1, MAX_LEVELS + 1):
+        boxes = len({_folder_of(p, base, levels) for p in paths})
+        if boxes >= MIN_BOXES:
+            return levels
+        if boxes > most:
+            best, most = levels, boxes
+    return best
 
 
 def _summary(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
@@ -129,26 +148,42 @@ def _arrows(g: RepoGraph, owner: dict[str, str], rank: dict[str, int]) -> tuple[
     return arrows, guesses, from_tests
 
 
-def _layout(ids: list[str], arrows: list[dict[str, Any]]) -> tuple[list[list[str]], dict[str, int], int]:
-    """Cycle groups and a column for every box. A cycle is boxes that import each other, directly or through others; they share a column.
-    A box's column is the longest chain of arrows that reaches it, so what nothing imports is on the left and what everything uses on the right."""
+def _layout(ids: list[str], arrows: list[dict[str, Any]]) -> tuple[list[list[str]], dict[str, int], int, set[tuple[str, str]]]:
+    """Cycle groups, a column for every box, and the arrows that point back.
+
+    One left-to-right order: groups of boxes that import each other come in topological order (what imports others first), and inside a group
+    the box that mostly imports comes before the one that is mostly imported (more imports out than in, within the group). An arrow against that
+    order is a "back" arrow: it is the weaker direction, the one that closes the loop. With no cycle there are none. A box's column is the longest
+    chain of forward arrows that reaches it."""
     rank = {b: i for i, b in enumerate(ids)}
     succ: dict[str, list[str]] = {b: [] for b in ids}
+    weight: dict[tuple[str, str], int] = {}
     for a in arrows:
         succ[a["from"]].append(a["to"])
+        weight[(a["from"], a["to"])] = a["count"]
     for b in ids:
         succ[b].sort(key=rank.__getitem__)
     groups = _components(ids, succ)  # Tarjan lists a group only after every group it reaches: sinks first
-    group_of = {b: i for i, grp in enumerate(groups) for b in grp}
-    level = [0] * len(groups)
-    for i in reversed(range(len(groups))):  # sources first
-        for b in groups[i]:
-            for nxt in succ[b]:
-                j = group_of[nxt]
-                if j != i:
-                    level[j] = max(level[j], level[i] + 1)
+    order: list[str] = []
+    for group in reversed(groups):  # sources first
+        if len(group) > 1:
+            inside = set(group)
+            flow = dict.fromkeys(group, 0)
+            for (src, dst), n in weight.items():
+                if src in inside and dst in inside:
+                    flow[src] += n
+                    flow[dst] -= n
+            group = sorted(group, key=lambda b: (-flow[b], rank[b]))
+        order.extend(group)
+    position = {b: i for i, b in enumerate(order)}
+    level = dict.fromkeys(ids, 0)
+    for b in order:  # every forward arrow into b comes from an earlier box, so b's level is final here
+        for nxt in succ[b]:
+            if position[nxt] > position[b]:
+                level[nxt] = max(level[nxt], level[b] + 1)
+    back = {pair for pair in weight if position[pair[0]] > position[pair[1]]}
     cycles = sorted((sorted(grp, key=rank.__getitem__) for grp in groups if len(grp) > 1), key=lambda grp: rank[grp[0]])
-    return cycles, {b: level[group_of[b]] for b in ids}, (max(level) + 1 if level else 0)
+    return cycles, level, (max(level.values()) + 1 if level else 0), back
 
 
 def _components(nodes: list[str], succ: dict[str, list[str]]) -> list[list[str]]:

@@ -80,7 +80,28 @@ def test_a_common_folder_is_stripped_and_reported():
     res = architecture(mini(py("src/api/x.py", "src/db/y.py")))
     assert res["base"] == "src" and sorted(by_label(res)) == ["api", "db"]
     res = architecture(mini(py("src/api/x.py", "src/db/y.py", "setup.py")))
-    assert res["base"] == "" and sorted(by_label(res)) == ["(root)", "src"]
+    assert res["base"] == "" and sorted(by_label(res)) == ["(root)", "src/api", "src/db"]  # fewer than six boxes: one level deeper
+
+
+def test_a_shallow_repository_is_shown_one_level_deeper():
+    """The first real run (this repository's backend folder) was three boxes and no arrows: everything lived one folder down."""
+    files = py("pkg/graph/a.py", "pkg/api/b.py", "pkg/db/c.py", "pkg/ai/d.py", "pkg/ui/e.py", "pkg/cli.py", "tests/t.py")
+    res = architecture(mini(files, [("pkg/api/b.py", "pkg/db/c.py")]))
+    assert sorted(by_label(res)) == ["pkg", "pkg/ai", "pkg/api", "pkg/db", "pkg/graph", "pkg/ui", "tests"]
+    assert by_label(res)["pkg"]["files"] == 1  # cli.py stays with the folder it is directly in
+    assert drawn(res) == [("pkg/api", "pkg/db", 1)]
+
+
+def test_a_repository_with_enough_top_folders_stays_at_the_top():
+    res = architecture(mini(py(*[f"f{i}/x/a.py" for i in range(1, 7)])))
+    assert sorted(by_label(res)) == [f"f{i}" for i in range(1, 7)]
+
+
+def test_it_goes_no_deeper_than_three_levels():
+    files = py("a/1.py", "a/b/2.py", "a/b/c/3.py", "a/b/c/d/4.py", "z/z.py")
+    res = architecture(mini(files))
+    assert sorted(by_label(res)) == ["a", "a/b", "a/b/c", "z"]
+    assert by_label(res)["a/b/c"]["files"] == 2  # 3.py and 4.py: what is deeper still stays in the third level
 
 
 def test_each_box_says_what_is_in_it():
@@ -119,22 +140,47 @@ def test_unmeasured_languages_are_said_not_drawn_as_independent():
 # ---- cycles -------------------------------------------------------------------------------------------------------
 
 
-def test_a_cycle_through_three_folders_is_one_group():
+def backs(res):
+    """The arrows that point against the main direction, as (from label, to label)."""
+    names = {m["id"]: m["label"] for m in res["modules"]}
+    return [(names[a["from"]], names[a["to"]]) for a in res["arrows"] if a["back"]]
+
+
+def test_a_cycle_through_three_folders_is_one_group_and_one_arrow_points_back():
     res = architecture(mini(py("a/x.py", "b/x.py", "c/x.py"), [("a/x.py", "b/x.py"), ("b/x.py", "c/x.py"), ("c/x.py", "a/x.py")]))
     ids = {m["label"]: m["id"] for m in res["modules"]}
     assert res["cycles"] == [sorted(ids.values())]
-    assert {m["column"] for m in res["modules"]} == {0}
+    assert {label: m["column"] for label, m in by_label(res).items()} == {"a": 0, "b": 1, "c": 2}  # equal weights: the order is by name
+    assert backs(res) == [("c", "a")]
 
 
-def test_a_plain_chain_has_no_cycle():
+def test_a_plain_chain_has_no_cycle_and_nothing_points_back():
     res = architecture(mini(py("a/x.py", "b/x.py", "c/x.py"), [("a/x.py", "b/x.py"), ("b/x.py", "c/x.py")]))
-    assert res["cycles"] == []
+    assert res["cycles"] == [] and backs(res) == []
 
 
-def test_a_cycle_shares_a_column_and_what_imports_it_sits_to_its_left():
+def test_in_a_pair_that_imports_each_other_the_weaker_direction_is_the_one_drawn_back():
+    files = py("a/1.py", "a/2.py", "b/1.py")
+    heavy_a = architecture(mini(files, [("a/1.py", "b/1.py"), ("a/2.py", "b/1.py"), ("b/1.py", "a/1.py")]))  # a -> b twice, b -> a once
+    assert backs(heavy_a) == [("b", "a")] and {label: m["column"] for label, m in by_label(heavy_a).items()} == {"a": 0, "b": 1}
+    heavy_b = architecture(mini(files, [("b/1.py", "a/1.py"), ("b/1.py", "a/2.py"), ("a/1.py", "b/1.py")]))  # b -> a twice, a -> b once
+    assert backs(heavy_b) == [("a", "b")] and {label: m["column"] for label, m in by_label(heavy_b).items()} == {"b": 0, "a": 1}
+
+
+def test_what_imports_a_cycle_sits_to_its_left_and_the_cycle_is_laid_out_along_its_main_direction():
     res = architecture(mini(py("a/x.py", "b/x.py", "x/x.py"), [("a/x.py", "b/x.py"), ("b/x.py", "a/x.py"), ("x/x.py", "a/x.py")]))
+    assert {label: m["column"] for label, m in by_label(res).items()} == {"x": 0, "a": 1, "b": 2}
+    assert len(res["cycles"]) == 1 and backs(res) == [("b", "a")]
+
+
+def test_a_box_with_many_importers_is_not_pushed_left_of_what_it_imports_when_there_is_no_cycle():
+    """Ordering by import counts alone would put z before y here and call y -> z "back", though nothing loops."""
+    files = py("w/1.py", "w/2.py", "w/3.py", "w/4.py", "w/5.py", "x/x.py", "y/y.py", "z/z.py")
+    edges = [(f"w/{i}.py", "y/y.py") for i in range(1, 6)] + [("x/x.py", "y/y.py"), ("y/y.py", "z/z.py")]
+    res = architecture(mini(files, edges))
+    assert res["cycles"] == [] and backs(res) == []
     cols = {label: m["column"] for label, m in by_label(res).items()}
-    assert cols == {"x": 0, "a": 1, "b": 1} and len(res["cycles"]) == 1
+    assert cols["y"] < cols["z"] and cols["w"] < cols["y"] and cols["x"] < cols["y"]
 
 
 # ---- size limits and names ------------------------------------------------------------------------------------

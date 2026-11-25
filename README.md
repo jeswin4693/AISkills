@@ -306,6 +306,13 @@ The app now opens on a **Dashboard** instead of redirecting to the Builder. It a
 no model set up, no sandbox: worst first, with a link to each), **what do I have** (saved and versions per kind, and the versions saved most recently) and **where do I start** (Build, Read a repository, Import, Combine into a plugin). It only reads and needs no new server code. When nothing
 needs you it says what it looked at, and **a part that cannot be read says so**: it never shows zero or "nothing needs you" for something it could not check. 259 UI unit tests, the browser suite 76 of 76, 26 deliberate breaks all caught. Details and limits: [docs/dashboard.md](docs/dashboard.md).
 
+## The Testing Lab (slice AD)
+
+The **Testing Lab** page answers *does this skill really help?* (the Dashboard and Library only say a skill passed static checks). Choose a skill and a version: the page lists the test cases that would run, each check in words, and **how many model calls it will cost before it asks anything**. A run sends each test message to
+a model that has the skill and to one that does not, and **code (never a model) checks every reply**. The result says *the skill helped*, *adds nothing* (the model passes everything without it), *no difference*, *made it worse*, *too few cases*, or *no comparison*, shows **each failed check in numbers** ("the first line is 101 characters, the limit is 50") and keeps the replies. It is
+a polled run kept in the database (a reload shows it again, a second click cannot spend the quota twice), it says when a newer version exists, and **a skill that cannot be run says why**: no test cases, or it needs tools (most skills about code), which a model with no tools cannot stand in for. None of the three skills on the author's machine could be run on 2026-11-25, which is the next
+slice's job (your own test cases). 40 new backend tests (2,886 in all), 294 UI unit tests, browser suite 86 of 86, 36 deliberate breaks all caught, a real run with the configured model (3 of 3 with the skill, 1 of 3 without). Details and limits: [docs/testing-lab.md](docs/testing-lab.md).
+
 ## Run the local API (the web UI talks to it)
 
 ```powershell

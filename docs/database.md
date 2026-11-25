@@ -31,6 +31,12 @@ longer registered can still be read, listed and discarded.
 error and the error kind, the input and output tokens as the provider reported them (null when it gave none) and the
 time taken. **Never any prompt or reply text.** Deleting a session deletes its rows. See [ai-engine.md](ai-engine.md).
 
+`eval_runs` (migration 0005, [testing-lab.md](testing-lab.md)): one row per Testing Lab run: the kind, skill name and **version** it tested with that
+version's content hash (a newer version later does not change what a run is about), how many times each case was repeated, whether the same cases were also run
+without the skill, how many cases there are and how many are done (the progress the page polls), the result as plain data (the outcome as a code, the counts,
+every case with its replies and checks; replies cut at 3,000 characters), the error and whether a retry can help. Not tied to a builder session, so deleting a
+session never touches it. A run that was `working` when the server stopped is marked failed and retryable at the next start.
+
 Generated files of a session are in `<data folder>\builds\<session id>\<skill name>\` until the session is
 discarded; **saving** copies a checked version into the library.
 

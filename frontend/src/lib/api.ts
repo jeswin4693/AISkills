@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
   SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -144,6 +144,20 @@ export const api = {
   suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),
   suggestRuns: () => get<SuggestRunSummary[]>("/api/suggestions"),
   retrySuggest: (id: string) => post<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}/retry`, {}),
+
+  // ---- the Testing Lab: a skill's own test cases, run against a model with the skill and without it ----
+  /** What a run would do (the cases, the checks, the calls) or why it cannot be run. No model is asked. */
+  evalPreview: (name: string, version?: number) =>
+    get<EvalPreview>(`/api/evals/preview?name=${encodeURIComponent(name)}${version ? `&version=${version}` : ""}`),
+  startEval: (body: { name: string; version?: number; runs: number; baseline: boolean }) => post<EvalRun>("/api/evals", body),
+  evalRun: (id: string) => get<EvalRun>(`/api/evals/${encodeURIComponent(id)}`),
+  evalRuns: (name?: string, version?: number) => {
+    const q = new URLSearchParams();
+    if (name) q.set("name", name);
+    if (version) q.set("version", String(version));
+    return get<EvalRunSummary[]>(`/api/evals${q.size ? `?${q}` : ""}`);
+  },
+  retryEval: (id: string) => post<EvalRun>(`/api/evals/${encodeURIComponent(id)}/retry`, {}),
 
   // ---- evidence: the code a stored skill cites, and what changed in it ----
   evidence: (name: string, version?: number, kind?: string) =>

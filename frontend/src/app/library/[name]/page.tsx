@@ -105,6 +105,7 @@ function VersionDetails({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {previous && <ButtonLink href={withKindParam(`/library/${v.name}/diff?from=${previous.version}&to=${v.version}`, kind)}>Changes since {previous.tag}</ButtonLink>}
+          {kind === "skill" && <ButtonLink href={`/testing?name=${encodeURIComponent(v.name)}&version=${v.version}`}>Test this skill</ButtonLink>}
           <Button busy={busy === "export"} onClick={() => void exportZip()}>
             Export .zip
           </Button>

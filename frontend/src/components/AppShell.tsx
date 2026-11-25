@@ -13,6 +13,7 @@ const NAV = [
   { href: "/builder", label: "Builder", hint: "Describe what you want and build it" },
   { href: "/repository", label: "Repository", hint: "Read a repository and get ideas grounded in its code" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
+  { href: "/testing", label: "Testing Lab", hint: "Run a skill's test cases with the skill and without it" },
   { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
   { href: "/settings", label: "Settings", hint: "Choose your model and add its key" },
 ];

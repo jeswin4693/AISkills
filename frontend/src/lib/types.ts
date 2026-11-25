@@ -692,6 +692,114 @@ export interface SuggestRunSummary extends Omit<SuggestRun, "result"> {
   ideas: number;
 }
 
+// ---- the Testing Lab (docs/testing-lab.md) -------------------------------------------------------------
+
+/** What a run found, as a code the server decides (the page never parses the sentence). */
+export type EvalOutcome = "helped" | "adds_nothing" | "no_difference" | "worse" | "too_few" | "with_only" | "not_run";
+/** Why a skill cannot be run at all ("" when it can). */
+export type EvalBlocker = "" | "no_cases" | "needs_tools" | "nothing_runnable";
+
+export interface EvalCheckSpec {
+  kind: string; // contains, not_contains, starts_with, regex, max_chars, max_lines, first_line_max_chars
+  value: string;
+  why: string;
+}
+
+export interface EvalPreviewCase {
+  name: string;
+  kind: string; // positive, negative, edge
+  message: string;
+  message_cut: boolean;
+  checks: EvalCheckSpec[];
+}
+
+/** What a run of one version would do, before any model is asked. */
+export interface EvalPreview {
+  name: string;
+  kind: string;
+  version: number;
+  tag: string;
+  content_hash: string;
+  skill_tokens: number;
+  runnable: boolean;
+  blocker: EvalBlocker;
+  reason: string;
+  cases: EvalPreviewCase[];
+  skipped: string[];
+  calls: { per_run: number; per_run_with_baseline: number };
+  limits: { max_cases: number; min_cases: number; max_runs: number };
+}
+
+export interface EvalCheckResult extends EvalCheckSpec {
+  passed: boolean;
+  detail: string; // what was wrong, in numbers ("the first line is 54 characters, the limit is 50"); empty when it passed
+}
+
+export interface EvalTry {
+  reply: string;
+  cut: boolean; // the reply was longer than the server keeps
+  passed: boolean;
+  checks: EvalCheckResult[];
+}
+
+export interface EvalAttempt {
+  passed: number;
+  runs: number;
+  tries: EvalTry[];
+}
+
+export interface EvalCase {
+  name: string;
+  kind: string;
+  message: string;
+  message_cut: boolean;
+  with_skill: EvalAttempt;
+  baseline: EvalAttempt | null;
+}
+
+export interface EvalTally {
+  passed: number;
+  total: number;
+}
+
+export interface EvalResult {
+  outcome: EvalOutcome;
+  verdict: string;
+  limits: string;
+  runnable: boolean;
+  reason: string;
+  runs: number;
+  calls: number;
+  skill_tokens: number;
+  min_cases: number; // how many cases it takes before a run says whether the skill helps
+  with_skill: EvalTally;
+  baseline: EvalTally | null;
+  skipped: string[];
+  cases: EvalCase[];
+}
+
+export interface EvalRun {
+  id: string;
+  status: RunStatus;
+  kind: string;
+  name: string;
+  version: number;
+  tag: string;
+  content_hash: string;
+  runs: number;
+  baseline: boolean;
+  progress: { done: number; total: number };
+  result: EvalResult | null;
+  error: string;
+  retryable: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvalRunSummary extends Omit<EvalRun, "result"> {
+  summary: { outcome: EvalOutcome; with_skill: EvalTally; baseline: EvalTally | null; calls: number } | null;
+}
+
 /** The repository a build started from. The folder's name only: the path stays on the server. */
 export interface BuildSeed {
   repo: string;

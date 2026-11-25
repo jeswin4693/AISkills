@@ -19,7 +19,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..graph.store import data_dir
-from .models import BuildSession, Job, SuggestRun
+from .models import BuildSession, EvalRun, Job, SuggestRun
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 
@@ -86,7 +86,13 @@ class Database:
                     error="The server stopped while this was running. Retry to run it again.",
                 )
             )
-            return len(jobs) + runs.rowcount
+            tests = s.execute(
+                update(EvalRun).where(EvalRun.status == "working").values(
+                    status="failed", retryable=True, updated_at=stamp,
+                    error="The server stopped while this was running. Retry to run it again.",
+                )
+            )
+            return len(jobs) + runs.rowcount + tests.rowcount
 
     def close(self) -> None:
         self.engine.dispose()

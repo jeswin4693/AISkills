@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 import yaml
@@ -31,6 +31,7 @@ from ..results import NOT_RUN, PASSED, WARNING, CheckResult
 from .grade import AssertionResult, grade
 
 MIN_CASES = 3  # fewer runnable cases than this say too little to call a skill helpful or not
+MAX_CASES = 12  # a run asks the model about at most this many cases
 LIMITS = (
     "The tests and their checks were written by the same model that wrote the skill, only text checks were run (not "
     "facts or tone), a model with no tools stood in for an agent, and a few cases say little. Passing is evidence, not proof."
@@ -172,27 +173,47 @@ class EvalReport:
     def baseline_passed(self) -> tuple[int, int]:
         return self._count("baseline")
 
+    def outcome(self) -> str:
+        """What the run found, as a code a page can rely on (the sentence in `verdict` is written from this, never the other way round):
+
+        not_run (nothing could be run), with_only (run without the comparison, so no claim about the skill), too_few (fewer than MIN_CASES cases),
+        helped, adds_nothing (the model passes everything without the skill too), no_difference, worse."""
+        if not self.runnable or not self.cases:
+            return "not_run"
+        w, _ = self.with_passed
+        b, bn = self.baseline_passed
+        if not bn:
+            return "with_only"
+        if len(self.cases) < MIN_CASES:
+            return "too_few"
+        if w > b:
+            return "helped"
+        if w == b == self.with_passed[1]:
+            return "adds_nothing"
+        return "no_difference" if w == b else "worse"
+
     def verdict(self) -> str:
-        if not self.runnable:
-            return f"Not run: {self.reason}."
-        if not self.cases:
+        code = self.outcome()
+        if code == "not_run":
+            if not self.runnable:
+                return f"Not run: {self.reason}."
             return "Not run: " + ("; ".join(self.skipped[:3]) or "no test case has a message to send and a check to run") + "."
         w, wn = self.with_passed
         b, bn = self.baseline_passed
         with_text = f"With the skill the model passed {w} of {wn} test runs"
-        if not bn:
+        if code == "with_only":
             return f"{with_text}. {LIMITS}"
         base_text = f"without it {b} of {bn}"
-        if len(self.cases) < MIN_CASES:
+        if code == "too_few":
             head = f"Only {len(self.cases)} test case(s) could be run, too few to say whether the skill helps. {with_text}, {base_text}."
-        elif w > b:
+        elif code == "helped":
             head = f"The skill helped: {with_text}, {base_text}."
-        elif w == b == wn:
+        elif code == "adds_nothing":
             head = (
                 f"The model passed every test run without the skill too ({b} of {bn}), so on these tests the skill adds "
                 f"nothing for the {self.skill_tokens} tokens it costs each time it is used."
             )
-        elif w == b:
+        elif code == "no_difference":
             head = f"No difference on these tests: {with_text}, {base_text}."
         else:
             head = f"The skill made it WORSE on these tests: {with_text}, {base_text}."
@@ -208,28 +229,47 @@ def _ask(provider: LLMProvider, system: str, message: str) -> tuple[str, int]:
     return reply.text, used
 
 
+def blocker(skill: LoadedSkill) -> tuple[str, str]:
+    """Why nothing can be run for this skill at all, as (code, words); ("", "") when something can. The code lets a page offer the right next
+    step (a skill with no cases can be given some; one that needs tools cannot be helped here), the words are for the person."""
+    if not skill.tests:
+        return "no_cases", "this skill has no test cases (tests/cases.json), so there is nothing to run"
+    if skill.needs_tools:
+        return "needs_tools", f"{skill.name} needs tools ({skill.needs_tools}), and a model with no tools cannot stand in for an agent that has them"
+    return "", ""
+
+
+def plan_cases(skill: LoadedSkill, max_cases: int = MAX_CASES) -> tuple[list[SkillTest], list[str]]:
+    """The cases that will be run, and "name: why" for each one that will not. One function for the run and for the page that previews it,
+    so what a person is shown before a run is, by construction, what the run does."""
+    runnable: list[SkillTest] = []
+    skipped: list[str] = []
+    for test in skill.tests:
+        if not test.run_input.strip() or not test.assertions:
+            skipped.append(f"{test.name}: it has no message to send or no check to run")
+        elif len(runnable) >= max_cases:
+            skipped.append(f"{test.name}: only the first {max_cases} cases are run")
+        else:
+            runnable.append(test)
+    return runnable, skipped
+
+
 def run_eval(
-    provider: LLMProvider, skill: LoadedSkill, *, baseline: bool = True, runs: int = 1, max_cases: int = 12,
+    provider: LLMProvider, skill: LoadedSkill, *, baseline: bool = True, runs: int = 1, max_cases: int = MAX_CASES,
+    on_case: Callable[[int, int], None] | None = None,
 ) -> EvalReport:
     """Every runnable test case, asked of the model with the skill and (unless baseline=False) without it, then graded.
 
-    Needs one model call per case, per run, per condition: 3 cases x 2 conditions x 1 run = 6 calls."""
+    Needs one model call per case, per run, per condition: 3 cases x 2 conditions x 1 run = 6 calls. `on_case(done, total)` is called after
+    each case, so a page can show progress."""
     report = EvalReport(skill.name, runnable=True, runs=max(1, runs), skill_tokens=estimate_tokens(skill.text))
-    if not skill.tests:
-        report.runnable, report.reason = False, "this skill has no test cases (tests/cases.json), so there is nothing to run"
-        return report
-    if skill.needs_tools:
-        report.runnable = False
-        report.reason = f"{skill.name} needs tools ({skill.needs_tools}), and a model with no tools cannot stand in for an agent that has them"
+    _, why = blocker(skill)
+    if why:
+        report.runnable, report.reason = False, why
         return report
     system = SKILL_SYSTEM.format(skill=_clean(skill.text, "skill"))
-    for test in skill.tests:
-        if not test.run_input.strip() or not test.assertions:
-            report.skipped.append(f"{test.name}: it has no message to send or no check to run")
-            continue
-        if len(report.cases) >= max_cases:
-            report.skipped.append(f"{test.name}: only the first {max_cases} cases are run")
-            continue
+    planned, report.skipped = plan_cases(skill, max_cases)
+    for test in planned:
         case = CaseRun(test.name, test.kind, test.run_input, Attempt(), Attempt() if baseline else None)
         for condition, sys_prompt in (("with_skill", system), ("baseline", BASELINE_SYSTEM)):
             attempt: Attempt | None = getattr(case, condition)
@@ -241,6 +281,8 @@ def run_eval(
                 attempt.replies.append(text)
                 attempt.results.append(grade(test.assertions, text))
         report.cases.append(case)
+        if on_case is not None:
+            on_case(len(report.cases), len(planned))
     return report
 
 

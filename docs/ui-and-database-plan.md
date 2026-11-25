@@ -21,7 +21,7 @@ in the environment or `.env`.
 | H2 | **Database + build sessions**: tables for build sessions and jobs; the chat builder as an API (a round of questions, your answers, approval, then a background job with progress). See [database.md](database.md) and the builder part of [api.md](api.md). | yes (mock in tests; checked live with Gemini) · **Built** |
 | H3 | **UI shell + Library page**: the first screen on top of H1, so something real can be clicked early. See [ui.md](ui.md). | no · **Built** |
 | H4 | **Builder page**: describe, answer, approve, live progress, the result with traceability, save. See [ui.md](ui.md). | yes (fake model in the browser test) · **Built** |
-| H5 | Suggest and graph pages, Settings (shows only *whether* a key is set, never its value), Testing Lab and Quality Report views. | partly: the Repository page (suggestions, slice W) and **Settings (slice X, [settings.md](settings.md))** are built; the **drawn architecture map is built too (slice Z, [architecture-map.md](architecture-map.md))**; a function-level graph, the Testing Lab and the Quality Report are not |
+| H5 | Suggest and graph pages, Settings (shows only *whether* a key is set, never its value), Testing Lab and Quality Report views. | partly: the Repository page (suggestions, slice W) and **Settings (slice X, [settings.md](settings.md))** are built; the **drawn architecture map is built too (slice Z, [architecture-map.md](architecture-map.md))**; the **Testing Lab is built too (slice AD, [testing-lab.md](testing-lab.md))**; a function-level graph and the Quality Report are not |
 
 Agent Builder stays last and is not blocked by any of this.
 

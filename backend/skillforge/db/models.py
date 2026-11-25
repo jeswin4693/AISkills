@@ -81,6 +81,30 @@ class SuggestRun(Base):
     retryable: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class EvalRun(Base):
+    """One run of a skill version's test cases in the Testing Lab, polled like a build. The result is a plain view of the report, kept as data.
+
+    A run belongs to one version and says which content it tested (`content_hash`): a newer version later does not change what this run is about."""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), index=True)  # working, done, failed
+    kind: Mapped[str] = mapped_column(String(16))  # a key of skillforge.kinds (only skills can be run so far)
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64))  # of the version that was tested
+    runs: Mapped[int] = mapped_column(Integer)  # how many times each case is repeated
+    baseline: Mapped[bool] = mapped_column(Boolean)  # also run the same cases without the skill
+    cases_total: Mapped[int] = mapped_column(Integer, default=0)
+    cases_done: Mapped[int] = mapped_column(Integer, default=0)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class ModelCall(Base):
     """One HTTP attempt at a model, for the session that asked for it. Counts and timings only: never a prompt or a reply."""
 

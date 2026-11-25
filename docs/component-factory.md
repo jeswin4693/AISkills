@@ -65,7 +65,7 @@ Sizes are guesses at this repo's pace (S 1 to 2 days, M 3 to 5, L 1 to 2 weeks, 
   `validate/formats.py`: the front-matter keys Claude Code knows, read on 2026-11-20 from the skills page through a summarising fetch;
   an unknown key warns.
 
-**Not done, on purpose:** running `eval` from the web pages (it takes minutes and many model calls, the hosted version forwards
+**Not done, on purpose:** running `eval` from the web pages (**built since, as the Testing Lab, slice AD: [testing-lab.md](testing-lab.md); a polled run in its own table, so no single request is long**; the reasons it was left out then: it takes minutes and many model calls, the hosted version forwards
 `/api/*` through a rewrite that I believe cuts a request at about 30 seconds, and the `jobs` table only exists per builder session, so
 it needs a job that is not a builder session); library tabs and per-kind skill and compare pages (Phase 1, when a second kind exists
 to look at); a `--kind` flag on the command line.

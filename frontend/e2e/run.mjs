@@ -878,6 +878,137 @@ try {
     await shot(page, "38-settings-tested");
   });
 
+  console.log("The Testing Lab");
+  // Text-only skills with test cases a model can be asked, written the way the builder writes them (tests/cases.json).
+  const labCases = (firstMessage) => JSON.stringify([
+    { name: "short change", kind: "positive", input_description: "one sentence", expected_result: "a short title", covers: ["AC1"], run_input: firstMessage,
+      assertions: [{ kind: "first_line_max_chars", value: "50", why: "title at most 50 characters" }] },
+    { name: "no description", kind: "negative", input_description: "no description", expected_result: "a question", covers: ["AC1"], run_input: "commit message please",
+      assertions: [{ kind: "regex", value: "\\?|please|describe", why: "asks what changed" }] },
+    { name: "many changes", kind: "edge", input_description: "many changes", expected_result: "a short list", covers: ["AC1"], run_input: "Updated README, fixed a typo, bumped the version",
+      assertions: [{ kind: "max_lines", value: "6", why: "keeps it short" }] },
+  ]);
+  const labZip = (name, firstMessage = "fixed the login button alignment on mobile", extra = {}) => makeZip({
+    [`${name}/SKILL.md`]: `---\nname: ${name}\ndescription: Writes a short commit message from a description of what changed.\n---\n# ${name}\n\nWrite a title of at most 50 characters, starting with a verb.\n`,
+    [`${name}/README.md`]: "A demo.\n", [`${name}/tests/cases.json`]: labCases(firstMessage), ...extra,
+  });
+  // imported through the API, from the page (so the request carries the UI's own origin, as a real import does)
+  const importZip = (name, zip) => page.evaluate(async ({ api, name, b64 }) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const r = await fetch(`${api}/api/library/import?filename=${name}.zip`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: bytes });
+    return { status: r.status, body: await r.json() };
+  }, { api: API, name, b64: zip.toString("base64") });
+  const skillPicker = () => page.getByLabel("Skill", { exact: true });
+
+  await step("the menu leads to the Testing Lab, which waits for a skill", async () => {
+    for (const [name, zip] of [["lab-demo", labZip("lab-demo")]]) {
+      const r = await importZip(name, zip);
+      assert.equal(r.status, 200, `importing ${name}: ${JSON.stringify(r.body).slice(0, 300)}`);
+    }
+    await page.goto(UI + "/builder");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Testing Lab" }).click();
+    await page.waitForURL("**/testing");
+    await page.getByRole("heading", { name: "Testing Lab", level: 1 }).waitFor();
+    await skillPicker().waitFor();
+    assert.equal(await page.getByRole("button", { name: "Run the tests" }).count(), 0, "nothing can be run before a skill is chosen");
+    await shot(page, "40-lab-empty");
+  });
+  await step("a skill with no test cases says why it cannot be run, before any model is asked", async () => {
+    await skillPicker().selectOption("e2e-demo");
+    await page.getByText(/e2e-demo v\d+ cannot be run here/).waitFor();
+    await page.getByText(/this skill has no test cases/i).waitFor();
+    await page.getByText(/Build it again in the Builder/).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Run the tests" }).count(), 0, "a skill that cannot be run offers no run");
+  });
+  await step("a skill that needs tools says a model with no tools cannot stand in for an agent", async () => {
+    const names = (await page.evaluate(async (api) => (await fetch(`${api}/api/library`)).json(), API)).map((s) => s.name);
+    assert.ok(names.includes("todo-counter-e2e"), `the skill the builder saved earlier should be here, saw ${names.join(", ")}`);
+    await skillPicker().selectOption("todo-counter-e2e");
+    await page.getByText(/todo-counter-e2e v\d+ cannot be run here/).waitFor();
+    await page.getByText(/needs tools \(it asks for read_files\)/).waitFor();
+    await page.getByText(/Install it and use it for real/).waitFor();
+    await shot(page, "41-lab-needs-tools");
+  });
+  await step("a skill with runnable tests lists what would run, and says what it will cost before anything is asked", async () => {
+    await skillPicker().selectOption("lab-demo");
+    await page.getByRole("heading", { name: "What would run", level: 2 }).waitFor();
+    for (const n of ["short change", "no description", "many changes"]) await page.getByText(n, { exact: true }).first().waitFor();
+    await page.getByText("fixed the login button alignment on mobile").first().waitFor();
+    await page.getByText(/has a first line of at most 50 characters/).waitFor();
+    await page.getByText("6 model calls").waitFor();
+    await page.getByLabel("Repeat each test").selectOption("3");
+    await page.getByText("18 model calls").waitFor();
+    await page.getByLabel(/Also run without the skill/).uncheck();
+    await page.getByText("9 model calls").waitFor();
+    await page.getByLabel(/Also run without the skill/).check();
+    await page.getByLabel("Repeat each test").selectOption("1");
+    await page.getByText(/one repeat of each test can mislead/).waitFor();
+    await shot(page, "42-lab-preview");
+  });
+  await step("running shows progress, then the verdict with both sides and each failed check in words", async () => {
+    await page.getByRole("button", { name: "Run the tests" }).click();
+    await page.getByText(/Running test \d of 3/).waitFor();
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText(/With the skill:/).waitFor();
+    await page.getByText(/3 of 3 runs passed every check/).waitFor();
+    await page.getByText(/1 of 3\./).waitFor(); // without the skill the model passes only the one it passes anyway
+    await page.getByText(/the first line is \d+ characters, the limit is 50/).first().waitFor(); // the failed check, in numbers
+    await page.getByText(/the reply does not match the pattern/).first().waitFor();
+    await page.getByText("Passing is evidence, not proof").waitFor();
+    // a reply is plain text behind a disclosure: the first is the model with the skill, the second the model without it
+    await page.getByText("Show the reply").nth(0).click();
+    await page.getByText(/Fix login button alignment/).first().waitFor();
+    await page.getByText("Show the reply").nth(1).click();
+    await page.getByText(/Here is a commit message you could use/).first().waitFor();
+    await shot(page, "43-lab-result");
+  });
+  await step("after a reload the result is still there, and the run is listed under earlier runs", async () => {
+    await page.reload();
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 30000 });
+    await page.getByRole("heading", { name: "Earlier runs of this version", level: 3 }).waitFor();
+    await page.getByText("the skill helped · with the skill 3/3 · without it 1/3").waitFor();
+  });
+  await step("a skill's own page links to the Lab with its version in the address", async () => {
+    await page.goto(UI + "/library/lab-demo");
+    await page.getByRole("link", { name: "Test this skill" }).click();
+    await page.waitForURL(/\/testing\?name=lab-demo&version=1/);
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 30000 });
+  });
+  await step("a model that cannot be reached fails the run, and 'Run it again' finishes it", async () => {
+    const r = await importZip("lab-down", labZip("lab-down", "fixed the login button [lab-down]"));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    await page.goto(UI + "/testing?name=lab-down");
+    await page.getByRole("button", { name: "Run the tests" }).click();
+    await page.getByText("The run did not finish").waitFor({ timeout: 30000 });
+    await page.getByText(/could not be reached/).first().waitFor();
+    await shot(page, "44-lab-failed");
+    await page.getByRole("button", { name: "Run it again" }).click();
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 60000 });
+  });
+  await step("a result says so when a newer version of the skill exists", async () => {
+    const r = await importZip("lab-demo", labZip("lab-demo", undefined, { "lab-demo/extra.md": "More.\n" }));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    await page.goto(UI + "/testing?name=lab-demo&version=1");
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 30000 });
+    await page.getByText("A newer version exists").waitFor();
+    await page.getByText(/This run tested v1\. The latest version is v2/).waitFor();
+    // the newer version has had no run: the page does not borrow v1's result for it
+    await page.goto(UI + "/testing?name=lab-demo");
+    await page.getByRole("button", { name: "Run the tests" }).waitFor();
+    assert.equal(await page.getByText("The skill helped", { exact: true }).count(), 0, "v2 was never run, so no verdict may be shown for it");
+    assert.equal(await page.getByRole("heading", { name: "Earlier runs of this version" }).count(), 0);
+  });
+  await step("the Lab never makes the page scroll sideways at phone width", async () => {
+    await page.goto(UI + "/testing?name=lab-demo&version=1");
+    await page.getByText("The skill helped", { exact: true }).waitFor({ timeout: 30000 });
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the Lab makes the page scroll sideways by ${overflow}px`);
+    await shot(page, "45-lab-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+
   console.log("The dashboard");
   const attentionCard = () => page.getByRole("heading", { name: "Needs attention", level: 2 }).locator("xpath=..");
   await step("the dashboard lists what is saved and the latest builds, and is reached from the menu", async () => {

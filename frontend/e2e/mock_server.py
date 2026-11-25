@@ -7,6 +7,7 @@ only fills a checklist item when the person's words really contain it, the way a
 Markers in the person's words steer the scenarios:
   [model-down]  the model fails once ("unreachable"), then works: the builder shows a retryable failure
   [draft]       the design has no test covering the acceptance criterion, so the skill is a DRAFT
+  [lab-down]    in a Testing Lab test message: the model fails once ("unreachable"), then works
 The model counts as "not set up" until the file named by E2E_MODEL_FLAG exists, like a missing .env.
 Run with PYTHONPATH set to the backend folder and SKILLFORGE_DATA_DIR set to a throwaway folder.
 """
@@ -27,6 +28,7 @@ from skillforge.build.models import Extraction, IOField, SkillDraft, SkillTest, 
 from skillforge.builder import Builder, JobRunner
 from skillforge.builder import github
 from skillforge.db import Database
+from skillforge.evaluate import Reply
 from skillforge.guide.models import GuideDraft, JourneyDraft, PartDraft, StepDraft
 from skillforge.library import Library
 from skillforge.providers import MockProvider, ProviderError
@@ -141,10 +143,32 @@ def guide_draft() -> GuideDraft:
     )
 
 
+lab_down_once = {"used": False}
+
+
+def lab_reply(prompt: str, system: str | None) -> Reply:
+    """The model answering one message of the Testing Lab. It does better with the skill than without it, like the skill is meant to make it
+    (the real commit-message result of docs/evaluate.md): without it the title is too long and it never asks what changed. A message marked
+    [lab-down] makes the model fail once ("unreachable"), then work."""
+    if "[lab-down]" in prompt and not lab_down_once["used"]:
+        lab_down_once["used"] = True
+        raise ProviderError("The model could not be reached (simulated by the test).")
+    with_skill = "<skill>" in (system or "")
+    if "fixed the login" in prompt:
+        if with_skill:
+            return Reply(text="Fix login button alignment\n\nThe button was misaligned on small screens.")
+        return Reply(text="Here is a commit message you could use: fix(login): align the login button properly on mobile screens")
+    if "commit message please" in prompt:
+        return Reply(text="What changed? Please describe the change in a sentence." if with_skill else "Sure! Here is a commit message: update stuff")
+    return Reply(text="Update docs and release tooling")  # the third test is one the model passes with or without the skill
+
+
 def respond(schema, prompt, system):
     time.sleep(DELAY)
     if schema is Ping:  # the Settings page's "Test my models"
         return Ping(reply="ok")
+    if schema is Reply:  # a Testing Lab message
+        return lab_reply(prompt, system)
     if schema is GuideDraft:
         return guide_draft()
     if schema is Extraction:

@@ -63,6 +63,6 @@ nothing tested that a very long reason from the model or the sandbox is cut to 2
 ## Limits (said plainly)
 
 * **It reads everything in the browser, on every visit**, including a rescan of the whole library (it only reads; nothing is run or changed). That is fine for a personal library and would not suit hundreds of skills. A server-side summary would be the next step then.
-* **"Checked" means today's static checks** (the same ones the skill page's rescan runs), not that a skill works: that is what the Testing Lab (not built yet) is for.
+* **"Checked" means today's static checks** (the same ones the skill page's rescan runs), not that a skill works: that is what the Testing Lab ([testing-lab.md](testing-lab.md)) is for. The Dashboard does not show a skill's test results yet.
 * Not a history: nothing is saved, charted or compared over time.
 * No sandbox is a *To do* with no link: it cannot be fixed from a page (see docs/sandbox-wsl.md).

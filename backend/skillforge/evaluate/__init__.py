@@ -2,10 +2,11 @@
 
 from .grade import Assertion, AssertionResult, assertion_problem, check_assertion, grade
 from .runner import (
-    LIMITS, Attempt, CaseRun, EvalReport, LoadedSkill, Reply, eval_checks, load_files, needs_tools_reason, run_eval,
+    LIMITS, MAX_CASES, MIN_CASES, Attempt, CaseRun, EvalReport, LoadedSkill, Reply, blocker, eval_checks, load_files, needs_tools_reason,
+    plan_cases, run_eval,
 )
 
 __all__ = [
-    "Assertion", "AssertionResult", "Attempt", "CaseRun", "EvalReport", "LIMITS", "LoadedSkill", "Reply", "assertion_problem",
-    "check_assertion", "eval_checks", "grade", "load_files", "needs_tools_reason", "run_eval",
+    "Assertion", "AssertionResult", "Attempt", "CaseRun", "EvalReport", "LIMITS", "LoadedSkill", "MAX_CASES", "MIN_CASES", "Reply",
+    "assertion_problem", "blocker", "check_assertion", "eval_checks", "grade", "load_files", "needs_tools_reason", "plan_cases", "run_eval",
 ]

@@ -34,6 +34,7 @@ from ..library.evidence import evidence_focus, recheck_version
 from ..sandbox import probe_sandbox
 from ..settings import EnvSettings, default_settings
 from .builds import builds_router
+from .evals import evals_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .plugins import plugins_router
 from .repos import repos_router
@@ -317,6 +318,7 @@ def create_app(
 
     api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
+    api.include_router(evals_router())
     api.include_router(repos_router())
     api.include_router(settings_router())
     api.include_router(plugins_router())

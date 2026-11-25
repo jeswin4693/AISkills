@@ -33,6 +33,7 @@ from ..library import ImportReport, Library, LibraryError, import_skill
 from ..providers import LLMProvider, ProviderError
 from ..validate.static import read_dir
 from .errors import BadRequest, BuilderError, SessionNotFound, WrongState
+from .evals import EvalRuns
 from .jobs import JobRunner
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
@@ -71,6 +72,11 @@ class Builder:
     def suggestions(self) -> SuggestRuns:
         """Suggestion runs for a repository, sharing this builder's database, job runner and model."""
         return SuggestRuns(self.db, self.runner, self.provider_factory)
+
+    @property
+    def evals(self) -> EvalRuns:
+        """Testing Lab runs: a skill's test cases asked of a model in the background, sharing this builder's database, job runner, model and library."""
+        return EvalRuns(self.db, self.runner, self.provider_factory, self.library)
 
     def close(self) -> None:
         self.runner.shutdown()

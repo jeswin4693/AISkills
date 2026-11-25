@@ -104,4 +104,4 @@ the skill, so the skill adds nothing there. The first run of the same build said
 - **It measures what the seven checks can express.** Format, length and required or forbidden words. Not facts, not tone.
 - **It is not a Claude Code run.** The test that matters most is still installing the skill and using it for real.
 - Skills saved before this step have no messages or checks: they are reported "not run", and a rebuild gives them tests.
-- The Builder page in the browser cannot ask for `--eval` yet (the command line can). Running it from the Library page is not built.
+- The Builder page in the browser cannot ask for `--eval` yet (the command line can). **The Testing Lab page runs a saved skill's tests in the browser** (slice AD, [testing-lab.md](testing-lab.md)): it shows what would run and what it costs before asking, keeps the result, and says when a newer version exists.

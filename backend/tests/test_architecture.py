@@ -151,6 +151,20 @@ def test_a_language_whose_imports_are_never_mapped_to_files_is_not_measured_even
     assert only["measured"] is False and any("not measured" in n and "csharp" in n for n in only["notes"])
 
 
+def test_every_import_link_the_graph_makes_today_is_proven_so_no_guess_can_be_drawn(graph):
+    """The docs say `left_out.guess` is 0 today because every import link the graph makes is `resolved`. This pins that claim on real graphs, with
+    an import that could mean either of two files: if a language ever makes a guessed import link, this fails and the docs need a second look."""
+    g = graph({
+        "pkg/__init__.py": "", "pkg/a.py": "from pkg.b import f\nfrom . import c\nimport util\n", "pkg/b.py": "def f():\n    return 1\n",
+        "pkg/c.py": "x = 1\n", "util.py": "y = 2\n", "other/util.py": "z = 3\n",  # `import util` could be either file
+        "web/app.ts": "import { h } from './lib';\nimport { q } from 'somepackage';\n", "web/lib.ts": "export const h = 1;\n",
+        "j/A.java": "package j;\nimport j.B;\nclass A {}\n", "j/B.java": "package j;\nclass B {}\n",
+    })
+    imports = [e for e in g.edges if e.kind == "imports"]
+    assert len(imports) >= 3 and {e.conf for e in imports} == {"resolved"}
+    assert architecture(g)["left_out"]["guess"] == 0
+
+
 def test_every_other_language_whose_imports_are_mapped_to_files_stays_measured():
     for lang in ("python", "typescript", "tsx", "javascript", "java", "kotlin", "go", "rust", "c", "cpp", "ruby", "php"):
         res = architecture(mini({f"A/x.{lang}": lang, f"B/y.{lang}": lang}))

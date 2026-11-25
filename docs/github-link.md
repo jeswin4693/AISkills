@@ -60,10 +60,10 @@ where, and how many.** No `git` program is run and no key is needed.
 
 ## Checked
 
-* **Backend** (`tests/test_github_link.py`, 182 tests, all offline: a fake download and in-memory hostile archives stand in for GitHub): the strict link list, the download limits and the redirect policy,
+* **Backend** (`tests/test_github_link.py`, 186 tests, all offline: a fake download and in-memory hostile archives stand in for GitHub): the strict link list, the download limits and the redirect policy,
   hostile archives (a path that leaves the folder, links and devices, Windows device names, invisible characters, a zip bomb, too many files, a file whose name differs only in case), snapshots (reuse, replace,
-  prune, simultaneous requests, Windows holding a folder for a moment), and the whole pipeline (read, a suggestion run, a build with evidence, a recheck). The whole backend suite: **2,524 passed, 3 skipped** (symbolic links).
-* **Frontend:** unit tests for the link rules and the "where it came from" lines (214 UI unit tests in all, typecheck clean). The real-browser run has two behaviours for links. It was re-run on 2026-11-25 on the final code of this
+  prune, simultaneous requests, Windows holding a folder for a moment), and the whole pipeline (read, a suggestion run, a build with evidence, a recheck). The whole backend suite: **2,529 passed, 3 skipped** (symbolic links).
+* **Frontend:** unit tests for the link rules and the "where it came from" lines (216 UI unit tests in all, typecheck clean). The real-browser run has two behaviours for links. It was re-run on 2026-11-25 on the final code of this
   slice (**60 of 60** before slice Z, **64 of 64** with it, on free ports with a scripted fake download), which closes the re-run this slice still owed.
 * **A real run against the real GitHub (2026-11-23):** this repository's public link read **257 source files (2.3 MB) in 7 seconds** and the graph matched the local counts (198 Python, 25 TypeScript, 27 TSX files); a second read
   a moment later reused the copy in 0.4 seconds. A repository with no source, a branch that does not exist, an owner that does not exist, another site and a link with a login each gave a plain message. No `.git` or half-made folder
@@ -87,9 +87,11 @@ where, and how many.** No `git` program is run and no key is needed.
 | 4 | A long but valid name made `mkdir` fail with an unexplained 500 whose message held the data folder's path. | The hashed names remove the cause; any disk error while storing a copy is now a plain message with no path (the details go to the server's log). |
 | (note) | The temporary folder was 2 characters **shorter** than the final one, and a test asserted that, which is the unsafe direction (a path that fits the shorter one may not fit the longer). | The temporary folder is now at least as long as the final one, and the test asserts that. |
 
-**Found, not fixed (Minor, listed so they are not forgotten):** the 120-second limit is checked between 64 KB reads, so a server that sends a byte every few seconds could hold a worker (only codeload over TLS could do it); a Content-Length written
-with a superscript digit passes `isdigit()` and then crashes `int()` (a 500 from an odd header); after the 200 MB budget is spent, later entries are still decompressed before being skipped, so a crafted 80 MB zip of identical files costs about 77 seconds
-of CPU (local use only). **Not reproduced, kept as open risks:** pruning can delete a copy another request is reading (no reference counting across repositories), and a data folder inside a git work tree lets `git ls-files` and `git log` see the parent
+**Three Minor findings, fixed afterwards (each test first, then broken on purpose):** (a) the 120-second limit was checked between 64 KB reads, so a server that sent a byte every few seconds could hold a worker for hours (only codeload over TLS could do
+it): the download now reads whatever has arrived (`read1`), so the deadline is looked at after every receive, and a test with a real HTTP response trickling bytes over a socket pair ends at the deadline instead of after the whole body; (b) a Content-Length
+written with a superscript digit passed `isdigit()` and then crashed `int()` (a 500 from an odd header): only plain ASCII digits count now; (c) after the 200 MB budget was spent, later entries were still decompressed before being skipped, so a crafted
+80 MB zip of identical files cost about 77 seconds of CPU (local use only): every decompressed byte now counts, skipped entries included, and a read never goes past the room that is left, so at most the budget plus one byte is ever decompressed (a test counts
+both the entries opened and the bytes read). **Not reproduced, still open risks:** pruning can delete a copy another request is reading (no reference counting across repositories), and a data folder inside a git work tree lets `git ls-files` and `git log` see the parent
 repository. The reviewer also noted, and left alone, that the page's TypeScript link reader accepts forms the server refuses (the server decides, so the only effect is a later error).
 
 ## What is not here

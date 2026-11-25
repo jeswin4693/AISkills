@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowSentences, boxSubtitle, cycleSentences, drawnArrows, layoutMap, mapNotes, MAX_DRAWN_ARROWS, shortLabel } from "./architecture";
+import { arrowSentences, boxSubtitle, cycleSentences, drawnArrows, layoutMap, loopMarks, mapNotes, MAX_DRAWN_ARROWS, shortLabel } from "./architecture";
 import type { Architecture, ArchModule } from "./types";
 
 const box = (id: string, label: string, column: number, over: Partial<ArchModule> = {}): ArchModule => ({
@@ -163,6 +163,26 @@ describe("shortLabel", () => {
   it("leaves markup-like text as plain text (the page escapes it, this does not rewrite it)", () => {
     expect(shortLabel("<b>x</b>")).toBe("<b>x</b>");
     expect(Array.from(shortLabel("<script>alert(1)</script>")).length).toBeLessThanOrEqual(18);
+  });
+});
+
+describe("loopMarks", () => {
+  it("marks every folder of a loop, and separately the ones at the ends of an arrow that closes it", () => {
+    // a loop m0 -> m1 -> m2 -> m0: only m2 -> m0 points back, so the folder in the middle is in the loop but at the end of no back arrow
+    const modules = [box("m0", "a", 0), box("m1", "b", 1), box("m2", "c", 2), box("m3", "d", 3)];
+    const arrows = [
+      { from: "m0", to: "m1", count: 1, back: false }, { from: "m1", to: "m2", count: 1, back: false }, { from: "m2", to: "m0", count: 1, back: true },
+      { from: "m2", to: "m3", count: 1, back: false },
+    ];
+    const marks = loopMarks(arch({ modules, arrows, cycles: [["m0", "m1", "m2"]], columns: 4 }));
+    expect([...marks.inLoop].sort()).toEqual(["m0", "m1", "m2"]);
+    expect([...marks.closes].sort()).toEqual(["m0", "m2"]);
+  });
+
+  it("marks nothing when nothing loops", () => {
+    const marks = loopMarks(arch());
+    expect(marks.inLoop.size).toBe(0);
+    expect(marks.closes.size).toBe(0);
   });
 });
 

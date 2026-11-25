@@ -59,14 +59,14 @@ page: `frontend/src/components/repository/ArchitectureMap.tsx` with the layout i
 
 ## Checked
 
-**Tests (2026-11-25).** Backend: 2,524 pass in all after the review's fixes (2,513 before them; 3 skipped: this account cannot create symbolic links), 26 of them new for this slice: 25 in `tests/test_architecture.py`
+**Tests (2026-11-25).** Backend: 2,529 pass in all after the review's fixes and the Minor fixes (2,513 before them; 3 skipped: this account cannot create symbolic links), 27 of them new for this slice: 26 in `tests/test_architecture.py`
 (graphs built by hand, so a guess link, a test file that imports, a language whose imports are not read, a hundred folders and a folder called `(root)` are exact) and one in
-`tests/test_repository_api.py` (a real repository through the real `analyze` route, with no path in the answer). UI: 214 unit tests, 27 of them new
+`tests/test_repository_api.py` (a real repository through the real `analyze` route, with no path in the answer). UI: 216 unit tests, 29 of them new
 (`lib/architecture.test.ts`), and a clean typecheck. Browser: the real-Edge suite is **64 of 64** on free ports (60 before this slice, which was also the re-run slice Y still owed, plus
 four map steps: the map with its cycle warning and no path on the page, a click and the keyboard with the faded arrows counted, the arrows as a list, and phone width with no sideways
 scroll; the GitHub step now also checks that a flat repository says it is one box). The screenshots were read by eye.
 
-**Deliberate breaks: 33, all caught (and 12 more on the review's fixes, also all caught).** Eighteen on the page's code (shortening a label, the width clamp, the dashed arrows, the frame margin, opposite arrows on one curve, an arrow
+**Deliberate breaks: 33, all caught (and 12 more on the review's fixes and 7 on the Minor fixes after it, also all caught).** Eighteen on the page's code (shortening a label, the width clamp, the dashed arrows, the frame margin, opposite arrows on one curve, an arrow
 ending at the wrong edge, overlapping boxes, the cycle-name cut, the `tests` tag, the base folder note, the imports-only note, no reordering, no arrow cap, the weakest arrows drawn
 instead of the strongest, and four on the zoom-in hint and the hidden-arrow count) and fifteen on the backend (a guess drawn as proven, test imports drawn, every box "measured",
 no back arrows, a box id equal to its name, no cap on boxes, arrows inside a folder, the order inside a loop ignoring the weights, loops taken sinks first, unsorted arrows, a level
@@ -92,8 +92,10 @@ graph had zero back arrows and every arrow pointed right), arrow direction is ri
 **One Important finding, reproduced and fixed test-first:** C# is a `standard` language but its imports are never turned into file links, so a C# solution was drawn as folders that depend on nothing and the page said "No imports
 between folders were found". Boxes now say "imports not measured" for it, the answer lists `imports_not_read`, and a test pins that every language whose imports *are* mapped stays measured (so nothing is over-excluded). The fix was broken on purpose
 (C# counted as measured again; the note not written) and both breaks are caught.
-**Found, not fixed (Minor):** in a loop of three or more folders the box in the middle gets no `⇄` mark although the warning names it (the mark is drawn from the back arrows, which is a design choice the page does not explain);
-`left_out.guess` is always 0 today (now said above). **Not reached by the reviewer:** the page at phone width and real keyboard focus (both were checked by me in the browser suite), and the Linux and macOS case rules.
+**Two Minor findings, fixed afterwards:** in a loop of three or more folders the box in the middle got no `⇄` mark although the warning named it (the mark was drawn from the back arrows only). Now **every folder of a loop gets the `⇄` mark**, and only the
+folders at the ends of a back arrow (the arrows that close the loop) keep the warning outline, so a repository where most folders are tangled together does not turn into a wall of warnings (`loopMarks` in `lib/architecture.ts`, unit-tested and broken on purpose);
+and `left_out.guess` is always 0 today, which was only said in prose: a test now builds real graphs (Python, TypeScript and Java, with an `import util` that could mean either of two files) and asserts that **every import link the graph makes is proven**, so if a
+language ever makes a guessed link that test fails and this document needs a second look. **Not reached by the reviewer:** the page at phone width and real keyboard focus (both were checked by me in the browser suite), and the Linux and macOS case rules.
 
 **Not verified:** macOS and Linux; a very large repository (the work is linear in files and edges and nothing was timed on a huge one); a screen reader (boxes are buttons with
 names and keyboard use, and the arrows have a text list, but it was not tried); any browser but Edge.

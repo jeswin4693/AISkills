@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
-import { arrowSentences, boxSubtitle, cycleSentences, layoutMap, mapNotes, shortLabel } from "@/lib/architecture";
+import { arrowSentences, boxSubtitle, cycleSentences, layoutMap, loopMarks, mapNotes, shortLabel } from "@/lib/architecture";
 import { plural } from "@/lib/format";
 import type { Architecture } from "@/lib/types";
 import { Alert, Badge, Card } from "../ui";
@@ -20,7 +20,7 @@ export function ArchitectureMap({ architecture: arch }: { architecture: Architec
   if (!arch || !layout || arch.modules.length === 0) return null;
 
   const selected = sel && sel.arch === arch ? arch.modules.find((m) => m.id === sel.id) : undefined;
-  const inCycle = new Set(arch.arrows.filter((a) => a.back).flatMap((a) => [a.from, a.to])); // the boxes at either end of an import that closes a loop
+  const marks = loopMarks(arch); // ⇄ for every folder in a loop; the warning outline only where an import that closes a loop starts or ends
   const boxAt = new Map(layout.boxes.map((b) => [b.id, b]));
   const cycles = cycleSentences(arch);
   const pick = (id: string) => setSel({ arch, id });
@@ -119,11 +119,11 @@ export function ArchitectureMap({ architecture: arch }: { architecture: Architec
                   height={b.h}
                   rx={8}
                   strokeWidth={isSelected ? 3 : 1.5}
-                  className={`fill-surface group-focus-visible:stroke-accent ${isSelected ? "stroke-accent" : inCycle.has(m.id) ? "stroke-warn" : "stroke-border"}`}
+                  className={`fill-surface group-focus-visible:stroke-accent ${isSelected ? "stroke-accent" : marks.closes.has(m.id) ? "stroke-warn" : "stroke-border"}`}
                 />
                 <text x={b.x + 12} y={b.y + 22} className="fill-text text-[13px] font-semibold">
                   {shortLabel(m.label)}
-                  {inCycle.has(m.id) ? " ⇄" : ""}
+                  {marks.inLoop.has(m.id) ? " ⇄" : ""}
                 </text>
                 <text x={b.x + 12} y={b.y + 40} className="fill-muted text-[11px]">
                   {files} · {lines}

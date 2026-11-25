@@ -868,7 +868,7 @@ def test_a_snapshot_can_be_asked_for_by_its_own_name_however_new_the_newest_is(t
 
 def test_asking_for_a_snapshot_that_is_gone_gives_the_newest_and_says_which_it_is(tmp_path):
     fetch, clock = Fetcher(), Tick()
-    first = snap(tmp_path, fetch=fetch, clock=clock)
+    first = newest = snap(tmp_path, fetch=fetch, clock=clock)
     for _ in range(3):
         clock.t += 100
         newest = snap(tmp_path, fetch=fetch, clock=clock, fresh=True)
@@ -899,3 +899,89 @@ def test_a_build_says_so_when_the_copy_its_idea_was_made_from_is_no_longer_kept(
     session = env.get(finished(env, from_run=rid, idea=1))
     assert session["status"] == "done" and session["result"]["evidence"]["places"] == 1  # the place is still in the newer copy
     assert any("no longer kept" in n for n in session["notes"])
+
+
+# ---- the review's Minor findings (2026-11-25), fixed afterwards, each as a test that failed before -----------------------------
+
+
+def test_a_server_that_sends_one_byte_at_a_time_cannot_hold_the_download_past_its_deadline(monkeypatch):
+    """The deadline was checked between 64 KB reads, and a read of 64 KB waits until they have all come: a byte every few seconds held a
+    worker for hours. A real HTTP response over a socket pair stands in for the slow server."""
+    import http.client
+    import socket
+
+    monkeypatch.setattr(gh, "DEADLINE", 0.5)
+    server, client = socket.socketpair()
+    body = b"PK" + chr(3).encode() + chr(4).encode() + b"x" * 20
+
+    def trickle():
+        try:
+            server.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n")
+            for byte in body:
+                time.sleep(0.25)
+                server.sendall(bytes([byte]))
+        except OSError:
+            pass
+
+    threading.Thread(target=trickle, daemon=True).start()
+    client.settimeout(5)
+    response = http.client.HTTPResponse(client)
+    response.begin()
+    started = time.monotonic()
+    try:
+        with pytest.raises(UpstreamError, match="too long"):
+            gh.download(URL, opener=Opener(response))
+        assert time.monotonic() - started < 2.5  # the whole body would take 6 seconds
+    finally:
+        server.close()
+        client.close()
+
+
+def test_a_content_length_that_is_not_plain_digits_is_ignored_not_a_crash():
+    """`str.isdigit()` is true for a superscript two, and `int()` then raises: an odd header was a 500."""
+    data = zip_of(SRC)
+    assert gh.download(URL, opener=Opener(Resp(data, length=chr(0xB2)))) == data
+
+
+def count_entries_opened(monkeypatch) -> list[int]:
+    """One item for every archive entry that gets decompressed."""
+    opened: list[int] = []
+    real_open = zipfile.ZipFile.open
+
+    def counting(self, *args, **kwargs):
+        opened.append(1)
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", counting)
+    return opened
+
+
+def test_entries_are_not_decompressed_once_the_byte_budget_is_spent(tmp_path, monkeypatch):
+    """After the 200 MB budget was spent every later entry was still decompressed (up to 1 MB each) and only then skipped: about 77 seconds
+    of CPU for a crafted 80 MB zip of identical files. Now what has been decompressed counts, skipped entries included."""
+    monkeypatch.setattr(gh, "MAX_UNPACKED", 3500)
+    data = zip_of({f"f{i:02d}.py": "x" * 1000 for i in range(50)})  # built first: writing a zip opens entries too
+    opened = count_entries_opened(monkeypatch)
+    out = gh.extract_sources(data, tmp_path / LEAF)
+    assert out.files == 3 and out.skipped == {"limit": 47}
+    assert len(opened) == 4  # three written, one that did not fit in the room left, and nothing after it
+
+
+def test_entries_that_each_just_do_not_fit_cannot_make_it_read_on(tmp_path, monkeypatch):
+    """The other way to waste the budget: leave a little of it and send entries that each just do not fit. Each is read only up to the room
+    that is left, and what is read counts, so the first of them ends the reading."""
+    monkeypatch.setattr(gh, "MAX_UNPACKED", 3500)
+    data = zip_of({f"a{i}.py": "x" * 1000 for i in range(3)} | {f"big{i:02d}.py": "y" * 900 for i in range(40)})
+    opened = count_entries_opened(monkeypatch)
+    decompressed: list[int] = []
+    real_read = zipfile.ZipExtFile.read
+
+    def counting_read(self, n=-1):
+        chunk = real_read(self, n)
+        decompressed.append(len(chunk))
+        return chunk
+
+    monkeypatch.setattr(zipfile.ZipExtFile, "read", counting_read)
+    out = gh.extract_sources(data, tmp_path / LEAF)
+    assert out.files == 3 and out.skipped == {"limit": 40} and len(opened) == 4
+    assert sum(decompressed) <= 3500 + 1  # never more than the budget, plus the one byte that shows an entry did not fit

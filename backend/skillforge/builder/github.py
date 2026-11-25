@@ -208,13 +208,16 @@ def download(url: str, *, opener=None, clock=time.monotonic) -> bytes:
     try:
         with response:
             length = response.headers.get("Content-Length")
-            if length and length.isdigit() and int(length) > MAX_DOWNLOAD:
+            if length and length.isascii() and length.isdigit() and int(length) > MAX_DOWNLOAD:  # isdigit() alone accepts a superscript two, which int() refuses
                 raise BadRequest(_too_large())
             deadline = clock() + DEADLINE
+            # read1 gives back whatever has arrived (at least one byte), so the deadline is looked at after every receive; read(n) waits until
+            # n bytes have come, and a server sending one byte every few seconds could hold this for hours.
+            read = getattr(response, "read1", None) or response.read
             while True:
                 if clock() > deadline:
                     raise UpstreamError("The download took too long and was stopped.")
-                chunk = response.read(CHUNK)
+                chunk = read(CHUNK)
                 if not chunk:
                     break
                 total += len(chunk)
@@ -312,7 +315,7 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
         dest.mkdir(parents=True, exist_ok=True)
         base = dest.resolve()
         seen: set[str] = set()
-        files = written = 0
+        files = written = read_bytes = 0  # written: bytes kept; read_bytes: every byte decompressed, kept or not
         for info in infos:
             if info.filename.endswith("/"):
                 continue  # a folder entry
@@ -340,16 +343,21 @@ def extract_sources(data: bytes, dest: Path) -> Extracted:
             if files >= MAX_FILES:
                 skip("limit")
                 continue
+            if read_bytes >= MAX_UNPACKED:  # decompressing is the cost, and it counts for entries that are then skipped too: stop reading
+                skip("limit")
+                continue
+            room = MAX_UNPACKED - written
             try:
                 with archive.open(info) as handle:
-                    body = handle.read(MAX_FILE + 1)  # what the header says is not trusted
+                    body = handle.read(min(MAX_FILE, room) + 1)  # what the header says is not trusted; and never more than there is room for
             except (zipfile.BadZipFile, RuntimeError, OSError, EOFError):
                 skip("unreadable")
                 continue
+            read_bytes += len(body)
             if len(body) > MAX_FILE:
                 skip("too_large")
                 continue
-            if written + len(body) > MAX_UNPACKED:
+            if len(body) > room:
                 skip("limit")
                 continue
             target = dest.joinpath(*parts)

@@ -190,6 +190,21 @@ export function boxSubtitle(m: Architecture["modules"][number]): string {
   return parts.join(" · ");
 }
 
+export interface LoopMarks {
+  /** Every folder that takes part in a loop (the ones the warning names): they get the ⇄ mark. */
+  inLoop: Set<string>;
+  /** The folders at either end of an arrow that points back, which closes a loop: they get the warning outline. In a repository where most folders
+   * are tangled together that is far fewer than the ones in a loop, so the picture does not turn into a wall of warnings. */
+  closes: Set<string>;
+}
+
+export function loopMarks(arch: Architecture): LoopMarks {
+  return {
+    inLoop: new Set(arch.cycles.flat()),
+    closes: new Set(arch.arrows.filter((a) => a.back).flatMap((a) => [a.from, a.to])),
+  };
+}
+
 function labels(arch: Architecture): Map<string, string> {
   return new Map(arch.modules.map((m) => [m.id, m.label]));
 }

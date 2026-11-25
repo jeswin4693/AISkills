@@ -593,6 +593,7 @@ try {
     await page.getByText(/Nothing was run\./).waitFor();
     await page.getByText(/Git history is not downloaded/).waitFor();
     await page.getByText(/3 files/).first().waitFor();
+    await page.getByText("Everything sits in one place, so the map is a single box.").waitFor(); // a flat repository: one box, said plainly
     const text = await page.locator("main").innerText();
     assert.ok(!text.includes(scratch) && !text.includes("codeload"), "the page must not show where the copy is kept");
     await shot(page, "30b-github-link");
@@ -667,6 +668,60 @@ try {
     await page.getByRole("button", { name: "Recheck" }).click();
     await page.getByText("Missing 1").waitFor();
     await page.getByText(/not that the skill's advice is right/).waitFor(); // every report says what it does not check
+  });
+
+  console.log("The architecture map");
+  const mapDir = path.join(scratch, "shop-map"); // folders that import each other: web -> api, and api <-> pricing
+  const writeMap = (name, text) => {
+    fs.mkdirSync(path.dirname(path.join(mapDir, name)), { recursive: true });
+    fs.writeFileSync(path.join(mapDir, name), text);
+  };
+  writeMap("pricing/__init__.py", "");
+  writeMap("pricing/core.py", "def tax():\n    return 1\n");
+  writeMap("pricing/audit.py", "from api.routes import route\n\ndef audit():\n    return route()\n");
+  writeMap("api/__init__.py", "");
+  writeMap("api/routes.py", "from pricing.core import tax\n\ndef route():\n    return tax()\n");
+  writeMap("web/app.py", "from api.routes import route\n\ndef page():\n    return route()\n");
+  const mapBox = (name) => page.getByRole("button", { name: new RegExp(`^${name}:`) });
+  await step("reading a repository with folders draws its map: boxes, arrows, and a warning for folders that import each other", async () => {
+    await page.goto(UI + "/repository");
+    await page.getByRole("heading", { name: "Repository", level: 1 }).waitFor();
+    await folderBox().fill(mapDir);
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "How the code is laid out" }).waitFor();
+    for (const name of ["web", "api", "pricing"]) await mapBox(name).waitFor();
+    await page.getByText("Folders that import each other").waitFor();
+    await page.getByText(/api and pricing import each other/).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the map must not show the folder's path");
+    await shot(page, "34m-architecture-map");
+  });
+  await step("clicking a box shows what is inside it, and the keyboard works too", async () => {
+    await page.getByText("Select a box to see what is inside it.").waitFor();
+    await mapBox("pricing").click();
+    await page.getByRole("heading", { name: "Inside pricing", level: 3 }).waitFor();
+    await page.getByText("pricing/core.py").first().waitFor();
+    const faded = () => page.locator('svg path[data-faded="true"]').count();
+    assert.equal(await faded(), 1, "with pricing selected only web -> api is not one of its arrows, so one arrow fades");
+    await mapBox("web").focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("heading", { name: "Inside web", level: 3 }).waitFor();
+    await page.getByText("web/app.py").first().waitFor();
+    assert.equal(await faded(), 2, "with web selected, the two arrows between api and pricing fade");
+  });
+  await step("the arrows can also be read as a list", async () => {
+    await page.getByText("The arrows as a list").click();
+    await page.getByText(/web imports api \(\d+ file pairs?\)/).waitFor();
+    await page.getByText(/api imports pricing \(\d+ file pairs?\)/).waitFor();
+    await page.getByText(/pricing imports api \(\d+ file pairs?\)/).waitFor();
+  });
+  await step("the map never makes the page scroll sideways at phone width", async () => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the map makes the page scroll sideways by ${overflow}px`);
+    await mapBox("api").scrollIntoViewIfNeeded();
+    await shot(page, "34n-architecture-map-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
   });
 
   console.log("The settings");

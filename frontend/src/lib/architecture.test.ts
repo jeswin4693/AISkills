@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowSentences, boxSubtitle, cycleSentences, layoutMap, mapNotes, shortLabel } from "./architecture";
+import { arrowSentences, boxSubtitle, cycleSentences, drawnArrows, layoutMap, mapNotes, MAX_DRAWN_ARROWS, shortLabel } from "./architecture";
 import type { Architecture, ArchModule } from "./types";
 
 const box = (id: string, label: string, column: number, over: Partial<ArchModule> = {}): ArchModule => ({
@@ -36,6 +36,7 @@ describe("layoutMap", () => {
       { from: "m0", to: "m1", count: 9, back: false }, { from: "m1", to: "m2", count: 1, back: false },
       { from: "m6", to: "m12", count: 40, back: false }, // same column: arcs on the right
       { from: "m5", to: "m0", count: 2, back: true }, // backwards
+      { from: "m5", to: "m11", count: 3, back: false }, { from: "m11", to: "m5", count: 1, back: true }, // the last column: its arcs need room on the right
     ];
     const l = layoutMap(arch({ modules, arrows, columns: 6 }));
     for (const b of l.boxes) {
@@ -81,6 +82,46 @@ describe("layoutMap", () => {
     expect(arrow("m1", "m0").cycle).toBe(true);
     expect(arrow("m2", "m0").cycle).toBe(true);
     expect(arrow("m0", "m2").cycle).toBe(false);
+  });
+
+  it("orders the boxes inside a column so arrows cross less: a box sits near the boxes it is connected to", () => {
+    const modules = [box("m0", "a", 0), box("m1", "b", 0), box("m2", "x", 1), box("m3", "y", 1)]; // by name x comes before y
+    const arrows = [{ from: "m0", to: "m3", count: 1, back: false }, { from: "m1", to: "m2", count: 1, back: false }]; // a -> y and b -> x would cross
+    const l = layoutMap(arch({ modules, arrows, columns: 2 }));
+    const at = (id: string) => l.boxes.find((b) => b.id === id)!;
+    expect(at("m3").y).toBeLessThan(at("m2").y); // y, which a points at, is above x, which b points at
+    expect(at("m0").y).toBeLessThan(at("m1").y); // the column that was already in order is left alone
+  });
+
+  it("keeps the answer's order for boxes that are not connected to anything", () => {
+    const modules = [box("m0", "a", 0), box("m1", "b", 0), box("m2", "c", 0)];
+    const l = layoutMap(arch({ modules, arrows: [], columns: 1 }));
+    const ys = ["m0", "m1", "m2"].map((id) => l.boxes.find((b) => b.id === id)!.y);
+    expect(ys).toEqual([...ys].sort((p, q) => p - q));
+  });
+
+  it("draws at most 36 arrows, the strongest, and keeps the rest for the list", () => {
+    const modules = Array.from({ length: 12 }, (_, i) => box(`m${i}`, `f${i}`, i % 4));
+    const arrows = Array.from({ length: 50 }, (_, i) => ({ from: `m${i % 12}`, to: `m${(i * 5 + 3) % 12}`, count: 50 - i, back: false })).filter((a) => a.from !== a.to);
+    const drawnCounts = layoutMap(arch({ modules, arrows, columns: 4 })).arrows.map((a) => a.count);
+    expect(MAX_DRAWN_ARROWS).toBe(36);
+    expect(drawnCounts).toHaveLength(Math.min(36, arrows.length));
+    expect(drawnArrows(arch({ modules, arrows, columns: 4 })).length).toBe(drawnCounts.length);
+    const left = arrows.map((a) => a.count).filter((c) => !drawnCounts.includes(c));
+    expect(Math.min(...drawnCounts)).toBeGreaterThan(Math.max(...left));
+  });
+
+  it("keeps an arrow and the one going the other way between the same two boxes apart, so both can be seen", () => {
+    const pair = (columns: [number, number]) =>
+      layoutMap(arch({
+        modules: [box("m0", "a", columns[0]), box("m1", "b", columns[1])],
+        arrows: [{ from: "m0", to: "m1", count: 1, back: false }, { from: "m1", to: "m0", count: 1, back: true }],
+        columns: 2,
+      }));
+    for (const l of [pair([0, 1]), pair([0, 0])]) {
+      const [there, back] = l.arrows;
+      expect(Math.hypot(there.x - back.x, there.y - back.y)).toBeGreaterThanOrEqual(8); // their middles are not in the same place
+    }
   });
 
   it("makes an arrow thicker as its count grows, but never thinner than 1.5 or thicker than 8", () => {
@@ -168,6 +209,31 @@ describe("the words under the picture", () => {
     expect(mixed.join("\n")).toContain("folders inside src/");
     const none = mapNotes(arch({ measured: false, language_levels: { swift: "basic" }, notes: ["Imports are not measured for any language here (swift), so no arrows are drawn."] }));
     expect(none.filter((n) => n.includes("not measured"))).toHaveLength(1);
+  });
+
+  it("points at a folder that holds most of the code, with the exact text to type to zoom in", () => {
+    const big = arch({ base: "src", modules: [box("m0", "api", 0, { files: 60 }), box("m1", "db", 0, { files: 10 })], arrows: [] });
+    expect(mapNotes(big).join("\n")).toContain('api holds 86% of the files. To see how it is laid out, type src/api in "Only this folder inside it"');
+    const flat = arch({ modules: [box("m0", "api", 0, { files: 60 }), box("m1", "db", 0, { files: 10 })], arrows: [] });
+    expect(mapNotes(flat).join("\n")).toContain("type api in");
+  });
+
+  it("gives no zoom-in hint when no folder dominates, the repository is small, or the big box is not one folder", () => {
+    expect(mapNotes(arch()).join("\n")).not.toContain("holds");
+    expect(mapNotes(arch({ modules: [box("m0", "a", 0, { files: 10 }), box("m1", "b", 0, { files: 1 })], arrows: [] })).join("\n")).not.toContain("holds");
+    const folded = arch({ modules: [box("m0", "(other: 9 more)", 0, { files: 60, kind: "other" }), box("m1", "db", 0, { files: 10 })], arrows: [] });
+    expect(mapNotes(folded).join("\n")).not.toContain("holds");
+    const top = arch({ modules: [box("m0", "(root)", 0, { files: 60, kind: "root" }), box("m1", "db", 0, { files: 10 })], arrows: [] });
+    expect(mapNotes(top).join("\n")).not.toContain("holds");
+  });
+
+  it("says how many weaker arrows are not drawn, only when some are left out", () => {
+    expect(mapNotes(arch()).join("\n")).not.toContain("weaker");
+    const modules = Array.from({ length: 12 }, (_, i) => box(`m${i}`, `f${i}`, i % 4));
+    const arrows = Array.from({ length: 50 }, (_, i) => ({ from: `m${i % 12}`, to: `m${(i * 5 + 3) % 12}`, count: 50 - i, back: false })).filter((a) => a.from !== a.to);
+    const notes = mapNotes(arch({ modules, arrows, columns: 4 })).join("\n");
+    expect(notes).toContain(`${arrows.length - 36} weaker arrows are not drawn`);
+    expect(notes).toContain("The arrows as a list");
   });
 
   it("explains dashed arrows only when there are some", () => {

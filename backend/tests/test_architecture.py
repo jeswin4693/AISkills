@@ -93,7 +93,8 @@ def test_a_shallow_repository_is_shown_one_level_deeper():
 
 
 def test_a_repository_with_enough_top_folders_stays_at_the_top():
-    res = architecture(mini(py(*[f"f{i}/x/a.py" for i in range(1, 7)])))
+    """Six top folders is enough. A level deeper would give twelve boxes, so a search that never stops early would pick it."""
+    res = architecture(mini(py(*[f"f{i}/{sub}/a.py" for i in range(1, 7) for sub in ("x", "y")])))
     assert sorted(by_label(res)) == [f"f{i}" for i in range(1, 7)]
 
 

@@ -65,26 +65,35 @@ export function ArchitectureMap({ architecture: arch }: { architecture: Architec
             <marker id={`${marker}-cycle`} viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
               <path d="M0 0 L10 5 L0 10 z" className="fill-warn" />
             </marker>
+            <marker id={`${marker}-active`} viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+              <path d="M0 0 L10 5 L0 10 z" className="fill-accent" />
+            </marker>
           </defs>
 
-          {layout.arrows.map((a) => (
-            <g key={`${a.from}>${a.to}`}>
-              <path
-                d={a.d}
-                fill="none"
-                strokeWidth={a.width}
-                strokeDasharray={a.cycle ? "6 4" : undefined}
-                markerEnd={`url(#${marker}-${a.cycle ? "cycle" : "head"})`}
-                className={a.cycle ? "stroke-warn" : "stroke-muted"}
-                opacity={0.8}
-              />
-              {a.count > 1 && (
-                <text x={a.x} y={a.y} textAnchor="middle" dominantBaseline="central" paintOrder="stroke" strokeWidth={4} className="fill-text stroke-bg text-[10px]">
-                  {a.count}
-                </text>
-              )}
-            </g>
-          ))}
+          {layout.arrows.map((a) => {
+            // With a box selected, its arrows stand out and every other arrow fades: a dense map can be read one box at a time.
+            const related = !selected || a.from === selected.id || a.to === selected.id;
+            const active = !!selected && related && !a.cycle;
+            return (
+              <g key={`${a.from}>${a.to}`}>
+                <path
+                  d={a.d}
+                  fill="none"
+                  strokeWidth={a.width}
+                  strokeDasharray={a.cycle ? "6 4" : undefined}
+                  markerEnd={`url(#${marker}-${a.cycle ? "cycle" : active ? "active" : "head"})`}
+                  className={a.cycle ? "stroke-warn" : active ? "stroke-accent" : "stroke-muted"}
+                  opacity={related ? 0.85 : 0.1}
+                  data-faded={!related}
+                />
+                {a.count > 1 && related && (
+                  <text x={a.x} y={a.y} textAnchor="middle" dominantBaseline="central" paintOrder="stroke" strokeWidth={4} className="fill-text stroke-bg text-[10px]">
+                    {a.count}
+                  </text>
+                )}
+              </g>
+            );
+          })}
 
           {arch.modules.map((m) => {
             const b = boxAt.get(m.id);

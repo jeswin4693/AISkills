@@ -9,6 +9,7 @@ import { StatusPanel } from "./StatusPanel";
 import { Loading } from "./ui";
 
 const NAV = [
+  { href: "/", label: "Dashboard", hint: "What needs you, and what you have" },
   { href: "/builder", label: "Builder", hint: "Describe what you want and build it" },
   { href: "/repository", label: "Repository", hint: "Read a repository and get ideas grounded in its code" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
@@ -24,7 +25,7 @@ function Shell({ children }: { children: ReactNode }) {
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="border-b border-border bg-surface md:sticky md:top-0 md:h-dvh md:overflow-y-auto md:border-r md:border-b-0">
         <div className="flex flex-col gap-4 p-4 md:h-full">
-          <Link href="/builder" className="flex items-center gap-2 font-semibold tracking-tight">
+          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
             <span aria-hidden className="grid size-7 place-items-center rounded-md bg-accent text-sm text-accent-fg">
               S
             </span>

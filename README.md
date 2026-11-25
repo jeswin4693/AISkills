@@ -300,6 +300,12 @@ GitHub link (a downloaded copy now also keeps README and doc files, best first),
 **One independent review** (no Critical, 3 Important and 5 Minor findings, all fixed), **57 deliberate breaks, all caught**, and **real runs with a real model on this repository** that found three defects no mock showed (a hop "confirmed" by the browser test's fake server,
 a hop with 1 import one way and 6 the other shown as plain "confirmed", and documents chosen alphabetically). Details, rules and limits: [docs/how-it-works.md](docs/how-it-works.md).
 
+## The Dashboard (slice AC)
+
+The app now opens on a **Dashboard** instead of redirecting to the Builder. It answers three questions on one screen: **does anything need me** (a stored skill that fails checks today or whose files are damaged, a build waiting for your answers, a failed or unsaved draft,
+no model set up, no sandbox: worst first, with a link to each), **what do I have** (saved and versions per kind, and the versions saved most recently) and **where do I start** (Build, Read a repository, Import, Combine into a plugin). It only reads and needs no new server code. When nothing
+needs you it says what it looked at, and **a part that cannot be read says so**: it never shows zero or "nothing needs you" for something it could not check. 259 UI unit tests, the browser suite 76 of 76, 26 deliberate breaks all caught. Details and limits: [docs/dashboard.md](docs/dashboard.md).
+
 ## Run the local API (the web UI talks to it)
 
 ```powershell

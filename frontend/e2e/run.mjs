@@ -156,12 +156,16 @@ try {
   const alert = (re) => page.locator('[role="alert"], [role="status"]').filter({ hasText: re }).first();
 
   console.log("The front door");
-  await step("/ opens the builder, and the status panel finds the API", async () => {
+  await step("/ opens the dashboard, which says the model is not set up and nothing is saved yet, and the status panel finds the API", async () => {
     await page.goto(UI + "/");
-    await page.waitForURL("**/builder");
-    await page.getByRole("heading", { name: "Build a skill", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Dashboard", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Needs attention", level: 2 }).waitFor();
+    await page.getByText("No AI model is set up").waitFor(); // this test server starts with no model, like a missing .env
+    await page.getByText("Nothing saved yet").waitFor();
+    await page.getByText("No builds yet").waitFor();
     await page.getByText(/online · v/).waitFor();
     await page.getByText("Linux, ready").waitFor({ timeout: 30000 }).catch(() => {}); // the sandbox may be absent on another machine
+    await shot(page, "00-dashboard-empty");
   });
   await step("the sidebar leads to the library", async () => {
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Library" }).click();
@@ -872,6 +876,77 @@ try {
     await page.getByRole("button", { name: "Test my models" }).click();
     await page.getByText("Works", { exact: true }).waitFor();
     await shot(page, "38-settings-tested");
+  });
+
+  console.log("The dashboard");
+  const attentionCard = () => page.getByRole("heading", { name: "Needs attention", level: 2 }).locator("xpath=..");
+  await step("the dashboard lists what is saved and the latest builds, and is reached from the menu", async () => {
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Dashboard" }).click();
+    await page.waitForURL(UI + "/");
+    await page.getByRole("heading", { name: "Dashboard", level: 1 }).waitFor();
+    await page.getByRole("heading", { name: "Your library", level: 2 }).waitFor();
+    await page.getByText(/\d+ saved · \d+ versions?/).first().waitFor();
+    await page.getByText("Saved most recently").waitFor();
+    // the top of that list is whatever the API says was saved last, across every kind (not a fixed name: other steps saved newer things)
+    const kindsList = await page.evaluate(async (api) => (await fetch(`${api}/api/kinds`)).json(), API);
+    const saved = [];
+    for (const k of kindsList) {
+      const query = k.key === "skill" ? "" : `?kind=${k.key}`;
+      const skills = await page.evaluate(async (url) => (await fetch(url)).json(), `${API}/api/library${query}`);
+      for (const s of skills) if (s.latest) saved.push({ kind: k.key, name: s.name, at: s.latest.created_at });
+    }
+    saved.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.name.localeCompare(b.name)));
+    assert.ok(saved.length >= 1, "the library should hold something by now");
+    const newest = saved[0];
+    await page.locator(`a[href="/library/${encodeURIComponent(newest.name)}${newest.kind === "skill" ? "" : `?kind=${newest.kind}`}"]`).first().waitFor();
+    const recentLinks = await page.getByText("Saved most recently").locator("xpath=following-sibling::ul[1]//a").count();
+    assert.ok(recentLinks >= 1 && recentLinks <= 5, `the recent list shows 1 to 5 versions, saw ${recentLinks}`);
+    await page.getByRole("heading", { name: "Recent builds", level: 2 }).waitFor();
+    assert.ok((await page.locator('a[href^="/builder/"]').count()) >= 1, "the recent builds link to their sessions");
+    await page.getByRole("link", { name: "Build something" }).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the dashboard must not show any path");
+    await shot(page, "36-dashboard");
+  });
+  await step("it says either what needs the person or that nothing does, and every unfinished build is on the list", async () => {
+    const list = await page.evaluate(async (api) => (await fetch(`${api}/api/builds`)).json(), API);
+    const unfinished = list.filter((b) => ["awaiting_answers", "awaiting_approval", "failed"].includes(b.status) || (b.status === "done" && !b.saved));
+    const nothing = await page.getByText("Nothing needs you right now.").count();
+    const items = await attentionCard().locator("li").count();
+    assert.ok(nothing + items > 0, "the dashboard must say what needs the person, or that nothing does");
+    if (unfinished.length > 0 && unfinished.length <= 8) {
+      for (const b of unfinished) await attentionCard().locator(`a[href="/builder/${b.id}"]`).first().waitFor();
+    }
+    await page.getByRole("button", { name: "Check again" }).click();
+    await attentionCard().waitFor();
+  });
+  await step("a library that cannot be read is said so and is never shown as zero", async () => {
+    const errorsBefore = problems.length;
+    await page.route(/\/api\/library\?kind=agent$/, (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "The agent library is on fire." }) }));
+    await page.route(/\/api\/rescan\?kind=agent$/, (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "No rescan today." }) }));
+    await page.goto(UI + "/");
+    await page.getByText("could not be read", { exact: true }).waitFor();
+    await page.getByText("The agent library is on fire.").waitFor();
+    await page.getByText("Something could not be checked").first().waitFor();
+    await page.getByText(/agent library could not be run: No rescan today\./).waitFor();
+    assert.equal(await page.getByText("Nothing needs you right now.").count(), 0, "a check that could not run must not become 'nothing needs you'");
+    const agentRow = page.locator("li").filter({ has: page.getByRole("link", { name: "Agent", exact: true }) }).first();
+    assert.ok(!(await agentRow.innerText()).includes("0 saved"), "an unreadable library is not an empty one");
+    await page.unroute(/\/api\/library\?kind=agent$/);
+    await page.unroute(/\/api\/rescan\?kind=agent$/);
+    // the two 500s above were put there on purpose, so the browser's console reports them: take exactly those out of the suite's list of problems
+    const mine = problems.splice(errorsBefore);
+    assert.ok(mine.length === 2 && mine.every((p) => /status of 500/.test(p)), `expected exactly the two deliberate 500s, saw: ${JSON.stringify(mine)}`);
+    await page.goto(UI + "/");
+    await page.getByRole("heading", { name: "Your library", level: 2 }).waitFor();
+    assert.equal(await page.getByText("could not be read", { exact: true }).count(), 0, "the page recovers when the API does");
+  });
+  await step("the dashboard never makes the page scroll sideways at phone width", async () => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the dashboard makes the page scroll sideways by ${overflow}px`);
+    await shot(page, "36n-dashboard-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
   });
 
   console.log("Looks and behaviour");

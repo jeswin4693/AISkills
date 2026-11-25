@@ -82,7 +82,7 @@ Choices worth knowing:
 
 ## Limits
 
-- **The Testing Lab and the Quality Report views are not built yet** (the rest of H5). The Repository page shows numbers and lists and, since slice Z, a drawn map of the repository's folders and the imports between them ([architecture-map.md](architecture-map.md)) and, since slice AB, a guide to how the project works read from its README ([how-it-works.md](how-it-works.md)); a function-level graph is not drawn.
+- **The Dashboard is built** (slice AC, [dashboard.md](dashboard.md): the home page, what needs you, what you have, where to start). **The Testing Lab and the Quality Report views are not built yet** (the rest of H5). The Repository page shows numbers and lists and, since slice Z, a drawn map of the repository's folders and the imports between them ([architecture-map.md](architecture-map.md)) and, since slice AB, a guide to how the project works read from its README ([how-it-works.md](how-it-works.md)); a function-level graph is not drawn.
 - **The Builder's automated browser test uses a fake model**, so it is repeatable and needs no key. The real thing was
   checked by hand with `node e2e/live.mjs` (real API, real model from your `.env`, real Edge): on 2026-11-19, with
   Gemini (`gemini-3.5-flash-lite`), one sentence, one round of five questions, approval, build and save took about

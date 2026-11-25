@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -37,6 +39,96 @@ from .validate import validate_skill_dir
 from .validate.static import read_dir
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+# ---- a repository given as the link of a public GitHub repository (docs/cli-github-links.md) ---------------------------------
+
+
+class RepoError(Exception):
+    """A repository argument that could not be read: a link that is refused, a repository GitHub does not have, GitHub out of reach.
+    It is said as one line, `error: ...`, with exit code 2."""
+
+
+_LINKISH = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")  # the builder's own check (builder/github.py), repeated here so a folder does not import the builder
+
+
+def _looks_like_link(text: str) -> bool:
+    lowered = text.strip().lower()
+    return bool(_LINKISH.match(text.strip())) or lowered.startswith(("github.com/", "www.github.com/")) or lowered in ("github.com", "www.github.com")
+
+
+# what the page says too, in words: why files of a downloaded repository were left out
+_LEFT_OUT = {
+    "not_source": ("file in a language or format the graph does not read", "files in languages or formats the graph does not read"),
+    "ignored_dir": ("file in a folder such as node_modules", "files in folders such as node_modules"),
+    "too_large": ("file over 1 MB", "files over 1 MB"),
+    "link": ("link or special file", "links or special files"),
+    "unsafe_name": ("file with a name that cannot be written safely", "files with names that cannot be written safely"),
+    "duplicate": ("file whose name repeats another's", "files whose names repeat another's"),
+    "limit": ("file over the size or count limit", "files over the size or count limit"),
+    "path_too_long": ("path too long for this disk", "paths too long for this disk"),
+    "unwritable": ("file this disk could not hold", "files this disk could not hold"),
+    "unreadable": ("unreadable file", "unreadable files"),
+}
+
+
+def _source_lines(view: dict[str, Any], now: float | None = None) -> list[str]:
+    """What a person is told about a repository read from a link: where it came from, how old the copy is, what was left out, and that git
+    history is missing. `view` is `builder.repository.source_view(...)` of a link."""
+    from datetime import datetime, timezone
+
+    where = f"branch {view['ref']}" if view.get("ref") else "default branch"
+    files = view["files"]
+    if view["reused"]:
+        taken = datetime.strptime(view["fetched_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+        minutes = max(0, int(((time.time() if now is None else now) - taken) // 60))
+        age = f"a copy from {minutes} minute{'' if minutes == 1 else 's'} ago" if minutes else "a copy from a moment ago"
+    else:
+        age = "downloaded just now"
+    lines = [f"Read {view['owner']}/{view['repo']} from GitHub ({where}): {files} source file{'' if files == 1 else 's'} kept ({view['bytes'] / 1_000_000:.1f} MB), {age}."]
+    left = [f"{n} {_LEFT_OUT[reason][0 if n == 1 else 1]}" for reason, n in sorted(view["skipped"].items(), key=lambda kv: list(_LEFT_OUT).index(kv[0]) if kv[0] in _LEFT_OUT else 99) if n]
+    if left:
+        lines.append("Left out: " + ", ".join(left) + ".")
+    lines.append("Nothing was run. Git history is not downloaded, so facts that come from it (how often a file changes) are missing.")
+    return lines
+
+
+def _repo_arg(text: str | None, *, fresh: bool = False, extra: str = "") -> str | None:
+    """The folder to read for a repository argument. A folder (or nothing) is returned as it was typed and costs nothing; the link of a public
+    GitHub repository is downloaded (the page's own code and limits: `resolve_repo`), a note about it goes to stderr (stdout stays what the command
+    prints), and the folder of the copy is returned. `fresh` downloads again instead of reusing a young copy. A link that is refused, or
+    GitHub being out of reach, is a `RepoError`."""
+    if not text:
+        return None
+    if not _looks_like_link(text):
+        return text
+    from .builder.errors import BuilderError
+    from .builder.repository import resolve_repo, source_view
+
+    try:
+        found = resolve_repo(text, fresh=fresh)
+    except BuilderError as exc:
+        raise RepoError(str(exc)) from None
+    view = source_view(found)
+    if view["kind"] != "github":
+        return str(found.folder)
+    for line in [*_source_lines(view), *([extra] if extra else [])]:
+        print(line, file=sys.stderr)
+    return str(found.folder)
+
+
+def _link_label(text: str | None) -> str | None:
+    """`owner/repo` (and the branch) for a link, None for a folder: what `graph stats` shows instead of the folder of the downloaded copy."""
+    if not text or not _looks_like_link(text):
+        return None
+    from .builder.errors import BuilderError
+    from .builder.github import parse_link
+
+    try:
+        link = parse_link(text)
+    except BuilderError:
+        return None
+    return None if link is None else link.name + (f" (branch {link.ref})" if link.ref else "")
 
 
 def _loc(item: dict[str, Any]) -> str:
@@ -185,7 +277,7 @@ def provider_from_env() -> LLMProvider:
 
 def _run_suggest(args: argparse.Namespace) -> int:
     load_dotenv(REPO_ROOT / ".env")  # real environment variables win over the file
-    g = build_graph(args.repo, focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
+    g = build_graph(_repo_arg(args.repo), focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
     if args.facts_only:
         facts = collect_facts(g)
         print(json.dumps([f.__dict__ for f in facts], indent=2) if args.json else _render_facts(facts))
@@ -825,7 +917,7 @@ def _run_library(args: argparse.Namespace) -> int:
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("repo", help="path of the repository to analyse")
+    p.add_argument("repo", help="path of the repository to analyse, or the link of a public GitHub repository (https://github.com/owner/repo)")
     p.add_argument("--focus", help="only analyse this folder of the repository")
     p.add_argument("--no-cache", action="store_true", help="do not read or write the parse cache")
     p.add_argument("--no-history", action="store_true", help="do not read git history")
@@ -1008,14 +1100,15 @@ def main(argv: list[str] | None = None) -> int:
         except NeedAnswers as exc:
             print(_need_answers_message(exc), file=sys.stderr)
             return 2
-        except (ProviderError, BuildError, LibraryError, query.QueryError, NotADirectoryError, OSError, ValueError, PlanError) as exc:
+        except (ProviderError, BuildError, LibraryError, query.QueryError, NotADirectoryError, OSError, ValueError, PlanError, RepoError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     try:
-        g = build_graph(args.repo, focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
+        g = build_graph(_repo_arg(args.repo), focus=args.focus, use_cache=not args.no_cache, with_history=not args.no_history)
         cmd = args.command
         if cmd == "stats":
             result, render = query.stats(g), _render_stats
+            result["root"] = _link_label(args.repo) or result["root"]  # a link shows owner/repo, not the folder its copy is kept in
         elif cmd == "symbols":
             result, render = query.search_symbols(g, args.text), _render_symbols
         elif cmd in ("callers", "callees"):
@@ -1034,7 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
             render = _render_duplicates
         else:
             result, render = query.dead_candidates(g), _render_dead
-    except (query.QueryError, NotADirectoryError) as exc:
+    except (query.QueryError, NotADirectoryError, RepoError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2) if args.json else render(result))

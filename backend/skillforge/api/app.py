@@ -37,6 +37,7 @@ from .builds import builds_router
 from .evals import evals_router
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .plugins import plugins_router
+from .quality import quality_router
 from .repos import repos_router
 from .settings import settings_router
 from .security import LocalOnlyMiddleware, allowed_origins
@@ -319,6 +320,7 @@ def create_app(
     api.include_router(auth_router(hosted, LoginGuard()))
     api.include_router(builds_router())
     api.include_router(evals_router())
+    api.include_router(quality_router())
     api.include_router(repos_router())
     api.include_router(settings_router())
     api.include_router(plugins_router())

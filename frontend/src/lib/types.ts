@@ -890,3 +890,89 @@ export interface CasesView {
   };
   cases: CaseDoc[];
 }
+
+// ---- the Quality Report (docs/quality-report.md) -------------------------------------------------------
+
+/** What a library check did since the skill was imported. "run_now": a design check, run today, that was never kept with the version. */
+export type QualityChange = "same" | "worse" | "better" | "new" | "run_now";
+
+export interface QualityRow {
+  name: string;
+  status: CheckStatus;
+  detail: string;
+  was: CheckStatus | null;
+  change: QualityChange;
+}
+
+export interface QualityGroup {
+  key: "library" | "design" | "written";
+  title: string;
+  rows: QualityRow[];
+}
+
+export interface QualityCriterion {
+  id: string;
+  text: string;
+  tests: string[];
+  runnable: number;
+}
+
+export interface QualityRun {
+  id: string;
+  tag: string;
+  outcome: EvalOutcome;
+  with_skill: EvalTally;
+  baseline: EvalTally | null;
+  calls: number;
+  runs: number;
+  created_at: string;
+}
+
+export interface QualityLab {
+  state: "this_version" | "older_version" | "never_run" | "running" | "failed";
+  run: QualityRun | null; // a run of THIS version
+  other: QualityRun | null; // the newest run of another version, only when this one has none
+  error?: string;
+}
+
+export type QualityLink = { page: "lab"; version: number } | { page: "skill" } | { page: "compare"; from: number; to: number } | null;
+
+export interface QualitySuggestion {
+  kind: "fix" | "write" | "run" | "read" | "shorten";
+  text: string;
+  link: QualityLink;
+}
+
+export interface QualityReport {
+  name: string;
+  version: number;
+  tag: string;
+  latest: boolean;
+  versions: number;
+  created_at: string;
+  source_kind: string;
+  source_label: string;
+  note: string;
+  content_hash: string;
+  headline: { failed: number; warnings: number; not_run: number; passed: number };
+  attention: { tone: "bad" | "warn" | "info"; text: string };
+  groups: QualityGroup[];
+  requirements: {
+    source: "definition" | "spec" | "none";
+    criteria: QualityCriterion[];
+    uncovered: string[];
+    unknown_cites: { test: string; ids: string[] }[];
+  };
+  tests: { total: number; runnable: number; blocker: EvalBlocker; reason: string; skipped: string[] };
+  tokens: { always: number; when_used: number; on_demand: number; heavy: string[] };
+  lab: QualityLab;
+  changes: {
+    from: string; to: string; from_version: number; to_version: number; level: "more_risk" | "look" | "less_risk" | "no_new_risk"; note: string;
+    counts: { riskier: number; look: number; safer: number }; items: { direction: string; kind: string; detail: string; path: string }[]; more: number;
+  } | null;
+  evidence: { repo: string; places: number; taken_at: string; commit: string | null; dirty: boolean } | null;
+  suggestions: QualitySuggestion[];
+  suggestions_more: number;
+  not_run: { what: string; why: string }[];
+  limits: string[];
+}

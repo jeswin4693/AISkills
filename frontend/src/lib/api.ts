@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, CasesView, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
   SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -158,6 +158,9 @@ export const api = {
     return get<EvalRunSummary[]>(`/api/evals${q.size ? `?${q}` : ""}`);
   },
   retryEval: (id: string) => post<EvalRun>(`/api/evals/${encodeURIComponent(id)}/retry`, {}),
+  /** Today's checks on one version, the requirement against its tests, the cost, the Lab's result, what did not run, and what to do next. A GET: no model, nothing run. */
+  qualityReport: (name: string, version?: number) =>
+    get<QualityReport>(`/api/library/${encodeURIComponent(name)}/quality${version ? `?version=${version}` : ""}`),
   /** Every test case of a skill version, the ones that cannot be run too (so they can be fixed). */
   skillCases: (name: string, version?: number) =>
     get<CasesView>(`/api/library/${encodeURIComponent(name)}/tests${version ? `?version=${version}` : ""}`),

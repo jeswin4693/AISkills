@@ -1131,6 +1131,92 @@ try {
     await page.setViewportSize({ width: 1280, height: 900 });
   });
 
+  console.log("The Quality Report");
+  const reportSkill = () => page.getByLabel("Skill", { exact: true });
+  const pillTexts = () => page.getByLabel("What the checks found").locator("span").allInnerTexts();
+  await step("the menu leads to the Quality Report, which waits for a skill", async () => {
+    await page.goto(UI + "/builder");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Quality Report" }).click();
+    await page.waitForURL("**/quality");
+    await page.getByRole("heading", { name: "Quality Report", level: 1 }).waitFor();
+    await reportSkill().waitFor();
+    assert.equal(await page.getByRole("heading", { name: "What to do next" }).count(), 0, "nothing is reported before a skill is chosen");
+    await shot(page, "50-quality-empty");
+  });
+  await step("a skill built here: its checks are run again in three groups, and the headline counts exactly the rows listed", async () => {
+    await reportSkill().selectOption("todo-counter-e2e");
+    await page.getByRole("heading", { name: /todo-counter-e2e v\d+/, level: 2 }).waitFor();
+    for (const title of ["What to do next", "The checks, run again today", "The requirement and its tests", "What it costs to use", "The Testing Lab", "What did not run", "What this report cannot tell you"]) {
+      await page.getByRole("heading", { name: title, level: 2 }).waitFor();
+    }
+    for (const g of ["Library checks: structure and safety", "Design checks: instruction clarity and requirement coverage", "The written files against the requirement"]) {
+      await page.getByRole("heading", { name: g, level: 3 }).waitFor();
+    }
+    // the headline is the server's count; the list is what the page drew: they must be the same number
+    const pills = await pillTexts();
+    const total = pills.reduce((n, t) => n + Number(/^(\d+)/.exec(t)?.[1] ?? 0), 0);
+    const listed = await page.locator('section[aria-labelledby="checks-heading"] li').count();
+    assert.equal(listed, total, `the headline counts ${total} checks but ${listed} are listed`);
+    assert.ok(total > 15, `a built skill has the library's checks and the builder's: saw ${total}`);
+    await page.getByText(/acceptance criteri(on|a): \d+ with a test, \d+ without/).waitFor();
+    await page.getByText(/About \d+ tokens always loaded/).waitFor();
+    await shot(page, "51-quality-built");
+  });
+  await step("the page never calls a skill safe or good, and says what did not run", async () => {
+    // the verdict is the banner and the headline: they must never say safe or good. (The page does contain the word, in its own disclaimers and in the
+    // real check "the approved requirement reached SKILL.md", so the whole page is not what is tested.)
+    const banner = await page.locator('[role="alert"], [role="status"]').filter({ hasText: /A problem|Worth a look|Nothing found by what ran/ }).first().innerText();
+    const verdict = banner + " " + (await pillTexts()).join(" ");
+    assert.ok(!/\bsafe\b|\bgood\b|approved|all clear|no problems/i.test(verdict), `the verdict must not claim safety: ${verdict}`);
+    assert.match(banner, /Nothing found by what ran|Worth a look|A problem/);
+    await page.getByText("Scripts run in a sandbox.").waitFor();
+    await page.getByText("A real agent using the skill.").waitFor();
+    await page.getByText(/not proof that a skill works or that it is safe/).waitFor();
+  });
+  await step("a skill that was not built here says its design checks could not run, and why", async () => {
+    await reportSkill().selectOption("e2e-demo");
+    await page.getByRole("heading", { name: /e2e-demo v\d+/, level: 2 }).waitFor();
+    await page.getByText(/this skill has no definition file \(skill\.sdm\.json\), so it was not built here/).first().waitFor();
+    await page.getByText(/No requirement is recorded for this skill/).waitFor();
+    const pills = await pillTexts();
+    assert.ok(pills.some((t) => /^[1-9]\d* not run$/.test(t)), `the headline must count what did not run: ${pills.join(" | ")}`);
+  });
+  await step("the Testing Lab's result belongs to the version it ran on, and a newer version is not given it", async () => {
+    await page.goto(UI + "/quality?name=lab-demo"); // the latest: v2, which was never run (only v1 was)
+    await page.getByText(/Only v1 was run in the Testing Lab \(the skill helped\)\. This version has not been\./).waitFor({ timeout: 30000 });
+    await page.goto(UI + "/quality?name=lab-demo&version=1");
+    await page.getByText("The Testing Lab ran v1: the skill helped (with the skill 3/3 · without it 1/3).").waitFor({ timeout: 30000 });
+  });
+  await step("a suggestion leads to where to act, and the changes since the previous version are shown with a link to compare", async () => {
+    await page.goto(UI + "/quality?name=lab-demo");
+    const suggestion = page.getByText(/Only v1 was run in the Testing Lab\. Run this version too\./);
+    await suggestion.waitFor({ timeout: 30000 });
+    await page.getByRole("heading", { name: "Changes since v1", level: 2 }).waitFor();
+    await page.getByRole("link", { name: "Compare v1 and v2" }).waitFor();
+    await suggestion.locator("xpath=..").getByRole("link", { name: "Open" }).click();
+    await page.waitForURL(/\/testing\?name=lab-demo&version=2/);
+    await page.goto(UI + "/quality?name=lab-demo&version=1");
+    await page.getByRole("heading", { name: /lab-demo v1/, level: 2 }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: /Changes since/ }).count(), 0, "the first version has nothing before it");
+  });
+  await step("the skill's own page has a Quality report button that opens that version", async () => {
+    await page.goto(UI + "/library/e2e-demo");
+    // exact: the menu also has a "Quality Report" link, which is there before the skill's own page has loaded its button
+    await page.getByRole("link", { name: "Quality report", exact: true }).click();
+    await page.waitForURL(/\/quality\?name=e2e-demo&version=\d+/);
+    await page.getByRole("heading", { name: /e2e-demo v\d+/, level: 2 }).waitFor();
+  });
+  await step("the report never makes the page scroll sideways at phone width", async () => {
+    await page.goto(UI + "/quality?name=todo-counter-e2e");
+    await page.getByRole("heading", { name: "What this report cannot tell you", level: 2 }).waitFor({ timeout: 30000 });
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the report makes the page scroll sideways by ${overflow}px`);
+    await shot(page, "52-quality-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+
   console.log("The dashboard");
   const attentionCard = () => page.getByRole("heading", { name: "Needs attention", level: 2 }).locator("xpath=..");
   await step("the dashboard lists what is saved and the latest builds, and is reached from the menu", async () => {

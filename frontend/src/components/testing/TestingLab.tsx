@@ -1,35 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { Alert, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
+import { useEffect, useState } from "react";
+import { Field, NoSkillsHere, SELECT, SkillVersionPicker, useSkillTarget } from "@/components/SkillVersionPicker";
+import { Alert, Button, Card, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { callsFor, costText, parseVersion, pickVersion, repeatNote, runChoices } from "@/lib/testing";
+import { callsFor, costText, repeatNote, runChoices } from "@/lib/testing";
 import { useAsync } from "@/lib/useAsync";
 import { useEvalRun } from "@/lib/useEvalRun";
 import { CaseEditor } from "./CaseEditor";
 import { PreviewPanel } from "./PreviewPanel";
 import { ResultView } from "./ResultView";
 import { RunHistory } from "./RunHistory";
-
-const SELECT = "rounded-md border border-border bg-surface px-3 py-1.5 text-sm";
-
-/**
- * A label tied to its control by id, not wrapped around it: a wrapping label's text includes every option of a select, so it would name the
- * control "SkillChoose a skill…e2e-demo…" for anything that reads the label's text.
- */
-function Field({ label, children }: { label: string; children: (id: string) => ReactNode }) {
-  const id = useId();
-  return (
-    <div className="text-sm">
-      <label htmlFor={id} className="mb-1 block font-medium">
-        {label}
-      </label>
-      {children(id)}
-    </div>
-  );
-}
 
 /** Everything about one version of one skill. Keyed by the pair, so choosing another starts a clean page: no result or choice carries over. */
 function LabFor({ name, version, latest, onSaved }: { name: string; version: number; latest: number; onSaved: (version: number) => void }) {
@@ -170,28 +152,19 @@ function LabFor({ name, version, latest, onSaved }: { name: string; version: num
 
 /** The Testing Lab: a skill's own test cases, run against a model with the skill and without it, graded by code. */
 export function TestingLab() {
-  const router = useRouter();
-  const params = useSearchParams();
-  const name = params.get("name") ?? "";
-  const wanted = parseVersion(params.get("version"));
-  const skills = useAsync(() => api.listSkills("skill"), "testing-skills");
-  const versions = useAsync(() => (name ? api.versions(name) : Promise.resolve(null)), `testing-versions/${name}`);
-  const list = versions.data?.versions ?? [];
-  const version = pickVersion(list, wanted);
-  const latest = list.length ? Math.max(...list.map((v) => v.version)) : undefined;
-
+  const target = useSkillTarget("/testing");
+  const { name, version, latest } = target;
   const [saved, setSaved] = useState<string | null>(null);
 
-  const go = (n: string, v?: number) => router.replace(`/testing${n ? `?name=${encodeURIComponent(n)}${v ? `&version=${v}` : ""}` : ""}`, { scroll: false });
   const choose = (n: string, v?: number) => {
     setSaved(null);
-    go(n, v);
+    target.go(n, v);
   };
   // The page moves to the new version. The notice lives here, not in the editor, because the editor is replaced when the version changes.
   const onSaved = (v: number) => {
     setSaved(`Saved as v${v}. Your test cases are now the latest version, and every older version is kept.`);
-    versions.reload();
-    go(name, v);
+    target.reloadVersions();
+    target.go(name, v);
   };
 
   return (
@@ -201,53 +174,12 @@ export function TestingLab() {
         subtitle="Does a skill really help? Its own test cases are sent to a model that has the skill and to one that does not, and code (never a model) checks every reply."
       />
       <div className="space-y-6">
-        {skills.error ? (
-          <ErrorBox error={skills.error} onRetry={skills.reload} />
-        ) : skills.data === undefined ? (
-          <Loading what="your skills" />
-        ) : skills.data.length === 0 ? (
-          <Empty title="No skills to test yet">
-            Build one in the Builder or import one into the <Link href="/library" className="underline">Library</Link>, then come back.
-          </Empty>
-        ) : (
-          <Card className="p-4">
-            <div className="flex flex-wrap items-end gap-4">
-              <Field label="Skill">
-                {(id) => (
-                  <select id={id} className={SELECT} value={name} onChange={(e) => choose(e.target.value)}>
-                    <option value="">Choose a skill…</option>
-                    {(skills.data ?? []).map((s) => (
-                      <option key={s.name} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </Field>
-              {name && list.length > 0 && version !== undefined && (
-                <Field label="Version">
-                  {(id) => (
-                    <select id={id} className={SELECT} value={version} onChange={(e) => choose(name, Number(e.target.value))}>
-                      {list.map((v) => (
-                        <option key={v.version} value={v.version}>
-                          {v.tag}
-                          {v.version === latest ? " (latest)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </Field>
-              )}
-            </div>
-          </Card>
-        )}
+        <SkillVersionPicker target={target} onChoose={choose} emptyTitle="No skills to test yet" emptyText={NoSkillsHere} />
         {saved && (
           <Alert tone="ok" title="Your test cases were saved" onDismiss={() => setSaved(null)}>
             {saved}
           </Alert>
         )}
-        {name && versions.error && <ErrorBox error={versions.error} onRetry={versions.reload} />}
-        {name && !versions.error && versions.data === undefined && <Loading what={name} />}
         {name && version !== undefined && latest !== undefined && <LabFor key={`${name}/${version}`} name={name} version={version} latest={latest} onSaved={onSaved} />}
       </div>
     </>

@@ -59,14 +59,14 @@ page: `frontend/src/components/repository/ArchitectureMap.tsx` with the layout i
 
 ## Checked
 
-**Tests (2026-11-25).** Backend: 2,513 pass in all (3 skipped: this account cannot create symbolic links), 24 of them new: 23 in `tests/test_architecture.py`
+**Tests (2026-11-25).** Backend: 2,524 pass in all after the review's fixes (2,513 before them; 3 skipped: this account cannot create symbolic links), 26 of them new for this slice: 25 in `tests/test_architecture.py`
 (graphs built by hand, so a guess link, a test file that imports, a language whose imports are not read, a hundred folders and a folder called `(root)` are exact) and one in
 `tests/test_repository_api.py` (a real repository through the real `analyze` route, with no path in the answer). UI: 214 unit tests, 27 of them new
 (`lib/architecture.test.ts`), and a clean typecheck. Browser: the real-Edge suite is **64 of 64** on free ports (60 before this slice, which was also the re-run slice Y still owed, plus
 four map steps: the map with its cycle warning and no path on the page, a click and the keyboard with the faded arrows counted, the arrows as a list, and phone width with no sideways
 scroll; the GitHub step now also checks that a flat repository says it is one box). The screenshots were read by eye.
 
-**Deliberate breaks: 33, all caught.** Eighteen on the page's code (shortening a label, the width clamp, the dashed arrows, the frame margin, opposite arrows on one curve, an arrow
+**Deliberate breaks: 33, all caught (and 12 more on the review's fixes, also all caught).** Eighteen on the page's code (shortening a label, the width clamp, the dashed arrows, the frame margin, opposite arrows on one curve, an arrow
 ending at the wrong edge, overlapping boxes, the cycle-name cut, the `tests` tag, the base folder note, the imports-only note, no reordering, no arrow cap, the weakest arrows drawn
 instead of the strongest, and four on the zoom-in hint and the hidden-arrow count) and fifteen on the backend (a guess drawn as proven, test imports drawn, every box "measured",
 no back arrows, a box id equal to its name, no cap on boxes, arrows inside a folder, the order inside a loop ignoring the weights, loops taken sinks first, unsorted arrows, a level

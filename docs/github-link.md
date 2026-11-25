@@ -62,7 +62,7 @@ where, and how many.** No `git` program is run and no key is needed.
 
 * **Backend** (`tests/test_github_link.py`, 182 tests, all offline: a fake download and in-memory hostile archives stand in for GitHub): the strict link list, the download limits and the redirect policy,
   hostile archives (a path that leaves the folder, links and devices, Windows device names, invisible characters, a zip bomb, too many files, a file whose name differs only in case), snapshots (reuse, replace,
-  prune, simultaneous requests, Windows holding a folder for a moment), and the whole pipeline (read, a suggestion run, a build with evidence, a recheck). The whole backend suite: **BACKEND_TOTAL passed, 3 skipped** (symbolic links).
+  prune, simultaneous requests, Windows holding a folder for a moment), and the whole pipeline (read, a suggestion run, a build with evidence, a recheck). The whole backend suite: **2,524 passed, 3 skipped** (symbolic links).
 * **Frontend:** unit tests for the link rules and the "where it came from" lines (214 UI unit tests in all, typecheck clean). The real-browser run has two behaviours for links. It was re-run on 2026-11-25 on the final code of this
   slice (**60 of 60** before slice Z, **64 of 64** with it, on free ports with a scripted fake download), which closes the re-run this slice still owed.
 * **A real run against the real GitHub (2026-11-23):** this repository's public link read **257 source files (2.3 MB) in 7 seconds** and the graph matched the local counts (198 Python, 25 TypeScript, 27 TSX files); a second read

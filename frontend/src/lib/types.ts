@@ -480,6 +480,62 @@ export type RepoSource =
       reused: boolean;
     };
 
+// ---- the architecture map (docs/architecture-map.md): folders as boxes, proven imports as arrows -----------------
+
+export interface ArchFunction {
+  name: string;
+  file: string;
+  line: number;
+  size: number;
+}
+
+export interface ArchFile {
+  path: string;
+  lines: number;
+}
+
+/** One box: a top-level folder, the files at the top ("root"), or the smallest folders folded together ("other"). `id` is a position (m0, m1, ...), never a name. */
+export interface ArchModule {
+  id: string;
+  label: string;
+  kind: "folder" | "root" | "other";
+  files: number;
+  lines: number;
+  test_files: number;
+  tests_only: boolean;
+  symbols: number;
+  languages: Record<string, number>;
+  /** False when none of its files is in a language whose imports are read: no arrow can start or end there, which is not the same as depending on nothing. */
+  measured: boolean;
+  column: number;
+  top_functions: ArchFunction[];
+  file_list: ArchFile[];
+  /** The folders folded into an "other" box; empty otherwise. */
+  members: string[];
+}
+
+/** `from` imports `to`; `count` is the number of distinct file pairs. */
+export interface ArchArrow {
+  from: string;
+  to: string;
+  count: number;
+}
+
+export interface Architecture {
+  /** The folder every file sits inside (a `src/` or the focus folder), left out of the box names; "" when none. */
+  base: string;
+  modules: ArchModule[];
+  arrows: ArchArrow[];
+  /** Groups of box ids that import each other, directly or through others. */
+  cycles: string[][];
+  columns: number;
+  measured: boolean;
+  language_levels: Record<string, string>;
+  /** Links that were found but not drawn: name-only guesses, and imports written by test files. */
+  left_out: { guess: number; from_tests: number };
+  notes: string[];
+}
+
 export interface RepoAnalysis {
   name: string;
   source: RepoSource;
@@ -501,6 +557,8 @@ export interface RepoAnalysis {
   notes: string[];
   hotspots: { core_symbols: CoreSymbol[]; risky_files: RiskyFile[]; note: string };
   dead_code: { internal: number; exported: number; note: string };
+  /** Optional so an answer from an older server cannot break the page. */
+  architecture?: Architecture;
 }
 
 export type IdeaCategory = "refactor" | "test" | "cleanup" | "risk" | "skill" | "automation";

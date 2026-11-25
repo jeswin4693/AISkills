@@ -113,8 +113,17 @@ def test_reading_a_folder_does_not_import_the_builder():
         "cli._repo_arg('C:/some/folder'); print(before, 'skillforge.builder' in sys.modules)"
     )
     done = subprocess.run([sys.executable, "-c", child], cwd=BACKEND, capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(BACKEND)})
-    before, after = done.stdout.split()
-    assert before == after, done.stderr
+    assert done.stdout.split() == ["False", "False"], done.stderr  # not by importing the CLI, and not by a folder argument either
+
+
+@pytest.mark.parametrize("text", [
+    "https://github.com/a/b", "http://github.com/a/b", "github.com/a/b", "www.github.com/a/b", "GITHUB.COM/a/b", "  https://github.com/a/b  ", "ftp://example.org/x",
+    "https://gitlab.com/a/b", "github.com", "www.github.com", "ssh://git@github.com/a/b.git",
+    "C:" + chr(92) + "code" + chr(92) + "repo", "/home/me/repo", "relative/path", chr(92) * 2 + "server" + chr(92) + "share", "//server/share/repo", "", "github.company.com/x", "git@github.com:a/b.git",
+])
+def test_the_cheap_link_check_agrees_with_the_builders_own(text):
+    """The CLI repeats the builder's check so that a folder never imports the builder. They must not drift apart."""
+    assert cli._looks_like_link(text) == gh.looks_like_link(text), text
 
 
 # ---- the note, as a pure function ------------------------------------------------------------------------------------

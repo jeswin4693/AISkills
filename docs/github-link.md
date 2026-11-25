@@ -96,7 +96,7 @@ repository. The reviewer also noted, and left alone, that the page's TypeScript 
 
 ## What is not here
 
-* The command line (`graph`, `suggest`, `library recheck` still take a folder). Clone a repository and give the folder, or use the page.
+* (The command line takes a link too since slice AA: [cli-github-links.md](cli-github-links.md). Its limits are the same, and a copy has no `CLAUDE.md` or `AGENTS.md`, which `plan` says.)
 * Private repositories, submodules (GitHub's zip leaves them out), Git LFS contents (only pointers), other hosts (GitLab, Bitbucket), and the repository's git history.
 * A repository whose zip is over 80 MB cannot be read from a link; clone it and give the folder.
 * (The drawn architecture map was built afterwards, in slice Z, and works for a link exactly as for a folder: [architecture-map.md](architecture-map.md). A flat repository such as a three-file one is one box, and the page says so.)

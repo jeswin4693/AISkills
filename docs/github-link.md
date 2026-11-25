@@ -74,4 +74,4 @@ where, and how many.** No `git` program is run and no key is needed.
 * The command line (`graph`, `suggest`, `library recheck` still take a folder). Clone a repository and give the folder, or use the page.
 * Private repositories, submodules (GitHub's zip leaves them out), Git LFS contents (only pointers), other hosts (GitLab, Bitbucket), and the repository's git history.
 * A repository whose zip is over 80 MB cannot be read from a link; clone it and give the folder.
-* A drawn architecture map: the page shows numbers and lists, as before. That is the next piece.
+* (The drawn architecture map was built afterwards, in slice Z, and works for a link exactly as for a folder: [architecture-map.md](architecture-map.md). A flat repository such as a three-file one is one box, and the page says so.)

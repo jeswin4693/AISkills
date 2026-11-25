@@ -29,8 +29,9 @@ Slice W is built too (the web **Repository** page: read a folder into the graph,
 every route that reads a folder is off in the hosted version; [docs/repository-page.md](docs/repository-page.md)).
 Slice X is built too (the web **Settings** page: choose the model, paste a key, add backups, test them; a key is never sent back, only a fixed list of names can be changed, values are checked, `.env` is edited atomically and the change applies at once; the model lookup re-reads `.env` each time; off in the hosted version; [docs/settings.md](docs/settings.md)).
 Slice Y is built too (the Repository page's box also takes the link of a **public GitHub repository**: GitHub's zip is downloaded, never cloned, and unpacked by our own code with strict name and size rules, kept as a snapshot; it works everywhere a folder does; off in the hosted version; **no independent review yet**; [docs/github-link.md](docs/github-link.md)).
-Next: the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built), a drawn architecture map
-(not started: the Repository page shows numbers and lists), GitHub links on the command line, and Node servers in plugins ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
+Slice Z is built too (the Repository page **draws the repository**: top-level folders as boxes and the proven imports between them as arrows, worked out by code in `graph/architecture.py` and drawn as plain SVG with no library; a guess and an import written by a test file are never drawn, only counted; fewer than six folders means one level deeper; a loop is shown by dashed back arrows; click a box to light its arrows; works for a folder and for a link; **no independent review yet, for Y and Z together**; [docs/architecture-map.md](docs/architecture-map.md)).
+Next: an independent review of slices Y and Z, the last differentiator ([docs/differentiators.md](docs/differentiators.md): a behavioural canary scan; the risk diff + rescan and code-level evidence + drift are built),
+GitHub links on the command line, and Node servers in plugins ([docs/ui-and-database-plan.md](docs/ui-and-database-plan.md)).
 
 ## Commands (run from `backend/`)
 

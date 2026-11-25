@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins, Repository and Settings), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins and the behavioural canary scan.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins, Repository with a drawn architecture map, and Settings), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins and the behavioural canary scan.
 See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
 your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
@@ -83,7 +83,7 @@ named the renamed function, the new caller and the changed structure (and expose
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
 3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
    ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
-4. **The Repository page, the Settings page and reading a repository from a GitHub link are built** (slices W, X and Y, below). Left of the web pages: a drawn graph (the Repository page shows numbers and lists).
+4. **The Repository page, the Settings page, reading a repository from a GitHub link and the drawn architecture map are built** (slices W, X, Y and Z, below). Left of the web pages: a function-level graph (the map shows folders and the imports between them).
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
 
@@ -276,6 +276,10 @@ A key is **never shown again and never sent back** by the API (the page learns o
 ## Reading a repository from a GitHub link (slice Y)
 
 The box on the **Repository** page now takes the link of a **public GitHub repository** as well as a folder (for example `https://github.com/owner/repo`). The repository is **downloaded as a zip** (never cloned, so nothing in it can run) and unpacked by our own code: only source files, only safe names, with limits on size and count. Then it works everywhere a folder does: the graph, ideas, a build with evidence, and the recheck. The page says where it came from, what was kept and left out, and that git history is not downloaded. Public repositories only; off in the hosted version; the command line still takes a folder. **This slice has not had an independent review yet.** Details, limits and what was checked, including a real run: [docs/github-link.md](docs/github-link.md).
+
+## The architecture map (slice Z)
+
+Under the numbers, the **Repository** page now draws the repository: its **folders as boxes** and the **proven imports between them as arrows** (thicker means more files import across; dashed means an import that points back against the main direction and closes a loop). Click a box to light its arrows and see its biggest files and functions; **The arrows as a list** says the same in words. It is worked out by code from the graph (no model, nothing is run) and drawn as plain SVG (no new library), and it works for a folder and for a GitHub link. A guess is never drawn, imports written by test files are left out (and counted), a repository with fewer than six top folders is shown one level deeper, and a language whose imports are not read is said to be "not measured", never shown as depending on nothing. The first real runs on this project found three things no mock showed (a three-box map with no arrows, one giant cycle that made a hairball, and arrows lying on top of each other); all are fixed, and the page says how many weaker arrows it does not draw. **This slice has not had an independent review yet** (slice Y has not either; one review can cover both). Details, rules, limits and what was checked: [docs/architecture-map.md](docs/architecture-map.md).
 
 ## Run the local API (the web UI talks to it)
 

@@ -16,9 +16,11 @@ T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V")
 
 # What kind of failure it was. The retry policy (ai/policy.py) is decided by this, not by parsing messages.
+# `too_long` is about the ANSWER (cut off) or the engine's own input limit; `input_too_large` is a MODEL saying the request is too big for it
+# (HTTP 413, a context-length error): the caller can send less, and trying again with the same request cannot help.
 ErrorKind = Literal[
     "auth", "model_missing", "bad_request", "rate_limit", "quota", "overloaded", "timeout", "connection",
-    "invalid_output", "too_long", "refused", "budget", "other",
+    "invalid_output", "too_long", "input_too_large", "refused", "budget", "other",
 ]
 
 

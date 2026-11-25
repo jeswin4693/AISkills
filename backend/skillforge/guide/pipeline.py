@@ -10,9 +10,9 @@ from typing import Any
 
 from ..ai.tasks import Task
 from ..graph.model import RepoGraph
-from ..providers.base import LLMProvider
+from ..providers.base import LLMProvider, ProviderError
 from ..providers.retry import generate_with_retry
-from .docs import DocSet
+from .docs import DocSet, shrink
 from .models import LAYERS, GuideDraft
 from .prompt import SYSTEM, build_prompt, folder_facts
 from .verify import check
@@ -43,21 +43,44 @@ def no_docs(name: str, docs: DocSet) -> dict[str, Any]:
     )
 
 
+SIZES = (1.0, 0.5, 0.25)  # the share of the documents' text asked about: all of it first, and less only if a model says the request is too big
+
+
+def _ask(
+    provider: LLMProvider, docs: DocSet, folders: list[tuple[str, int]], name: str, attempts: int
+) -> tuple[GuideDraft, int, DocSet, float]:
+    """(the model's draft, the calls it took, the documents it was given, their share), asking about less when a model says the request is too big."""
+    for position, share in enumerate(SIZES):
+        given = docs if share == 1.0 else shrink(docs, share)
+        try:
+            draft, used = generate_with_retry(provider, GuideDraft, build_prompt(given, folders, name), SYSTEM, attempts, task=Task.GUIDE)
+        except ProviderError as exc:
+            # Decided by the error's kind, never by its words. A model that says the request is too big (often a backup with a small per-minute limit,
+            # asked because the first model was down) can still answer a smaller one. Every other failure is the caller's to see.
+            if exc.kind != "input_too_large" or position == len(SIZES) - 1:
+                raise
+            continue
+        return draft, used, given, share
+    raise AssertionError("unreachable: the last size either answers or raises")  # pragma: no cover
+
+
 def build_guide(g: RepoGraph, docs: DocSet, provider: LLMProvider, name: str, *, attempts: int = 2) -> dict[str, Any]:
-    draft, used = generate_with_retry(provider, GuideDraft, build_prompt(docs, folder_facts(g), name), SYSTEM, attempts, task=Task.GUIDE)
-    checked = check(draft, docs, g)
+    draft, used, given, share = _ask(provider, docs, folder_facts(g), name, attempts)
+    checked = check(draft, given, g)  # against what the model was given: it could not quote what was cut away
     status = "ok" if len(checked.parts) >= 2 else "thin"
     notes: list[str] = list(NOTES)
     if status == "thin":
         notes.insert(0, "Fewer than two parts could be checked against the documents, so nothing is drawn. The documents may not describe how the project works.")
     elif not checked.journeys:
         notes.insert(0, "No route through the parts could be checked against the documents, so the layers are shown without one.")
-    if any(d.truncated for d in docs.files):
+    if share < 1.0:
+        notes.append(f"A model refused the full size of the request, so only about {round(share * 100)}% of the documents' text was given to it. Parts that lean on the rest may be missing.")
+    if any(d.truncated for d in given.files):
         notes.append("A long document was cut before it was read: only its first part was given to the model.")
-    if docs.skipped.get("limit"):
-        notes.append(f"{docs.skipped['limit']} more document(s) were not read: only the first few are given to the model.")
+    if given.skipped.get("limit"):
+        notes.append(f"{given.skipped['limit']} more document(s) were not read: only the first few are given to the model.")
     return _answer(
-        status, name, docs,
+        status, name, given,
         parts=checked.parts if status == "ok" else [], journeys=checked.journeys if status == "ok" else [], dropped=checked.dropped, notes=notes,
         provider=provider.name, model=provider.model, attempts=used,
     )

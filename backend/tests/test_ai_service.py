@@ -280,6 +280,23 @@ def test_answers_that_keep_failing_the_format_go_to_the_next_model():
     assert "count is missing" in first.calls[1]["prompt"] and second.calls[0]["prompt"] == "q"  # a new model starts from the plain prompt
 
 
+def test_a_request_too_big_for_a_model_is_raised_at_once_and_not_handed_to_the_next():
+    first = Fake([boom("input_too_large", False)], "gemini", "m1")
+    second = Fake([gen()], "groq", "g1")
+    with pytest.raises(ProviderError) as info:
+        service(first, fallbacks=[second]).generate(Task.DESIGN, Answer, "q")
+    assert info.value.kind == "input_too_large" and len(first.calls) == 1 and second.calls == []  # not retried, and no other model asked
+
+
+def test_when_a_backup_refuses_the_size_after_the_first_model_failed_the_caller_still_sees_the_kind():
+    """The real failure: Gemini overloaded, then the backup (Groq) said the request was too big. The caller must be able to tell, to send less."""
+    first = Fake([boom(), boom()], "gemini", "m1")
+    backup = Fake([boom("input_too_large", False)], "groq", "g1")
+    with pytest.raises(ProviderError) as info:
+        service(first, fallbacks=[backup]).generate(Task.DESIGN, Answer, "q")
+    assert info.value.kind == "input_too_large" and "No model could answer" in str(info.value) and len(backup.calls) == 1
+
+
 def test_every_fallback_is_tried_in_order_and_the_last_error_names_each_model():
     a = Fake([boom(), boom()], "gemini", "m1")
     b = Fake([boom("rate_limit", False)], "groq", "g1")

@@ -82,6 +82,7 @@ call it. **One request, nothing saved**: a guide is one model call, so it needs 
 | No README or docs: the answer says so and **no model is asked**, so no key is needed. | Cheap and honest. |
 | Fewer than **two checked parts**: `thin`, nothing is drawn, and the page says so. | A near-empty diagram would mislead. |
 | The call names its task (`Task.GUIDE`) and goes through the AI service. | One model service: retries, budget, usage, redaction. |
+| A model that says the request is too big (`input_too_large`) is asked again with **half, then a quarter** of the documents' text; any other failure is shown at once. Decided by the error's kind, never by its words. | A backup with a small limit can still answer a smaller request. |
 
 ## GitHub copies now keep documents
 
@@ -120,8 +121,10 @@ The outline lists the layers, each part with the quote behind it, and each route
 * **One call, nothing saved.** It waits for the model (seconds to about a minute), uses a little quota each time and is not remembered after a reload. Documents beyond the caps are not read, and a long one is cut (the page says so).
 * **Strict quoting costs some real parts.** When a model paraphrases instead of copying, a part that really exists is dropped (the real GitHub run lost "Docker Sandbox" and "Web User Interface" this way). Every drop is
   listed on the page with its reason, and asking again often brings them back.
-* **The prompt is large**: up to about 15,000 tokens (60,000 characters of documents). A backup model with a small per-minute limit cannot take it (the real run's Groq backup refused 16,700 tokens against 8,000 per minute),
-  so a Gemini outage cannot be covered by that backup. The command says so in one `error:` line.
+* **The prompt is large**: up to about 15,000 tokens (60,000 characters of documents). A backup model with a small per-minute limit cannot take that (the first real GitHub run's Groq backup refused 16,700 tokens against 8,000 per minute
+  while Gemini was overloaded). So when a model says the request is too big for it (the typed error kind `input_too_large`, see [ai-engine.md](ai-engine.md)), the guide **asks again with about half, then a quarter, of the documents' text**
+  (`shrink` in `guide/docs.py`: the best documents stay whole, the one that does not fit is cut and says so, the rest are counted as left out). The page says "only about 50%" (or 25%), shows the documents that were really given, and the quotes
+  are checked against what the model was given, so a part that leans on the cut-away text is dropped, not kept. After the quarter the error is shown. Parts that need the text that was cut may be missing: ask again when the first model is back.
 * Off in the hosted version, like every route that reads a folder. No function-level call graph, no image export.
 
 ## Checked
@@ -154,5 +157,13 @@ After the fixes, a second run (a folder) drew 5 parts and 1 route (the model var
 the first attempt failed cleanly (Gemini answered 503, and the Groq backup refused the 16,700-token request, one `error:` line and exit code 2); the second read **278 source files and 56 README and doc files from GitHub's real zip** and drew 8 parts and 2 routes, with 6 items
 dropped (two parts whose quotes were not in the docs word for word, and the steps that needed them; the hop across a dropped step said so).
 
-**Not verified:** a real GitHub download of a repository other than this one; macOS and Linux (the junction test is Windows-only, the symbolic-link tests skip here); a very large docs set; a README in another language; a model other than Gemini on this prompt;
-the hosted refusal over a real network (it is tested with the test client).
+**Follow-up: a request too big for a model (2026-11-25).** The failed first GitHub attempt (Gemini overloaded, the Groq backup refusing 16,700 tokens) was fixed test first: the adapters now report a typed `input_too_large` (HTTP 413, OpenAI's `context_length_exceeded`,
+Anthropic's 413), the guide asks again with half, then a quarter, of the documents, and Groq's `json_validate_failed` is now `invalid_output` (asked again once with what the model wrote). Tests added in the adapters, the policy, the engine's chain of models, `shrink`, the
+pipeline, and **two end-to-end tests through real adapters over a fake connection** that reproduce the real failure (an overloaded first model, a backup that refuses the size); 24 deliberate breaks, all caught (one was dead code in `shrink`, removed).
+The whole backend suite: **2,842 pass** (2,820 before this follow-up), 4 skipped (symbolic links), none failed. The web code did not change.
+**A real Groq-only run** (Groq's free tier, 8,000 tokens a minute; every request listed from the engine's usage records) showed the staircase against the real API: the full size was refused as `input_too_large`, so was half, a quarter was accepted by size, the model then wrote
+JSON that did not match the schema (now `invalid_output`, asked again once), and that retry was rate limited (429), twice, even after waiting a minute. **So Groq's free tier alone never produced a guide.** What this fix gives a person is a clear, typed failure and a smaller second try;
+it does not make a small free-tier backup able to draw the diagram.
+
+**Not verified:** a real GitHub download of a repository other than this one; macOS and Linux (the junction test is Windows-only, the symbolic-link tests skip here); a very large docs set; a README in another language; a model other than Gemini producing a valid guide
+after a size refusal (the Groq run above never got that far); the hosted refusal over a real network (it is tested with the test client).

@@ -265,6 +265,67 @@ def test_a_length_cut_off_is_too_long_and_is_not_retried_with_the_same_prompt():
     assert info.value.kind == "too_long" and info.value.retryable is False
 
 
+def test_a_request_the_model_says_is_too_big_is_input_too_large_and_is_not_retried():
+    """Found by a real run: Groq answered 413 ("Request too large ... tokens per minute") and that was `other`, which says nothing a caller can act on."""
+    with pytest.raises(ProviderError) as big:
+        adapter(lambda request: httpx2.Response(413, json={"error": {"message": "Request too large: limit 8000, requested 16728"}})).generate(Answer, "q")
+    with pytest.raises(ProviderError) as ctx:
+        adapter(lambda request: httpx2.Response(
+            400, json={"error": {"message": "This model's maximum context length is 8192 tokens.", "code": "context_length_exceeded"}}
+        )).generate(Answer, "q")
+    for info in (big, ctx):
+        assert info.value.kind == "input_too_large" and info.value.retryable is False
+
+
+def groq_failed_json(produced='{"parts":[{"id":"kinds"}]}'):
+    """What Groq answers (HTTP 400, code json_validate_failed) when the model's JSON does not match the schema; found by a real run of the guide."""
+    return httpx2.Response(400, json={"error": {
+        "message": "Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.",
+        "type": "invalid_request_error", "code": "json_validate_failed", "failed_generation": produced,
+    }})
+
+
+def test_a_json_the_provider_says_failed_validation_is_invalid_output_and_keeps_what_the_model_wrote():
+    with pytest.raises(ProviderError) as info:
+        adapter(lambda request: groq_failed_json()).generate(Answer, "q")
+    e = info.value
+    assert e.kind == "invalid_output" and e.retryable is True
+    assert "kinds" in e.detail and 0 < len(e.detail) <= 600  # the model is told what it wrote, capped like every detail
+
+
+def test_a_very_long_failed_generation_is_cut_in_the_detail():
+    with pytest.raises(ProviderError) as info:
+        adapter(lambda request: groq_failed_json("x" * 5000)).generate(Answer, "q")
+    assert info.value.kind == "invalid_output" and len(info.value.detail) <= 600
+
+
+def test_that_failure_is_asked_again_once_with_what_was_wrong_in_the_prompt():
+    from skillforge.ai.policy import NO_WAIT
+    from skillforge.ai.profiles import Profile, ProfileSet
+    from skillforge.ai.service import AIService
+    from skillforge.ai.tasks import Task
+    from skillforge.providers import CallOptions
+
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content)["messages"][-1]["content"])
+        return groq_failed_json() if len(seen) == 1 else httpx2.Response(200, json=completion(json.dumps({"word": "ok", "count": 3})))
+
+    service = AIService(ProfileSet(Profile("default", adapter(handler), CallOptions())), policy=NO_WAIT, sleep=lambda seconds: None)
+    value, calls = service.generate(Task.DESIGN, Answer, "question")
+    assert value == Answer(word="ok", count=3) and calls == 2
+    assert "What was wrong" in seen[1] and "kinds" in seen[1] and seen[0] == "question"  # the second prompt carries the feedback, the first was plain
+
+
+def test_an_ordinary_bad_request_and_a_server_error_keep_their_own_kinds():
+    with pytest.raises(ProviderError) as bad:
+        adapter(lambda request: httpx2.Response(400, json={"error": {"message": "bad field", "code": "invalid_value"}})).generate(Answer, "q")
+    with pytest.raises(ProviderError) as server:
+        adapter(lambda request: httpx2.Response(500, json={"error": {"message": "boom"}})).generate(Answer, "q")
+    assert bad.value.kind == "bad_request" and server.value.kind == "overloaded"
+
+
 def test_invalid_json_is_invalid_output_with_a_short_detail():
     provider = adapter(lambda request: httpx2.Response(200, json=completion('{"word": "x"}')))
     with pytest.raises(ProviderError) as info:

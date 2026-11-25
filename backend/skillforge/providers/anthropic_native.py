@@ -79,6 +79,8 @@ class AnthropicProvider:
         except anthropic.APIStatusError as exc:
             if exc.status_code == 408:
                 raise ProviderError(f"API error 408: {exc.message}", retryable=True, kind="timeout")
+            if exc.status_code == 413:  # Request Entity Too Large
+                raise ProviderError(f"The request is too big for this model (413): {exc.message}", kind="input_too_large")
             raise ProviderError(
                 f"API error {exc.status_code}: {exc.message}",
                 retryable=exc.status_code >= 500, kind="overloaded" if exc.status_code >= 500 else "other",

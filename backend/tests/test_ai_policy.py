@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from skillforge.ai.policy import NO_WAIT, Policy, decide, feedback_text
+from skillforge.ai.policy import FALLBACK_KINDS, NO_WAIT, Policy, decide, feedback_text
 from skillforge.ai.redact import redact
 from skillforge.ai.tasks import TIER_OF, Task, Tier
 from skillforge.providers import ProviderError
@@ -18,6 +18,12 @@ def test_tasks_map_to_tiers():
     assert set(TIER_OF) == set(Task) and {t.value for t in Tier} == {"fast", "design", "code", "actor"}
 
 
+def test_a_request_too_big_for_a_model_is_reported_and_not_handed_to_another_model():
+    """The caller can send less; handing a request that was too big for one model to the next would only spend another call."""
+    assert "input_too_large" not in FALLBACK_KINDS
+    assert FALLBACK_KINDS == {"rate_limit", "quota", "overloaded", "timeout", "connection", "invalid_output"}  # nothing else changed
+
+
 def err(kind="other", retryable=False, **kw):
     return ProviderError("x", kind=kind, retryable=retryable, **kw)
 
@@ -28,7 +34,7 @@ def err(kind="other", retryable=False, **kw):
         (err("overloaded", True), 3), (err("timeout", True), 3), (err("connection", True), 3), (err("rate_limit"), 3),
         (err("invalid_output", True), 2), (err("other", True), 2), (err("other", False), 1),
         (err("auth"), 1), (err("model_missing"), 1), (err("bad_request"), 1), (err("quota"), 1), (err("refused"), 1),
-        (err("too_long"), 1), (err("budget"), 1),
+        (err("too_long"), 1), (err("input_too_large"), 1), (err("budget"), 1),
     ],
 )
 def test_attempts_per_kind(error, attempts):

@@ -112,6 +112,13 @@ def test_network_failures_are_retryable():
     assert (t.value.kind, t.value.retryable, c.value.kind, c.value.retryable) == ("timeout", True, "connection", True)
 
 
+def test_a_413_is_input_too_large_and_is_not_retried():
+    body = {"type": "error", "error": {"type": "request_too_large", "message": "Request exceeds the maximum allowed number of bytes."}}
+    with pytest.raises(ProviderError) as info:
+        adapter(lambda request: httpx2.Response(413, json=body)).generate(Answer, "q")
+    assert info.value.kind == "input_too_large" and info.value.retryable is False
+
+
 def test_a_refusal_and_a_cut_off_answer_are_reported_by_kind():
     with pytest.raises(ProviderError) as r:
         adapter(lambda request: httpx2.Response(200, json=message("", stop_reason="refusal"))).generate(Answer, "q")

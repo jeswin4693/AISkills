@@ -92,10 +92,21 @@ falls back silently to the default model.
 | rate_limit (429) | 3 | `Retry-After`, or "retry in N s" in the message, or backoff; stop if the wait is over 30 s |
 | invalid_output | 2 | none; the second prompt ends with what was wrong (at most 600 characters) |
 | other, marked retryable | 2 | backoff |
-| auth, model_missing, bad_request, quota, refused, too_long, budget | 1 | stop |
+| auth, model_missing, bad_request, quota, refused, too_long, input_too_large, budget | 1 | stop |
 
 An explicit `attempts=` from a caller (suggest passes 2) is a hard cap. A length cut-off (`too_long`) is no longer
 retried with the same prompt: it would fail the same way.
+
+**`input_too_large`** is a *model* saying the request is too big for it: HTTP 413 (Groq says so for a prompt over its tokens-per-minute limit, Anthropic
+for a request over its size limit) or OpenAI's `context_length_exceeded`. It is not `too_long`, which is about the *answer* being cut off or this engine's
+own input limit (`LLM_MAX_INPUT_TOKENS`). It is raised at once and is **not** handed to a backup model: the remedy is to send less, and only the caller
+can do that (the guide does, see [how-it-works.md](how-it-works.md)). When the first model failed for another reason and a backup then refuses the size,
+the final "No model could answer" error still carries this kind, so the caller can tell. Found by a real run: Gemini answered 503, the backup answered 413,
+and the error had been plain `other`, which says nothing a caller can act on.
+
+**Groq's `json_validate_failed`** (HTTP 400: the model's own JSON did not match the schema) is `invalid_output`, not `bad_request`. It carries what the model wrote
+(`failed_generation`, capped at 600 characters) as the detail, so it is asked again once with that as feedback, and can be handed to a backup model. Found by the
+same real run: `openai/gpt-oss-120b` wrote one part of the guide and stopped, and the engine gave up at once because the error had been classed a plain bad request.
 
 ### Usage
 

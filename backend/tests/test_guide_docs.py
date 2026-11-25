@@ -153,6 +153,42 @@ def test_a_focus_that_leads_to_another_real_folder_outside_the_repository_is_nev
         assert [d.path for d in got.files] == ["README.md"] and "SOMEONE ELSE" not in got.files[0].text, focus
 
 
+def doc(path, size):
+    return gd.DocFile(path, "x" * size)
+
+
+def test_shrinking_keeps_the_best_documents_first_and_cuts_the_one_that_does_not_fit():
+    docs = gd.DocSet([doc("README.md", 10_000), doc("CLAUDE.md", 10_000), doc("docs/a.md", 10_000)], {"binary": 1})
+    got = gd.shrink(docs, 0.5)  # room for 15,000 of the 30,000 characters
+    assert [(d.path, len(d.text), d.truncated) for d in got.files] == [("README.md", 10_000, False), ("CLAUDE.md", 5_000, True)]
+    assert got.skipped == {"binary": 1, "limit": 1}  # the third was left out, and counted with the rest
+
+
+def test_shrinking_leaves_the_input_alone_and_a_share_of_one_changes_nothing():
+    docs = gd.DocSet([doc("README.md", 3_000), doc("docs/a.md", 2_000)], {"empty": 2})
+    gd.shrink(docs, 0.25)
+    assert [len(d.text) for d in docs.files] == [3_000, 2_000] and docs.skipped == {"empty": 2}
+    same = gd.shrink(docs, 1.0)
+    assert [(d.path, len(d.text), d.truncated) for d in same.files] == [("README.md", 3_000, False), ("docs/a.md", 2_000, False)]
+    same.skipped["x"] = 1
+    assert docs.skipped == {"empty": 2}  # the answer has its own copy of the counts
+
+
+def test_the_first_document_is_always_kept_however_little_room_there_is():
+    got = gd.shrink(gd.DocSet([doc("README.md", 5_000), doc("docs/a.md", 5_000)]), 0.0001)
+    assert [(d.path, len(d.text), d.truncated) for d in got.files] == [("README.md", gd.MIN_ROOM, True)] and got.skipped == {"limit": 1}
+
+
+def test_small_documents_all_stay_because_the_room_never_goes_below_the_floor():
+    docs = gd.DocSet([doc("README.md", 300), doc("docs/a.md", 100)])
+    assert [len(d.text) for d in gd.shrink(docs, 0.25).files] == [300, 100]
+
+
+def test_a_document_with_almost_no_room_left_is_dropped_and_not_cut_to_a_stub():
+    got = gd.shrink(gd.DocSet([doc("README.md", 10_000), doc("docs/a.md", 10_300)]), 0.5)  # room 10,150: 150 left after the first
+    assert [d.path for d in got.files] == ["README.md"] and got.skipped == {"limit": 1}
+
+
 @pytest.mark.skipif(os.name != "nt", reason="a junction is a Windows folder link")
 def test_a_junction_inside_the_repository_that_points_outside_is_never_read(repo):
     root = repo({"README.md": "# mine\n", "src/a.py": "x = 1\n"})

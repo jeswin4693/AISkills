@@ -100,6 +100,25 @@ class DocSet:
         return [{"path": d.path, "lines": d.lines, "chars": len(d.text), "truncated": d.truncated} for d in self.files]
 
 
+def shrink(docs: DocSet, share: float) -> DocSet:
+    """The same documents, best first, in `share` of their text (0.5: about half). Used when a model says the request is too big for it: the first
+    documents stay whole, the one that does not fit is cut (and says so), the rest are left out and counted. The room never goes below MIN_ROOM, so the
+    first document is always kept (at least that much of it), and a later document that would get less than MIN_ROOM is dropped rather than cut to a
+    stub. The input is not changed."""
+    room = max(MIN_ROOM, int(sum(len(d.text) for d in docs.files) * share))
+    out = DocSet(skipped=dict(docs.skipped))
+    for d in docs.files:
+        if len(d.text) <= room:
+            out.files.append(d)
+            room -= len(d.text)
+        elif room >= MIN_ROOM:
+            out.files.append(DocFile(d.path, d.text[:room], True))
+            room = 0
+        else:
+            out.skipped["limit"] = out.skipped.get("limit", 0) + 1
+    return out
+
+
 def _search(root: Path, skipped: dict[str, int]) -> dict[str, Path]:
     """The document files of the repository: a bounded walk that never follows a link and never goes into a folder the graph ignores."""
     found: dict[str, Path] = {}

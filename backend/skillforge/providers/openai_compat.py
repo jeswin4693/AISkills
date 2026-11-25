@@ -71,6 +71,16 @@ class OpenAICompatibleProvider:
                 kind="model_missing",
             )
         except openai.BadRequestError as exc:
+            if getattr(exc, "code", None) == "context_length_exceeded":  # OpenAI's own code for a prompt over the model's window
+                raise ProviderError(f"The request is too big for this model (400): {exc.message}", kind="input_too_large")
+            if getattr(exc, "code", None) == "json_validate_failed":
+                # Groq: the model's own JSON did not match the schema (found by a real run: it wrote one part and stopped). That is invalid output, not a
+                # bad request: it is asked again once with what it wrote, and another model may do better. `failed_generation` is what the model wrote.
+                wrote = exc.body.get("failed_generation") if isinstance(exc.body, dict) else None
+                raise ProviderError(
+                    f"The model's JSON did not match the schema (400): {exc.message}", retryable=True, kind="invalid_output",
+                    detail=short(f"The JSON did not match the schema. The model wrote: {wrote}" if wrote else "The JSON did not match the schema."),
+                )
             raise ProviderError(f"Bad request (400): {exc.message}", kind="bad_request")
         except openai.RateLimitError as exc:
             quota = exc.code == "insufficient_quota" or "no credits" in exc.message.lower()
@@ -82,6 +92,8 @@ class OpenAICompatibleProvider:
         except openai.APIStatusError as exc:
             if exc.status_code == 408:
                 raise ProviderError(f"API error 408: {exc.message}", retryable=True, kind="timeout")
+            if exc.status_code == 413:  # Request Entity Too Large (Groq says so for a prompt over its tokens-per-minute limit)
+                raise ProviderError(f"The request is too big for this model (413): {exc.message}", kind="input_too_large")
             raise ProviderError(
                 f"API error {exc.status_code}: {exc.message}",
                 retryable=exc.status_code >= 500, kind="overloaded" if exc.status_code >= 500 else "other",

@@ -177,6 +177,38 @@ The hint is a guess from names, and the savings come from reading less, not from
 plan into skills (C2), enforcement by hooks (C3), the checked requirement-to-test chain (C4), and a runner (C5). The token
 numbers are estimates, and real token use is not recorded anywhere yet.
 
+## Reference: Polaris, compared and not adopted (2026-11-25)
+
+Polaris (v2026.2.9, a spec-driven development toolkit based on GitHub Spec Kit) was compared with how this project already
+works. **Decision: it is not installed in this repository.** It is the prompt-only "option A" from the top of this page: its
+steps are instructions to a model, and no code checks the result. Its ideas are still worth reading before C2 to C5.
+
+**Why not installed** (each point was checked on the author's machine, not assumed):
+
+| Polaris step | Already covered here by |
+|---|---|
+| `constitution` (the project's permanent rules) | `CLAUDE.md`, "Rules for working here" |
+| `specify` (interview, then a feature spec) | `docs/superpowers/specs/` |
+| `tasks` (work packages) | `docs/superpowers/plans/` |
+| `review`, `accept`, `merge` | one final independent review, then the "After each slice" checklist |
+| `assess`, `standards` | the product itself: `graph`, `suggest`, `guide` |
+
+- `polaris analyze .` reported this project as type "unknown" with no test framework: it looks at the repository root, and the
+  code is in `backend/` and `frontend/`. It wrote nothing.
+- `tasks` tells the person to run `/polaris.plan` first, but that command does not exist in the install. A flow that names a
+  step that is missing is the kind of fault C4 (traceability) should catch **by code**.
+- Each of the `specify` and `tasks` prompts is about 22 KB (roughly 5 to 6 thousand tokens, an estimate at 4 characters a
+  token). Token cost is a stated concern here.
+
+**What is worth borrowing, and how this design differs**
+
+| Polaris idea | Could inform | How the Conductor differs |
+|---|---|---|
+| Two "missions" with their own phases. `software-dev`: research, design, implement, test, review. `research`: question, methodology, gather, analyze, synthesize, publish. (A third, `documentation`, exists; its phases were not read.) | C2 phase skills, and a "research" task type next to feature, bug, refactor, migration, docs | The tier comes from graph facts (blast radius, sensitive paths), not from a model's guess at which mission fits |
+| An interview scaled to the size of the request: 1 to 2 questions for a trivial feature, 5 or more for a critical one | The stop triggers in "When it stops and asks"; it supports the limit "too many questions is a failure too" | The number of questions follows the tier and the scope ledger, and a slot counts as answered only with a verified quote |
+| One isolated **worktree** (a second folder of the same git repository, on its own branch) per work package | Tier 3 tasks (C3 and C5): try each task-list item apart from the main branch | A change reaches the main branch only after the code-run gates pass |
+| A written rules file that every step must follow | The rule ledger's sources (`CLAUDE.md` already counts) | Each rule is marked mechanical (code blocks it) or judgment (a person reviews it) |
+
 ## Decisions for the person who owns the project
 
 1. Start with C1, the read-only plan? (recommended)

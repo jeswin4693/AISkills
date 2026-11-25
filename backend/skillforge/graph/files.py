@@ -41,6 +41,17 @@ def is_test_path(path: str) -> bool:
     )
 
 
+# Folders of tests and of test scaffolding: end-to-end suites, fixtures, mocks. `is_test_path` is left as it is (test counts, risk and coverage all
+# depend on it); this wider rule is only for deciding that an import written in such a folder says nothing about how the project works.
+TEST_SUPPORT_DIRS = frozenset({"e2e", "test", "tests", "__tests__", "spec", "specs", "fixtures", "mocks", "__mocks__", "testing"})
+
+
+def is_test_support_path(path: str) -> bool:
+    """Whether a file sits inside a folder of tests or test scaffolding (an end-to-end suite, fixtures, mocks, a test server). Only a whole folder
+    name counts: `e2e-tools/` does not, and neither does a file that is itself called `e2e.py`. Case does not matter."""
+    return any(part.lower() in TEST_SUPPORT_DIRS for part in path.split("/")[:-1])
+
+
 def _git_files(root: Path) -> list[str] | None:
     try:
         inside = subprocess.run(

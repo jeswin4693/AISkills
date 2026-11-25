@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any
 
 from . import languages
+from .files import is_test_support_path
 from .model import RepoGraph
 
 MIN_BOXES = 6  # fewer top folders than this: look one level deeper, so the picture shows structure and not just "backend" and "tests"
@@ -116,7 +117,9 @@ def _summary(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
     )
     tests = sum(1 for r in recs if r.is_test)
     return {
-        "files": len(recs), "lines": sum(r.lines for r in recs), "test_files": tests, "tests_only": tests == len(recs),
+        # test_files stays the graph's own count (it adds up to the headline); tests_only also counts scaffolding, so an e2e box is tagged "tests"
+        "files": len(recs), "lines": sum(r.lines for r in recs), "test_files": tests,
+        "tests_only": all(r.is_test or is_test_support_path(r.path) for r in recs),
         "symbols": sum(len(r.symbols) for r in recs), "languages": dict(sorted(langs.items())),
         "measured": any(_reads_imports(lang) for lang in langs),
         "top_functions": [{"name": s.name, "file": s.file, "line": s.line, "size": s.size} for s in biggest[:MAX_FUNCTIONS_LISTED]],
@@ -156,7 +159,7 @@ def _arrows(g: RepoGraph, owner: dict[str, str], rank: dict[str, int]) -> tuple[
             continue
         if e.conf != "resolved":
             guesses.add((e.src, e.dst))
-        elif g.files[e.src].is_test:
+        elif g.files[e.src].is_test or is_test_support_path(e.src):  # a test, or scaffolding: an e2e suite or a test server
             from_tests.add((e.src, e.dst))
         else:
             pairs.setdefault((owner[e.src], owner[e.dst]), set()).add((e.src, e.dst))

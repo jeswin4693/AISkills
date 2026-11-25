@@ -26,7 +26,7 @@ design: [superpowers/specs/2026-11-25-architecture-map-design.md](superpowers/sp
 | Rule | Why |
 |---|---|
 | Only **proven** imports are drawn. A `guess` (a name match only) is never drawn or counted as an arrow; the page says how many were left out. | The graph's rule: guesses never count. |
-| Imports **written by test files** are not drawn; the page says how many. | A tests folder would point at every other box. |
+| Imports **written by test files, or by test scaffolding** (a file inside a folder named `e2e`, `fixtures`, `mocks`, `__mocks__` or `testing`, as well as `tests`, `test`, `__tests__`, `spec`, `specs`; whole names only, any case), are not drawn; the page says how many. A box made only of such files is tagged `tests`. Only the side that writes the import is judged: real code that imports a mock is still drawn. | A tests folder would point at every other box. **A real run on this repository** drew `frontend/e2e -> backend/skillforge` (12 file pairs): the browser test's fake server imports the backend, which says nothing about how the project works. The graph's own test rule (`is_test_path`) is unchanged (test counts, risk and coverage depend on it); the wider one (`is_test_support_path`) is used only here and by the guide. |
 | Boxes are folders. If that gives **fewer than six boxes** the map goes one level deeper (up to three levels, `skillforge/api`). A folder every file sits inside (`src/`, or a `focus` folder) is stripped and named. | The first real run: this repository's `backend` folder was three boxes and no arrows. |
 | More than **14 boxes**: the smallest fold into one `(other: N more)` box that lists its folders. | Readability. |
 | A box's id is its **position**, not its name. | A real folder called `(root)` or `(other)` cannot be mistaken for a box the code made. |
@@ -56,6 +56,7 @@ page: `frontend/src/components/repository/ArchitectureMap.tsx` with the layout i
 - A box is one **folder level** (up to three); there is no zoom on the picture itself. To zoom, type a folder in "Only this folder inside it".
 - No function-level call graph, no history of how the structure changed, nothing is saved or exported as an image.
 - It reads the code as it was downloaded or read; it says nothing about a running system.
+- **Test scaffolding is recognised by a folder's whole name** (`e2e`, `fixtures`, `mocks`, `testing`, ...). A fake server or a helper in a folder with another name is still drawn as ordinary code.
 
 ## Checked
 
@@ -96,6 +97,12 @@ between folders were found". Boxes now say "imports not measured" for it, the an
 folders at the ends of a back arrow (the arrows that close the loop) keep the warning outline, so a repository where most folders are tangled together does not turn into a wall of warnings (`loopMarks` in `lib/architecture.ts`, unit-tested and broken on purpose);
 and `left_out.guess` is always 0 today, which was only said in prose: a test now builds real graphs (Python, TypeScript and Java, with an `import util` that could mean either of two files) and asserts that **every import link the graph makes is proven**, so if a
 language ever makes a guessed link that test fails and this document needs a second look. **Not reached by the reviewer:** the page at phone width and real keyboard focus (both were checked by me in the browser suite), and the Linux and macOS case rules.
+
+**Follow-up (2026-11-25, found by a real model run of slice AB's guide on this repository).** The map drew `frontend/e2e -> backend/skillforge` (12 file pairs), all from `frontend/e2e/mock_server.py`, the browser test's fake server, because the
+graph's test rule does not know an `e2e` folder. Fixed test first: 48 new backend tests (19 in `test_architecture.py`, 29 in `test_test_support.py` for the shared rule), 1 new unit test for the page's wording (it now says "tests or test scaffolding", not "test files"),
+and 11 deliberate breaks, all caught. On the real repository the false arrow is gone, the `frontend/e2e` box is tagged `tests`, and exactly those 12 pairs moved to "left out" (the map has no arrows at all there: the TypeScript and the Python never import each other).
+The whole backend suite after the fix: **2,820 pass** (2,772 before, plus the 48), 4 skipped (symbolic links), none failed; the UI has 238 unit tests and a clean typecheck.
+The browser suite was not re-run: only a sentence on the page changed, and the unit test covers it.
 
 **Not verified:** macOS and Linux; a very large repository (the work is linear in files and edges and nothing was timed on a huge one); a screen reader (boxes are buttons with
 names and keyboard use, and the arrows have a text list, but it was not tried); any browser but Edge.

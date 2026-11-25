@@ -239,7 +239,9 @@ export function mapNotes(arch: Architecture): string[] {
   const { guess, from_tests: fromTests } = arch.left_out;
   if (guess > 0) notes.push(`${plural(guess, "guessed link")} (name matches only, not proven) ${guess === 1 ? "is" : "are"} not drawn.`);
   if (fromTests > 0) {
-    notes.push(`${plural(fromTests, "import")} written by test files ${fromTests === 1 ? "is" : "are"} not drawn, so a tests folder does not point at every box.`);
+    notes.push(
+      `${plural(fromTests, "import")} written by tests or test scaffolding (an e2e suite, fixtures, mocks) ${fromTests === 1 ? "is" : "are"} not drawn, so a tests folder does not point at every box.`,
+    );
   }
   // from the answer, not guessed from the level: C# is a "standard" language whose imports are still not turned into links between files
   if (arch.measured && arch.imports_not_read.length > 0) {

@@ -115,7 +115,7 @@ The outline lists the layers, each part with the quote behind it, and each route
   judged, when it does not mention its part.
 * **Imports are the only proof.** A route through a language whose imports are not read (basic, C#) is *not measured*. Two parts in one folder are *one folder*. A hop shows a few file pairs so a reader can see
   whether they are the real link, and files in a folder named for tests or a test server (`e2e`, `tests`, `spec`, `fixtures`, `mocks`, `testing`) are not counted; a test server in a folder with another name still would be.
-  (The architecture map of slice Z does not apply that rule: on this repository it draws a `frontend` to `api` arrow that comes only from the browser test's fake server.)
+  (The architecture map of slice Z applies the same rule, from one shared function: it first drew a `frontend/e2e` to backend arrow that came only from the browser test's fake server, which this guide's first real run showed. See [architecture-map.md](architecture-map.md).)
 * **The page guides the repository that was last read**, not what the box says now, and ignores an answer that comes back after another read.
 * **One call, nothing saved.** It waits for the model (seconds to about a minute), uses a little quota each time and is not remembered after a reload. Documents beyond the caps are not read, and a long one is cut (the page says so).
 * **Strict quoting costs some real parts.** When a model paraphrases instead of copying, a part that really exists is dropped (the real GitHub run lost "Docker Sandbox" and "Web User Interface" this way). Every drop is

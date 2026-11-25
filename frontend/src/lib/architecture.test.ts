@@ -219,8 +219,13 @@ describe("the words under the picture", () => {
   it("says how many guessed links and test imports were left out", () => {
     const notes = mapNotes(arch({ left_out: { guess: 2, from_tests: 1 } })).join("\n");
     expect(notes).toContain("2 guessed links (name matches only, not proven) are not drawn.");
-    expect(notes).toContain("1 import written by test files is not drawn");
+    expect(notes).toContain("1 import written by tests or test scaffolding (an e2e suite, fixtures, mocks) is not drawn");
     expect(mapNotes(arch()).join("\n")).not.toContain("guessed");
+  });
+
+  it("uses the plural for several test imports and says nothing when there are none", () => {
+    expect(mapNotes(arch({ left_out: { guess: 0, from_tests: 12 } })).join("\n")).toContain("12 imports written by tests or test scaffolding (an e2e suite, fixtures, mocks) are not drawn");
+    expect(mapNotes(arch()).join("\n")).not.toContain("scaffolding");
   });
 
   it("names the languages whose imports are not measured, once, and the base folder", () => {

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..graph.architecture import reads_imports
+from ..graph.files import is_test_support_path
 from ..graph.model import RepoGraph
 from .docs import DocSet
 from .models import GuideDraft
@@ -34,8 +35,6 @@ READ_FIRST_FUNCTIONS = 3
 EVIDENCE_PAIRS = 3  # file pairs a hop shows as an example of the imports behind it
 # What the page shows of the model's own words: cut here, so a long answer cannot fill the page.
 NAME, LINE, PLAIN, TITLE = 60, 200, 300, 80
-# A folder with one of these names holds tests, fixtures or a test server, not the project: an import from there says nothing about how it works.
-SUPPORT_DIRS = frozenset({"e2e", "test", "tests", "__tests__", "spec", "specs", "fixtures", "mocks", "__mocks__", "testing"})
 # Words too common in a part's name or folder to show that a quote is about it.
 COMMON_WORDS = frozenset({"the", "and", "for", "with", "src", "lib", "app", "code", "core", "main", "backend", "frontend", "skillforge"})
 
@@ -204,11 +203,6 @@ def under(paths: list[str], folder: str) -> list[str]:
     return [p for p in paths if p == folder or p.startswith(prefix)]
 
 
-def support_path(path: str) -> bool:
-    """Whether a file sits in a folder of tests, fixtures or a test server, whatever the graph calls it."""
-    return any(p.lower() in SUPPORT_DIRS for p in path.split("/")[:-1])
-
-
 def place_facts(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
     """What the graph knows about a part's files: how many, how big, and where to start reading (the biggest files and functions, never tests
     unless the folder is only tests)."""
@@ -295,7 +289,7 @@ def check(draft: GuideDraft, docs: DocSet, g: RepoGraph) -> Checked:
         status = "in_code" if mine else ("external" if p.layer == "outside" and not folder else "docs_only")
         # What a hop can be confirmed by: the part's own files, never a test and never a folder of fixtures or a test server (an import from there
         # says nothing about how the project works).
-        real = [x for x in mine if not g.files[x].is_test and not support_path(x)]
+        real = [x for x in mine if not g.files[x].is_test and not is_test_support_path(x)]
         files[pid] = set(real)
         measured[pid] = any(reads_imports(g.files[x].lang) for x in real)
         parts.append({

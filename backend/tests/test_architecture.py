@@ -3,6 +3,8 @@ guess link, a test file that imports, a language whose imports are not read and 
 
 from __future__ import annotations
 
+import pytest
+
 from skillforge.graph import languages
 from skillforge.graph.architecture import MAX_BOXES, MAX_FILES_LISTED, MAX_FUNCTIONS_LISTED, architecture
 from skillforge.graph.model import Edge, FileRecord, RepoGraph, Symbol
@@ -126,6 +128,49 @@ def test_imports_from_tests_are_not_drawn_and_are_counted():
     boxes = by_label(res)
     assert res["arrows"] == [] and res["left_out"] == {"guess": 0, "from_tests": 1}
     assert boxes["tests"]["tests_only"] is True and boxes["tests"]["test_files"] == 1 and boxes["src"]["tests_only"] is False
+
+
+SERVER_EDGES = [("web/app.py", "api/routes.py")]  # the real code of `web` imports `api`
+
+
+@pytest.mark.parametrize("folder", ["e2e", "E2E", "fixtures", "mocks", "__mocks__", "testing", "tests", "spec"])
+def test_an_import_written_in_a_folder_of_end_to_end_tests_or_mocks_is_not_drawn_and_is_counted(folder):
+    """Found by a real run on this repository: `frontend/e2e/mock_server.py` imports the backend, so the map drew `frontend/e2e -> backend`,
+    as if the web code depended on it. The graph's own rule calls a file a test only inside `tests`, `spec` and a few more; a folder of
+    end-to-end tests, fixtures or mocks is test scaffolding, and an import written there says nothing about how the project works."""
+    res = architecture(mini(py("web/app.py", f"web/{folder}/server.py", "api/routes.py", "pricing/core.py"), [(f"web/{folder}/server.py", "api/routes.py")]))
+    assert drawn(res) == [] and res["left_out"] == {"guess": 0, "from_tests": 1}
+
+
+def test_a_folder_of_test_scaffolding_is_tagged_as_tests_and_does_not_change_the_headline_test_count():
+    res = architecture(mini(py("web/app.py", "web/e2e/server.py", "web/e2e/helper.py", "api/routes.py", "pricing/core.py"), SERVER_EDGES))
+    boxes = by_label(res)
+    assert boxes["web/e2e"]["tests_only"] is True and boxes["web"]["tests_only"] is False
+    assert boxes["web/e2e"]["test_files"] == 0  # test_files stays the graph's own count, so it still adds up to the headline "N of them tests"
+
+
+def test_the_same_import_written_by_ordinary_code_is_still_drawn():
+    res = architecture(mini(py("web/app.py", "web/e2e/server.py", "api/routes.py", "pricing/core.py"), SERVER_EDGES))
+    assert drawn(res) == [("web", "api", 1)] and res["left_out"]["from_tests"] == 0  # an e2e folder next to it does not hide a real import
+
+
+@pytest.mark.parametrize("folder", ["latest", "e2e-tools", "mocking", "fixturesque", "contests", "testsuite", "specification"])
+def test_only_a_whole_folder_name_makes_scaffolding_not_a_part_of_one(folder):
+    res = architecture(mini(py("web/app.py", f"web/{folder}/server.py", "api/routes.py", "pricing/core.py"), [(f"web/{folder}/server.py", "api/routes.py")]))
+    assert drawn(res) == [(f"web/{folder}", "api", 1)] and res["left_out"]["from_tests"] == 0
+
+
+def test_an_import_of_a_file_in_a_mocks_folder_by_ordinary_code_is_still_drawn():
+    """Only the side that writes the import is judged, as with tests: if real code imports a mock, it does depend on it."""
+    res = architecture(mini(py("api/routes.py", "api/mocks/fake.py", "web/app.py", "pricing/core.py"), [("web/app.py", "api/mocks/fake.py")]))
+    assert drawn(res) == [("web", "api/mocks", 1)]
+
+
+def test_every_import_written_in_scaffolding_is_counted_once_per_file_pair():
+    files = py("web/app.py", "web/e2e/a.py", "web/e2e/b.py", "api/routes.py", "pricing/core.py")
+    edges = [("web/e2e/a.py", "api/routes.py"), ("web/e2e/a.py", "pricing/core.py"), ("web/e2e/b.py", "api/routes.py")]
+    res = architecture(mini(files, edges))
+    assert res["arrows"] == [] and res["left_out"]["from_tests"] == 3
 
 
 def test_unmeasured_languages_are_said_not_drawn_as_independent():

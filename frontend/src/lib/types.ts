@@ -537,7 +537,7 @@ export interface Architecture {
   language_levels: Record<string, string>;
   /** Languages in this repository whose imports the graph does not turn into links between files (basic level, and C#). Their boxes have no arrows. */
   imports_not_read: string[];
-  /** Links that were found but not drawn: name-only guesses, and imports written by test files. */
+  /** Links that were found but not drawn: name-only guesses, and imports written by tests or test scaffolding (an e2e suite, fixtures, mocks). */
   left_out: { guess: number; from_tests: number };
   notes: string[];
 }

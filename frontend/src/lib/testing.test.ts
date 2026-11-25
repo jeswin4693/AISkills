@@ -81,16 +81,31 @@ describe("cost", () => {
 
 describe("blockerAdvice", () => {
   it("gives a different next step for each reason a skill cannot be run, and none when it can", () => {
-    const texts = (["no_cases", "needs_tools", "nothing_runnable"] as const).map(blockerAdvice);
-    expect(new Set(texts).size).toBe(3);
-    expect(texts.every((t) => t.length > 20)).toBe(true);
-    expect(blockerAdvice("")).toBe("");
+    for (const canEdit of [true, false]) {
+      const texts = (["no_cases", "needs_tools", "nothing_runnable"] as const).map((b) => blockerAdvice(b, canEdit));
+      expect(new Set(texts).size).toBe(3);
+      expect(texts.every((t) => t.length > 20)).toBe(true);
+      expect(blockerAdvice("", canEdit)).toBe("");
+    }
   });
 
   it("tells a person with a tool-using skill that the Lab cannot help it, instead of offering a fix that does not exist", () => {
-    expect(blockerAdvice("needs_tools")).toMatch(/use it for real/i);
-    expect(blockerAdvice("needs_tools")).not.toMatch(/add .*test cases|build it again|import it as a new version/i); // more test cases would not make it runnable
-    expect(blockerAdvice("no_cases")).toMatch(/build it again/i); // and for a skill that can be helped, the way is named
+    for (const canEdit of [true, false]) {
+      expect(blockerAdvice("needs_tools", canEdit)).toMatch(/use it for real/i);
+      expect(blockerAdvice("needs_tools", canEdit)).not.toMatch(/write|below|latest version|build it again/i); // more test cases would not make it runnable
+    }
+  });
+
+  it("points at the editor below when it is on the page, and only then", () => {
+    expect(blockerAdvice("no_cases", true)).toMatch(/write some below/i);
+    expect(blockerAdvice("nothing_runnable", true)).toMatch(/fix them below/i);
+  });
+
+  it("says where to go when the editor is not here, because the version is not the latest, and never says 'below'", () => {
+    for (const b of ["no_cases", "nothing_runnable"] as const) {
+      expect(blockerAdvice(b, false)).toMatch(/open the latest version/i);
+      expect(blockerAdvice(b, false)).not.toMatch(/below/i);
+    }
   });
 });
 

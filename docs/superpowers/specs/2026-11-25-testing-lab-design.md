@@ -101,9 +101,10 @@ The exact words; layout details; whether the pickers remember the last skill (no
 
 * A **Test cases** section on the Lab page for the chosen version: the current cases, add / edit / remove, and **Keep as a new version**.
   A case is a name, a kind (positive, negative, edge), the message to send, and 1 to 3 checks, each one of the seven kinds with a value and the reason it is there.
-* `PUT /api/library/{name}/tests` `{base_version, cases, note?}`. The server validates every case with the same rules the harness uses (`assertion_problem`), writes
+* `POST /api/library/{name}/tests` `{base_version, cases, note?}` (**a POST, not the PUT first written here**: this API's CORS policy allows only GET, POST and DELETE, so a browser could not send a PUT, and the API's other writes are POSTs). The server validates every case with the same rules the harness uses (`assertion_problem`), writes
   `tests/cases.json` into a copy of **the latest version's files** and keeps it only through `import_source`, so the static checks run and a refusal leaves the library untouched.
   `base_version` must be the latest (409 otherwise): a person never silently drops a newer change. Identical content makes no new version.
+  Found while building it: the definition file `skill.sdm.json` holds a second copy of the tests (a rebuild renders from it), so a save updates **both**, and stops if the definition cannot be read rather than leave two copies that disagree. `GET /api/library/{name}/tests` lists every case of a version, the ones that cannot be run too, so they can be fixed.
 * Limits to say in the page: tests a person writes still only reach what the seven checks can say; an edit makes a new version (older ones are kept, as everywhere).
 
 ## Done means

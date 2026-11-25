@@ -79,15 +79,22 @@ export function repeatNote(runs: number): string | null {
   return runs < 3 ? "Models vary from run to run, so one repeat of each test can mislead. Repeat 3 times before trusting a small difference." : null;
 }
 
-/** What a person can do when a skill cannot be run. Only what exists today: the advice never points at a button that is not there. */
-export function blockerAdvice(blocker: EvalBlocker): string {
+/**
+ * What a person can do when a skill cannot be run. The advice never points at a button that is not on the page: `canEdit` says whether the
+ * editor is (it is only offered on the latest version, because a save always makes the next version).
+ */
+export function blockerAdvice(blocker: EvalBlocker, canEdit: boolean): string {
   switch (blocker) {
     case "needs_tools":
       return "Install it and use it for real: that is the test that matters for a skill like this.";
     case "no_cases":
-      return "It has no test cases yet. Build it again in the Builder (a built skill comes with test cases), or add a tests/cases.json to it and import it as a new version.";
+      return canEdit
+        ? "It has no test cases yet. Write some below: a message to send, and the checks the reply must pass."
+        : "It has no test cases yet. Open the latest version: test cases can only be written there, because saving them makes the next version.";
     case "nothing_runnable":
-      return "Its test cases have no message to send or no check to run (they were saved before test cases could be run). Build it again in the Builder, or add messages and checks and import it as a new version.";
+      return canEdit
+        ? "Its test cases have no message to send or no check to run (they were saved before test cases could be run). Fix them below, or write new ones."
+        : "Its test cases have no message to send or no check to run. Open the latest version: they can only be fixed there, because saving them makes the next version.";
     default:
       return "";
   }

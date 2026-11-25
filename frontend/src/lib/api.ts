@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AuthStatus, BuildSession, BuildSummary, CasesView, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
   SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -158,6 +158,17 @@ export const api = {
     return get<EvalRunSummary[]>(`/api/evals${q.size ? `?${q}` : ""}`);
   },
   retryEval: (id: string) => post<EvalRun>(`/api/evals/${encodeURIComponent(id)}/retry`, {}),
+  /** Every test case of a skill version, the ones that cannot be run too (so they can be fixed). */
+  skillCases: (name: string, version?: number) =>
+    get<CasesView>(`/api/library/${encodeURIComponent(name)}/tests${version ? `?version=${version}` : ""}`),
+  /** Keep cases as a NEW version of the skill (the latest only). 200 and 422 both carry a report (kept, or refused by a check); a case that could
+   *  not be run is a 400 that names it, and an edit of a version that is no longer the latest is a 409. */
+  async saveCases(name: string, body: { base_version: number; note: string; cases: unknown[] }): Promise<ImportResult> {
+    const res = await send(`/api/library/${encodeURIComponent(name)}/tests`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return json<ImportResult>(res, [422]);
+  },
 
   // ---- evidence: the code a stored skill cites, and what changed in it ----
   evidence: (name: string, version?: number, kind?: string) =>

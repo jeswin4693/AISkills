@@ -420,6 +420,12 @@ def test_the_same_conversation_works_on_real_threads_with_the_browser_polling(ma
     assert wait_for(env, sid, "awaiting_approval")["spec"]["goal"]
     assert env.post(sid, "approve").json()["status"] == "working"
     done = wait_for(env, sid, "done")
+    # The session is marked done in one transaction and its job "succeeded" in the next, a moment later: on a busy machine a poll can land
+    # between them (it failed once, with a browser suite running beside it). So wait for the second update instead of asserting both at once.
+    end = time.time() + 5
+    while done["job"]["status"] != "succeeded" and time.time() < end:
+        time.sleep(0.02)
+        done = env.get(sid)
     assert done["result"]["status"] == "ok" and done["job"]["status"] == "succeeded"
     assert any("Designing" in e["message"] for e in done["job"]["events"])
 

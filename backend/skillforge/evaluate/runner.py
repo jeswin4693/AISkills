@@ -69,13 +69,49 @@ def needs_tools_reason(permissions: list[str], has_scripts: bool) -> str:
     return " and ".join(why)
 
 
+def _text_of(files: Mapping[str, str | bytes], rel: str) -> str | None:
+    data = files.get(rel)
+    return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
+
+
+def _sdm_of(files: Mapping[str, str | bytes]) -> dict:
+    """The skill's own definition file as a dict ({} when there is none or it is not an object)."""
+    text = _text_of(files, "skill.sdm.json")
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def tests_of(files: Mapping[str, str | bytes]) -> tuple[list[SkillTest], int]:
+    """The test cases a skill folder holds, and how many entries could not be read (they are skipped, never run, so a person who edits
+    the cases is told that saving drops them). `tests/cases.json` is read first; the definition's own copy is the fallback."""
+    raw: object = None
+    cases_text = _text_of(files, "tests/cases.json")
+    if cases_text:
+        try:
+            raw = json.loads(cases_text)
+        except ValueError:
+            raw = None
+    if raw is None:
+        raw = _sdm_of(files).get("tests")
+    tests: list[SkillTest] = []
+    unreadable = 0
+    if isinstance(raw, list):
+        for item in raw:
+            try:
+                tests.append(SkillTest.model_validate(item))
+            except ValidationError:
+                unreadable += 1
+    return tests, unreadable
+
+
 def load_files(files: Mapping[str, str | bytes]) -> LoadedSkill:
     """A skill held in memory (path -> text or bytes), as the builder and the library hold them."""
-    def text_of(rel: str) -> str | None:
-        data = files.get(rel)
-        return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
-
-    skill_md = text_of("SKILL.md")
+    skill_md = _text_of(files, "SKILL.md")
     if skill_md is None:
         raise ValueError("There is no SKILL.md in this folder, so there is no skill to run.")
     name = ""
@@ -86,33 +122,9 @@ def load_files(files: Mapping[str, str | bytes]) -> LoadedSkill:
         front = None
     if isinstance(front, dict) and isinstance(front.get("name"), str):
         name = front["name"]
-    permissions: list[str] = []
-    sdm_text = text_of("skill.sdm.json")
-    sdm: dict = {}
-    if sdm_text:
-        try:
-            parsed = json.loads(sdm_text)
-            sdm = parsed if isinstance(parsed, dict) else {}
-        except ValueError:
-            sdm = {}
-        perms = sdm.get("permissions", [])
-        permissions = [str(p) for p in perms] if isinstance(perms, list) else []
-    raw: object = None
-    cases_text = text_of("tests/cases.json")
-    if cases_text:
-        try:
-            raw = json.loads(cases_text)
-        except ValueError:
-            raw = None
-    if raw is None:
-        raw = sdm.get("tests")
-    tests: list[SkillTest] = []
-    if isinstance(raw, list):
-        for item in raw:
-            try:
-                tests.append(SkillTest.model_validate(item))
-            except ValidationError:
-                continue
+    perms = _sdm_of(files).get("permissions", [])
+    permissions = [str(p) for p in perms] if isinstance(perms, list) else []
+    tests, _ = tests_of(files)
     return LoadedSkill(name or "skill", skill_md, tests, needs_tools_reason(permissions, any(r.startswith("scripts/") for r in files)))
 
 

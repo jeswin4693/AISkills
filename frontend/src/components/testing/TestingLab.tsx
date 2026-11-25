@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { callsFor, costText, parseVersion, pickVersion, repeatNote, runChoices } from "@/lib/testing";
 import { useAsync } from "@/lib/useAsync";
 import { useEvalRun } from "@/lib/useEvalRun";
+import { CaseEditor } from "./CaseEditor";
 import { PreviewPanel } from "./PreviewPanel";
 import { ResultView } from "./ResultView";
 import { RunHistory } from "./RunHistory";
@@ -31,7 +32,7 @@ function Field({ label, children }: { label: string; children: (id: string) => R
 }
 
 /** Everything about one version of one skill. Keyed by the pair, so choosing another starts a clean page: no result or choice carries over. */
-function LabFor({ name, version, latest }: { name: string; version: number; latest: number }) {
+function LabFor({ name, version, latest, onSaved }: { name: string; version: number; latest: number; onSaved: (version: number) => void }) {
   const preview = useAsync(() => api.evalPreview(name, version), `testing-preview/${name}/${version}`);
   const history = useAsync(() => api.evalRuns(name, version), `testing-history/${name}/${version}`);
   const provider = useAsync(api.provider, "testing-provider");
@@ -41,6 +42,7 @@ function LabFor({ name, version, latest }: { name: string; version: number; late
   const [baseline, setBaseline] = useState(true);
   const [busy, setBusy] = useState<"start" | "retry" | null>(null);
   const [problem, setProblem] = useState<Error | null>(null);
+  const [editing, setEditing] = useState(false);
 
   // A page that is opened (or reloaded) shows the run that is still going, else the latest one, so a result is never lost by leaving the page.
   const rows = history.data;
@@ -92,6 +94,9 @@ function LabFor({ name, version, latest }: { name: string; version: number; late
   const p = preview.data;
   const calls = callsFor(p.cases.length, repeats, baseline);
   const note = repeatNote(repeats);
+  // Saving test cases makes the next version, so they can only be written on the latest. A skill that needs tools gets no editor: more cases would not make it runnable.
+  const canEdit = version === latest;
+  const needsCases = !p.runnable && (p.blocker === "no_cases" || p.blocker === "nothing_runnable");
 
   return (
     <div className="space-y-6">
@@ -100,7 +105,15 @@ function LabFor({ name, version, latest }: { name: string; version: number; late
           A run asks a model, so it cannot start yet. <Link href="/settings" className="underline">Set one up in Settings</Link>.
         </Alert>
       )}
-      <PreviewPanel preview={p} />
+      <PreviewPanel preview={p} canEdit={canEdit} />
+      {needsCases && canEdit && <CaseEditor name={name} version={version} onSaved={onSaved} />}
+      {p.runnable && canEdit && (editing ? (
+        <CaseEditor name={name} version={version} onSaved={onSaved} />
+      ) : (
+        <div>
+          <Button onClick={() => setEditing(true)}>Edit the test cases…</Button>
+        </div>
+      ))}
       {p.runnable && (
         <Card className="p-4">
           <h2 className="font-semibold">Run it</h2>
@@ -159,7 +172,19 @@ export function TestingLab() {
   const version = pickVersion(list, wanted);
   const latest = list.length ? Math.max(...list.map((v) => v.version)) : undefined;
 
+  const [saved, setSaved] = useState<string | null>(null);
+
   const go = (n: string, v?: number) => router.replace(`/testing${n ? `?name=${encodeURIComponent(n)}${v ? `&version=${v}` : ""}` : ""}`, { scroll: false });
+  const choose = (n: string, v?: number) => {
+    setSaved(null);
+    go(n, v);
+  };
+  // The page moves to the new version. The notice lives here, not in the editor, because the editor is replaced when the version changes.
+  const onSaved = (v: number) => {
+    setSaved(`Saved as v${v}. Your test cases are now the latest version, and every older version is kept.`);
+    versions.reload();
+    go(name, v);
+  };
 
   return (
     <>
@@ -181,7 +206,7 @@ export function TestingLab() {
             <div className="flex flex-wrap items-end gap-4">
               <Field label="Skill">
                 {(id) => (
-                  <select id={id} className={SELECT} value={name} onChange={(e) => go(e.target.value)}>
+                  <select id={id} className={SELECT} value={name} onChange={(e) => choose(e.target.value)}>
                     <option value="">Choose a skill…</option>
                     {(skills.data ?? []).map((s) => (
                       <option key={s.name} value={s.name}>
@@ -194,7 +219,7 @@ export function TestingLab() {
               {name && list.length > 0 && version !== undefined && (
                 <Field label="Version">
                   {(id) => (
-                    <select id={id} className={SELECT} value={version} onChange={(e) => go(name, Number(e.target.value))}>
+                    <select id={id} className={SELECT} value={version} onChange={(e) => choose(name, Number(e.target.value))}>
                       {list.map((v) => (
                         <option key={v.version} value={v.version}>
                           {v.tag}
@@ -208,9 +233,14 @@ export function TestingLab() {
             </div>
           </Card>
         )}
+        {saved && (
+          <Alert tone="ok" title="Your test cases were saved" onDismiss={() => setSaved(null)}>
+            {saved}
+          </Alert>
+        )}
         {name && versions.error && <ErrorBox error={versions.error} onRetry={versions.reload} />}
         {name && !versions.error && versions.data === undefined && <Loading what={name} />}
-        {name && version !== undefined && latest !== undefined && <LabFor key={`${name}/${version}`} name={name} version={version} latest={latest} />}
+        {name && version !== undefined && latest !== undefined && <LabFor key={`${name}/${version}`} name={name} version={version} latest={latest} onSaved={onSaved} />}
       </div>
     </>
   );

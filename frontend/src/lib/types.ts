@@ -858,3 +858,33 @@ export interface RecheckReport {
   notes: string[];
   limits: string;
 }
+
+// ---- the Testing Lab's own test cases (docs/testing-lab.md, "Your own test cases") -----------------------
+
+export interface CaseCheck {
+  kind: string;
+  value: string;
+  why: string;
+}
+
+/** One test case of a skill version, as the editor reads it. A case saved before test cases could be run has an empty message and no checks. */
+export interface CaseDoc {
+  name: string;
+  kind: string; // positive, negative, edge
+  message: string;
+  covers: string[];
+  runnable: boolean;
+  checks: CaseCheck[];
+}
+
+export interface CasesView {
+  name: string;
+  version: number;
+  tag: string;
+  content_hash: string;
+  latest: boolean; // only the latest version can be edited
+  needs_tools: string; // why the Lab cannot run these cases ("" when it can); they are still the person's to edit
+  unreadable: number; // entries of tests/cases.json that could not be read: a save drops them
+  limits: { max_cases: number; max_checks: number; max_name: number; max_message: number; max_value: number; max_why: number };
+  cases: CaseDoc[];
+}

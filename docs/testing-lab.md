@@ -67,11 +67,42 @@ The engine is the one `skillforge eval` already had ([evaluate.md](evaluate.md))
 
 It works in the hosted version too: it reads the server's library and asks the server's model, like a build does (nothing reads a folder).
 
+## Your own test cases (slice AE)
+
+The Lab's main limit was that the model that wrote a skill also wrote its tests. On the Lab page a person can now **write the cases themselves**, and keep them as a **new version** of the skill.
+
+```
+ Your test cases
+   Case 1                                                         [Remove case]
+     Name [ short change ]            Kind [ positive: the usual case, it should work v ]
+     Message sent to the model (exactly what a person would type)
+       [ fixed the login button alignment on mobile ]
+     The reply must pass (1 to 3 checks)
+       The reply [ has a first line of at most … characters v ]  Number [ 50 ]  Why [ the title is at most 50 characters ]   [Remove]
+       [Add a check]
+   [Add a case]
+   Before this can be saved
+     - Case 2 ('x'): it needs a message to send.
+   Note [ ... ]                         [ Keep as a new version (v2) ]
+```
+
+* **Where it appears.** For a skill with no cases, or whose cases have no message or no check (the Lab's old advice is now this editor), on the **latest** version; for a runnable skill behind an **Edit the test cases…** button. A skill that **needs tools gets no editor**: more cases would not make it runnable.
+  An older version offers none and says "Open the latest version": a save always makes the **next** version.
+* **A case** is a name, a kind (positive, negative, edge), the exact message, and one to three of the seven checks with a value and an optional reason. An old case saved before cases could be run is shown with its name and an empty message, with a hint where to add a check.
+* **The page says what would stop a save before it is pressed**, by the same rules the server applies (a name, a name not used twice, a message, at least one check, a whole number from 1 to 1,000,000 for a size, a pattern of at most 80 characters, the sizes); the server checks again, and also the rule that needs Python (a pattern that repeats a repeat could hang the checker).
+  Every problem of every case is listed in one go, naming the case.
+* **A save is a new version through the library's checked import**: `tests/cases.json` is written the way the builder writes it (indented, every character kept), **and the definition file `skill.sdm.json`'s own copy of the tests is updated with it** when it has one, so a later rebuild cannot bring the old tests back (and a definition that cannot be read stops the save rather than leave two copies that disagree).
+  Everything else in the folder is carried over unchanged. The static checks run: **a message pasted with a hidden character is refused** and said in words (nothing stored), wording that only warns is kept with its warning.
+* **A case whose words did not change keeps the descriptions it had** (`input_description`, `expected_result`); a changed or new one gets descriptions worked out from what the person wrote, never left stale.
+* **A newer version made meanwhile is never dropped**: the edit names the version it was made on, and a save is refused (409, "A newer version exists") when that is no longer the latest.
+* **Saving the same cases twice makes one version**, not two. The new version is marked `tests` / "edited in the Testing Lab" with the person's note, and shows in the library, the compare page and the risk diff like any change.
+
 ## Limits (said plainly)
 
 * **A skill that needs tools cannot be run here**, and that is **most skills about code**. On 2026-11-25 none of the three skills saved on the author's machine could be run: one needs `read_files`, one was saved before test cases had messages, one was imported with no test cases.
   The Lab says so honestly; it does not pretend a model with no tools is an agent. For those skills the test that matters is still installing the skill and using it.
-* **The tests were written by the same model that wrote the skill** (for a built skill), so a skill can pass weak tests. Read the cases the page lists before believing a verdict. (Slice AE adds test cases written by the person.)
+* **The tests of a built skill were written by the same model that wrote it**, so a skill can pass weak tests. Read the cases the page lists before believing a verdict. Cases a person writes themselves (above) are the stronger answer, but they still reach only what the seven checks can say, and a person can write weak ones too.
+* **The README's count of test cases is not rewritten** when cases are edited (a built skill's README says how many it has); only `tests/cases.json` and the definition's copy are.
 * **One model, a small sample, repeats of 1 to 5.** A single run is noisy: the first and second runs of the same build in `evaluate.md` said 0 of 3 and 2 of 6 without the skill.
 * **Only what the seven checks can say** is checked (text, a pattern, length). Not facts, not tone, not "is this a good summary".
 * **A run spends the model's quota**, and the page says how much before it starts. Nothing is counted in tokens per run (the AI engine's usage table is per builder session).
@@ -96,8 +127,31 @@ with the skill it asked, and kept the title short. **That run showed that the re
 **Not verified:** the hosted version's sign-in with this page (it adds nothing of its own); a skill with many cases and repeats (a run of 12 cases x 5 repeats x 2 is 120 calls: bounded, but not timed); a model that is slow for minutes (the page polls and tolerates five failed polls, which was not forced in the browser);
 macOS and Linux; a screen reader beyond the native controls (labels are tied to controls by id; the progress bar has `role=progressbar`); any browser but Edge.
 
-## Next (slice AE and AF)
+## Checked, slice AE: your own test cases (2026-11-25)
 
-* **AE: the person's own test cases.** The Lab's "cannot be run" advice for a skill with no usable cases should become a button: write cases (a message and checks from the seven kinds) and keep them as a new version through the library's checked import
-  ([design](superpowers/specs/2026-11-25-testing-lab-design.md)). That is what makes `git-commit-writer` and `meeting-notes-summarizer` runnable.
-* **AF: the Quality Report**, built after this one on purpose: it gathers the checks, the token cost, the criteria and their tests, and (now) the latest test result for a version, and had little to show before the Lab kept results.
+**Tests.** Backend: **2,930 collected, 4 skipped (symbolic links)**, 44 new in `test_case_editor.py` (2,886 before); web: **322 unit tests** (28 new: `lib/cases.test.ts`, and two for the changed advice) and a clean typecheck; browser (real Edge, the real API, a scripted fake model, side ports): **92 of 92** (86 before; 6 new steps: a
+runnable skill offers its cases and nothing can be saved until something changes; the first case of a skill that had none is written, the page names what is missing before the button is pressed, and the Lab then runs it and says "Too few test cases to say" for one case; an old case with no message or check is shown by name, with a hint where to add a check, and the fixed one runs and its descriptions are worked out
+again; an edit of a version that is no longer the latest is refused with "A newer version exists" and stores nothing; a message pasted with a hidden character is refused by the library's own checks, said in words with the line, and stores nothing; no sideways scrolling at phone width).
+
+**Deliberate breaks: 35, all caught** (18 backend, 17 page logic). Two were not caught at first and both were my tests' fault, not the code's: nothing checked that a changed *check* (not only a changed message) refreshes a case's `expected_result`, so it could have described checks that no longer exist (a test now does); and one "break" of the page's order-comparison was not a break at all (calling `.sort()` on objects sorts nothing), so
+it was rewritten to really ignore order and caught.
+
+**Found while building it, and fixed:**
+* The design said `PUT`. **This API's CORS policy allows only GET, POST and DELETE**, so a browser could not have sent it, though every offline test would have passed. It is a `POST`, like the API's other writes.
+* A built skill keeps **two copies of its tests** (`tests/cases.json` and the `tests` list inside `skill.sdm.json`, which a rebuild renders from). Editing one would have let a later rebuild bring the old tests back; a save now updates both, and stops if the definition cannot be read.
+* A save files a version under the name the skill gives itself, so a skill filed under a different library name would have created a **second skill** instead of a new version. A guard refuses it.
+* A case with no checks showed an empty list and no hint (the browser run failed on it): the page now says "No checks yet" and where to add one. The selected check was cut off in a narrow dropdown: widened.
+* An existing test (`test_the_same_conversation_works_on_real_threads_with_the_browser_poll`) failed once, with a browser suite running beside it: it asserted at once that the session is done *and* its job succeeded, but those are two updates a moment apart. It now waits for the second. (A race in the test, not in the product.)
+
+**Real run on your own skill (2026-11-25, `gemini-3.5-flash-lite`, the real HTTP API on a COPY of your library, so the real one was not touched):** `meeting-notes-summarizer` had no test cases, so the Lab said "no test cases". Three cases were written from the skill's own rules (ask when no notes are pasted; write "unassigned" for a task with no owner; do not invent) and saved through the API as `v2`
+("tests", with the note); the Lab then ran them in 14 s: **2 of 3 with the skill, 2 of 3 without it, "no difference"**. The reading of the replies is the useful part, and it is a lesson about the limits of the seven checks:
+* **With the skill it failed my third case** with `Sam: Write the test plan (due date: unassigned)`: it used the word "unassigned" for a missing *due date*, which the skill never asked for (it says to write it when there is no *owner*). So the check caught a real, mild misbehaviour, and the skill's wording is a little loose.
+* **Without the skill it "passed" that case by doing nothing the skill is for**: one line, "Notes received and recorded: ...", no summary, no decisions, no action items. A "must not say X" check is passed by an answer that does not do the job at all. And the two sides both scored 2 of 3 for opposite reasons (the skill failed one the model passed; the model failed one the skill passed).
+  So **"no difference" here does not mean the skill is useless**: the seven checks cannot express "did the job". Tests that name what a good answer must contain (as the second case does: "unassigned" and "Priya") are worth more than tests that only name what it must not.
+
+**Not verified:** the editor against a very large library or 30 cases of 4,000 characters (bounded, not timed); two people saving at once (the second is refused as stale, which is the rule, but a simultaneous race at the file level was not provoked); a screen reader beyond native controls and labels tied by id; any browser but Edge.
+
+## Next
+
+* **AF: the Quality Report page**: it gathers a version's checks, token cost, which criteria have tests (now including a person's own cases, which carry no criteria unless they were kept) and the latest Lab result, and had little to show before the Lab kept results.
+* An **independent review** of slices AD and AE together is still owed (earlier slices W, X, Y, Z and AB each had one and each found real bugs).

@@ -917,7 +917,8 @@ try {
     await skillPicker().selectOption("e2e-demo");
     await page.getByText(/e2e-demo v\d+ cannot be run here/).waitFor();
     await page.getByText(/this skill has no test cases/i).waitFor();
-    await page.getByText(/Build it again in the Builder/).waitFor();
+    await page.getByText(/Write some below/).waitFor(); // on the latest version the advice points at the editor, which is on the page
+    await page.getByRole("heading", { name: "Your test cases", level: 2 }).waitFor();
     assert.equal(await page.getByRole("button", { name: "Run the tests" }).count(), 0, "a skill that cannot be run offers no run");
   });
   await step("a skill that needs tools says a model with no tools cannot stand in for an agent", async () => {
@@ -927,6 +928,7 @@ try {
     await page.getByText(/todo-counter-e2e v\d+ cannot be run here/).waitFor();
     await page.getByText(/needs tools \(it asks for read_files\)/).waitFor();
     await page.getByText(/Install it and use it for real/).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Your test cases" }).count(), 0, "more test cases would not make a tool-using skill runnable, so no editor is offered");
     await shot(page, "41-lab-needs-tools");
   });
   await step("a skill with runnable tests lists what would run, and says what it will cost before anything is asked", async () => {
@@ -997,6 +999,126 @@ try {
     await page.getByRole("button", { name: "Run the tests" }).waitFor();
     assert.equal(await page.getByText("The skill helped", { exact: true }).count(), 0, "v2 was never run, so no verdict may be shown for it");
     assert.equal(await page.getByRole("heading", { name: "Earlier runs of this version" }).count(), 0);
+  });
+  // ---- the person's own test cases (slice AE) ----
+  const plainZip = (name, extra = {}) => makeZip({
+    [`${name}/SKILL.md`]: `---\nname: ${name}\ndescription: Writes a short commit message from a description of what changed.\n---\n# ${name}\n\nWrite a title of at most 50 characters, starting with a verb.\n`,
+    [`${name}/README.md`]: "A demo.\n", ...extra,
+  });
+  const keepButton = () => page.getByRole("button", { name: /Keep as a new version/ });
+  const typeCheck = async (kind, value, why = "") => {
+    await page.getByLabel("The reply", { exact: true }).last().selectOption(kind);
+    await page.getByLabel(/^(Number|Text or pattern)$/).last().fill(value);
+    if (why) await page.getByLabel("Why (optional)", { exact: true }).last().fill(why);
+  };
+  await step("a runnable skill offers its cases for editing, and nothing can be saved until something changes", async () => {
+    await page.goto(UI + "/testing?name=lab-demo"); // the latest version (v2: the newer-version step made it): a save always makes the next one
+    await page.getByRole("button", { name: "Edit the test cases…" }).waitFor({ timeout: 30000 });
+    await page.getByRole("button", { name: "Edit the test cases…" }).click();
+    await page.getByRole("heading", { name: "Your test cases", level: 2 }).waitFor();
+    for (const n of ["Case 1", "Case 2", "Case 3"]) await page.getByRole("heading", { name: n, level: 4 }).waitFor();
+    assert.equal(await page.getByLabel("Name", { exact: true }).first().inputValue(), "short change");
+    assert.ok(await keepButton().isDisabled(), "nothing was changed, so there is nothing to keep");
+    await page.getByLabel("Name", { exact: true }).first().fill("short change, renamed");
+    assert.ok(await keepButton().isEnabled(), "a changed name is a change");
+    await page.getByLabel("Name", { exact: true }).first().fill("short change");
+    assert.ok(await keepButton().isDisabled(), "changing it back is no change");
+  });
+  await step("the first test case of a skill that had none is written in the page, and the Lab then runs it", async () => {
+    const r = await importZip("lab-blank", plainZip("lab-blank"));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    await page.goto(UI + "/testing?name=lab-blank");
+    await page.getByText(/this skill has no test cases/i).waitFor({ timeout: 30000 });
+    await page.getByText(/Write some below/).waitFor();
+    assert.ok(await keepButton().isDisabled());
+    // a name alone is not enough: the page says what is missing, before the person presses anything
+    await page.getByLabel("Name", { exact: true }).fill("short change");
+    await page.getByText("Before this can be saved").waitFor();
+    await page.getByText(/needs a message to send/).waitFor();
+    assert.ok(await keepButton().isDisabled());
+    await page.getByLabel(/^Message sent to the model/).fill("fixed the login button alignment on mobile");
+    await typeCheck("first_line_max_chars", "fifty");
+    await page.getByText(/needs a whole number from 1 to 1000000, not 'fifty'/).waitFor();
+    await typeCheck("first_line_max_chars", "50", "the title is at most 50 characters");
+    assert.equal(await page.getByText("Before this can be saved").count(), 0, "every problem is fixed");
+    await shot(page, "46-lab-editor");
+    await page.getByLabel("Note for the new version (optional)").fill("my first cases");
+    await keepButton().click();
+    await page.getByText(/Saved as v2\./).waitFor();
+    await page.getByRole("heading", { name: "What would run", level: 2 }).waitFor();
+    await page.getByText("short change", { exact: true }).first().waitFor();
+    await page.getByText(/has a first line of at most 50 characters/).waitFor();
+    // the new version is in the library, from the page, with the note and where it came from
+    const versions = await page.evaluate(async (api) => (await fetch(`${api}/api/library/lab-blank`)).json(), API);
+    assert.deepEqual(versions.versions.map((v) => [v.tag, v.source_kind, v.note]).sort(), [["v1", "zip", ""], ["v2", "tests", "my first cases"]]);
+    // one case is too few to say whether the skill helps: the Lab says that and does not round it up
+    await page.getByRole("button", { name: "Run the tests" }).click();
+    await page.getByText("Too few test cases to say", { exact: true }).waitFor({ timeout: 60000 });
+    await shot(page, "47-lab-too-few");
+  });
+  await step("a case saved before cases could be run is shown with its name so it can be fixed, and the fixed one runs", async () => {
+    const old = JSON.stringify([{ name: "old case", kind: "positive", input_description: "x", expected_result: "y", covers: ["AC1"] }]);
+    const r = await importZip("lab-old", plainZip("lab-old", { "lab-old/tests/cases.json": old }));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    await page.goto(UI + "/testing?name=lab-old");
+    await page.getByText(/have no message to send or no check to run/).waitFor({ timeout: 30000 });
+    await page.getByText(/Fix them below/).waitFor();
+    assert.equal(await page.getByLabel("Name", { exact: true }).inputValue(), "old case");
+    assert.equal(await page.getByLabel(/^Message sent to the model/).inputValue(), "");
+    await page.getByLabel(/^Message sent to the model/).fill("fixed the login button alignment on mobile");
+    await page.getByText(/No checks yet/).waitFor(); // the old case had none: the page says so and where to add one
+    await page.getByRole("button", { name: "Add a check" }).click();
+    await typeCheck("max_chars", "200");
+    await keepButton().click();
+    await page.getByText(/Saved as v2\./).waitFor();
+    await page.getByRole("heading", { name: "What would run", level: 2 }).waitFor();
+    await page.getByText("old case", { exact: true }).first().waitFor();
+    // the old descriptions ("x", "y") are not kept for a case whose words changed: they are worked out from what the person wrote
+    const files = await page.evaluate(async (api) => (await fetch(`${api}/api/library/lab-old/versions/2/files/tests/cases.json`)).json(), API);
+    const stored = JSON.parse(files.text);
+    assert.equal(stored[0].run_input, "fixed the login button alignment on mobile");
+    assert.equal(stored[0].expected_result, "The reply is at most 200 characters");
+  });
+  await step("an edit of a version that is no longer the latest is refused and names the newer one, so nothing newer is lost", async () => {
+    await page.goto(UI + "/testing?name=lab-blank");
+    await page.getByRole("button", { name: "Edit the test cases…" }).click();
+    await page.getByLabel("Name", { exact: true }).fill("short change, renamed");
+    // someone saves a newer version while this page is open
+    const r = await importZip("lab-blank", plainZip("lab-blank", { "lab-blank/notes.md": "A newer change.\n" }));
+    assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    await keepButton().click();
+    await page.getByText("A newer version exists", { exact: true }).waitFor();
+    await page.getByText(/The latest version is v3/).waitFor();
+    const versions = await page.evaluate(async (api) => (await fetch(`${api}/api/library/lab-blank`)).json(), API);
+    assert.equal(versions.versions.length, 3, "the stale edit stored nothing");
+    // an older version offers no editor: saving makes the next version, so it can only be done from the latest
+    await page.goto(UI + "/testing?name=lab-blank&version=1");
+    await page.getByText(/Open the latest version/).first().waitFor({ timeout: 30000 });
+    assert.equal(await page.getByRole("heading", { name: "Your test cases" }).count(), 0);
+  });
+  await step("a message pasted with a hidden character is refused by the library's own checks, said in words, and nothing is saved", async () => {
+    await page.goto(UI + "/testing?name=lab-blank"); // its latest version (v3) has no test cases
+    await page.getByLabel("Name", { exact: true }).fill("pasted");
+    await page.getByLabel(/^Message sent to the model/).fill("fixed the login​ button");
+    await typeCheck("contains", "login");
+    await keepButton().click();
+    await page.getByText("A check refused the new version, so nothing was saved").waitFor();
+    await page.getByText(/no hidden or direction-changing characters in text/).waitFor();
+    await page.getByText(/tests\/cases\.json:\d+ \(U\+200B\)/).waitFor();
+    const versions = await page.evaluate(async (api) => (await fetch(`${api}/api/library/lab-blank`)).json(), API);
+    assert.equal(versions.versions.length, 3, "a refused save stores nothing");
+    await shot(page, "49-lab-editor-refused");
+  });
+  await step("the editor never makes the page scroll sideways at phone width", async () => {
+    await page.goto(UI + "/testing?name=lab-demo");
+    await page.getByRole("button", { name: "Edit the test cases…" }).click();
+    await page.getByRole("heading", { name: "Case 3", level: 4 }).waitFor();
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the editor makes the page scroll sideways by ${overflow}px`);
+    await shot(page, "48-lab-editor-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
   });
   await step("the Lab never makes the page scroll sideways at phone width", async () => {
     await page.goto(UI + "/testing?name=lab-demo&version=1");

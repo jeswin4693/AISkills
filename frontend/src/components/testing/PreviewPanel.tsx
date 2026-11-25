@@ -5,14 +5,14 @@ import { blockerAdvice, checkWords } from "@/lib/testing";
 import type { EvalPreview } from "@/lib/types";
 
 /** What a run would do: the test cases and their checks. Or, for a skill that cannot be run, why not and what a person can do. */
-export function PreviewPanel({ preview }: { preview: EvalPreview }) {
+export function PreviewPanel({ preview, canEdit }: { preview: EvalPreview; canEdit: boolean }) {
   if (!preview.runnable) {
     return (
       <Alert tone="warn" title={`${preview.name} ${preview.tag} cannot be run here`}>
         <p>
           <strong>Why:</strong> {preview.reason}.
         </p>
-        <p className="mt-1">{blockerAdvice(preview.blocker)}</p>
+        <p className="mt-1">{blockerAdvice(preview.blocker, canEdit)}</p>
         {preview.skipped.length > 0 && (
           <ul className="mt-2 list-disc pl-5 text-muted">
             {preview.skipped.map((s) => (

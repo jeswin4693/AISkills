@@ -167,6 +167,7 @@ export function ArchitectureMap({ architecture: arch }: { architecture: Architec
                   <span className="font-medium">{lang}</span>
                   <span className="text-muted">{plural(count, "file")}</span>
                   <Badge tone={LEVEL_TONE[arch.language_levels[lang]] ?? "neutral"}>{arch.language_levels[lang] ?? "unknown"}</Badge>
+                  {arch.imports_not_read.includes(lang) && <span className="text-xs text-warn">imports not read</span>}
                 </li>
               ))}
             </ul>

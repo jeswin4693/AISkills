@@ -39,18 +39,18 @@ class Repo:
     snapshot: github.Snapshot | None = None
 
 
-def check_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL) -> Path:
+def check_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL, stamp: str | None = None) -> Path:
     """The folder a person named, or BadRequest saying what to fix. A GitHub link is downloaded into a snapshot folder first (see
     builder/github.py). Nothing else is read yet, and no message repeats the path."""
-    return resolve_repo(path, fresh=fresh, max_age=max_age).folder
+    return resolve_repo(path, fresh=fresh, max_age=max_age, stamp=stamp).folder
 
 
-def resolve_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL) -> Repo:
+def resolve_repo(path: object, *, fresh: bool = False, max_age: float | None = github.SNAPSHOT_TTL, stamp: str | None = None) -> Repo:
     """`check_repo`, keeping what a link was and where it was downloaded to. `fresh` downloads again, `max_age` (None: any age) is how old a
-    snapshot may be and still be reused."""
+    snapshot may be and still be reused, `stamp` asks for one particular copy of a link (see `github.open_snapshot`; a folder has none)."""
     link = github.parse_link(path)  # BadRequest for a link that is not a public GitHub repository link
     if link is not None:
-        snapshot = github.open_snapshot(link, fresh=fresh, max_age=max_age)
+        snapshot = github.open_snapshot(link, fresh=fresh, max_age=max_age, stamp=stamp)
         return Repo(snapshot.path, link, snapshot)
     return Repo(_check_folder(path))
 
@@ -123,21 +123,30 @@ def source_view(repo: Repo) -> dict[str, Any]:
     }
 
 
-def check_seed(kind: str, repo: object, focus: object, nodes: object) -> dict[str, Any] | None:
-    """The seed a build session keeps, or None when the build does not start from a repository. BadRequest when it is half given."""
+def check_seed(kind: str, repo: object, focus: object, nodes: object, snapshot: object = None) -> dict[str, Any] | None:
+    """The seed a build session keeps, or None when the build does not start from a repository. BadRequest when it is half given.
+
+    `snapshot` is the copy of a GitHub repository an idea was made from (a run records it). The seed keeps the copy it ended up with, and
+    says so (`newer`) when that is not the one asked for, so the evidence can be recorded from the same code the idea saw, or say it was not."""
     asked = [n for n in nodes if isinstance(n, str) and n.strip()] if isinstance(nodes, list) else []
     if not (isinstance(repo, str) and repo.strip()) and not asked:
         return None
     if not (isinstance(repo, str) and repo.strip()):
         raise BadRequest("Evidence needs the repository the places are in: give repo.")
-    found = resolve_repo(repo)
+    wanted = snapshot if isinstance(snapshot, str) and snapshot else None
+    found = resolve_repo(repo, stamp=wanted, max_age=None if wanted else github.SNAPSHOT_TTL)
     if kind not in EVIDENCE_KINDS:
         raise BadRequest("Only skills and agents can cite a repository's code.")
     if not asked:
         raise BadRequest("Say which places of the repository the idea cites (evidence_nodes).")
     if len(asked) > MAX_REFS or any(len(n) > MAX_NODE_TEXT for n in asked):
         raise BadRequest(f"A skill can cite at most {MAX_REFS} places, each named in at most {MAX_NODE_TEXT} characters.")
-    return {"repo": source_of(found), "focus": clean_focus(focus), "nodes": list(dict.fromkeys(n.strip() for n in asked))}
+    seed: dict[str, Any] = {"repo": source_of(found), "focus": clean_focus(focus), "nodes": list(dict.fromkeys(n.strip() for n in asked))}
+    if found.snapshot is not None:
+        seed["snapshot"] = found.snapshot.stamp
+        if wanted and found.snapshot.stamp != wanted:
+            seed["newer"] = True
+    return seed
 
 
 def seed_view(seed: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -151,11 +160,15 @@ def record_evidence(seed: dict[str, Any], folder: Path, summary: dict[str, Any],
     """When a build ends: write evidence.json into the built folder from the graph as it is now, and say so in the result. A repository
     that cannot be read now, or none of whose places exist, leaves the build as it is and adds a note: the skill itself is fine."""
     try:
-        # the snapshot the idea was made from, however old: a build can last hours, and its places must be looked up in the same code
-        g = build_graph(check_repo(seed["repo"], max_age=None), focus=seed.get("focus"), with_history=False)
+        # the copy the idea was made from, however old (a build can last hours, and its places must be looked up in the same code)
+        wanted = seed.get("snapshot")
+        found = resolve_repo(seed["repo"], max_age=None, stamp=wanted)
+        g = build_graph(found.folder, focus=seed.get("focus"), with_history=False)
     except (OSError, ValueError, BuilderError):
         notes.append("Evidence was not recorded: the repository could not be read when the build finished (it may have been moved or deleted).")
         return
+    if found.snapshot is not None and (seed.get("newer") or (wanted and found.snapshot.stamp != wanted)):
+        notes.append("The copy of the repository this idea was made from is no longer kept, so the evidence was recorded from a newer copy: the code may differ.")
     got = collect(g, seed["nodes"], focus=seed.get("focus"))
     ev, too_big = fit(got.evidence)
     if not ev.refs:

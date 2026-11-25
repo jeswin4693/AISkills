@@ -22,7 +22,7 @@ from ..suggest.pipeline import suggest as run_suggest
 from .errors import BadRequest, SessionNotFound, WrongState
 from .jobs import JobRunner
 from .errors import BuilderError, UpstreamError
-from .repository import check_repo, clean_focus, display_name, read_failure, resolve_repo, source_of
+from .repository import clean_focus, display_name, read_failure, resolve_repo, source_of
 
 _ID = re.compile(r"^[0-9a-f]{32}\Z")
 _START = threading.Lock()  # one check-then-add at a time: two clicks cannot both start a run for the same folder
@@ -73,13 +73,13 @@ class SuggestRuns:
             row = self._row(s, rid)
             if row.status != "done" or not row.result:
                 raise BadRequest("That suggestion run is not finished (or it failed), so there is nothing to build from.")
-            repo, focus, ideas = row.repo, row.focus, list(row.result.get("suggestions", []))
+            repo, focus, ideas, snapshot = row.repo, row.focus, list(row.result.get("suggestions", [])), row.result.get("snapshot")
         if not isinstance(idea, int) or isinstance(idea, bool) or not 0 <= idea < len(ideas):
             raise BadRequest("Say which idea of the run to build from: idea is its position in the run, counting from 0.")
         item = ideas[idea]
         if item.get("category") not in ("skill", "automation") or not item.get("evidence_nodes"):
             raise BadRequest("Only a skill or automation idea that cites a place can start a build.")
-        return {"repo": repo, "focus": focus, "nodes": list(item["evidence_nodes"])}
+        return {"repo": repo, "focus": focus, "nodes": list(item["evidence_nodes"]), "snapshot": snapshot}
 
     def get(self, rid: str) -> dict:
         with self.db.session() as s:
@@ -120,16 +120,19 @@ class SuggestRuns:
         try:
             provider = self.provider_factory()
             try:
-                folder = check_repo(repo)  # a link not used for a while is downloaded again
+                found = resolve_repo(repo)  # a link not used for a while is downloaded again
             except BuilderError as exc:  # the folder is gone, or GitHub could not be reached: said without any path
                 self._finish(rid, "failed", error=str(exc), retryable=isinstance(exc, UpstreamError))
                 return
             try:
-                g = build_graph(folder, focus=focus)
+                g = build_graph(found.folder, focus=focus)
             except (OSError, ValueError) as exc:  # only reading the folder: a ValueError later is not the folder's fault
                 self._finish(rid, "failed", error=read_failure(exc))
                 return
-            self._finish(rid, "done", result=run_suggest(g, provider, with_ideas=with_ideas).to_dict())
+            result = run_suggest(g, provider, with_ideas=with_ideas).to_dict()
+            if found.snapshot is not None:  # the copy these ideas were made from: a build started from one of them records its evidence from that copy
+                result["snapshot"] = found.snapshot.stamp
+            self._finish(rid, "done", result=result)
         except ProviderError as exc:  # a missing key or an unreachable model: running it again can help
             self._finish(rid, "failed", error=str(exc), retryable=True)
         except Exception as exc:  # noqa: BLE001 - recorded for the person (without text that could hold a path), and logged for whoever runs the server

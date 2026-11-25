@@ -10,7 +10,7 @@ const box = (id: string, label: string, column: number, over: Partial<ArchModule
 const arch = (over: Partial<Architecture> = {}): Architecture => ({
   base: "", modules: [box("m0", "api", 1), box("m1", "pricing", 2), box("m2", "web", 0)],
   arrows: [{ from: "m2", to: "m0", count: 3, back: false }, { from: "m0", to: "m1", count: 1, back: false }],
-  cycles: [], columns: 3, measured: true, language_levels: { python: "full" }, left_out: { guess: 0, from_tests: 0 }, notes: [], ...over,
+  cycles: [], columns: 3, measured: true, language_levels: { python: "full" }, imports_not_read: [], left_out: { guess: 0, from_tests: 0 }, notes: [], ...over,
 });
 
 /** The eight numbers of an arrow's path "M sx sy C c1x c1y, c2x c2y, ex ey". */
@@ -204,10 +204,15 @@ describe("the words under the picture", () => {
   });
 
   it("names the languages whose imports are not measured, once, and the base folder", () => {
-    const mixed = mapNotes(arch({ base: "src", language_levels: { python: "full", swift: "basic" } }));
-    expect(mixed.join("\n")).toContain("Imports are not measured for swift");
+    // csharp is a "standard" level language, but its imports are not turned into links between files: the answer says so, the level alone does not
+    const mixed = mapNotes(arch({ base: "src", language_levels: { python: "full", csharp: "standard" }, imports_not_read: ["csharp"] }));
+    expect(mixed.join("\n")).toContain("Imports are not measured for csharp");
     expect(mixed.join("\n")).toContain("folders inside src/");
-    const none = mapNotes(arch({ measured: false, language_levels: { swift: "basic" }, notes: ["Imports are not measured for any language here (swift), so no arrows are drawn."] }));
+    expect(mapNotes(arch({ language_levels: { python: "full", java: "standard" } })).join("\n")).not.toContain("not measured");
+    const none = mapNotes(arch({
+      measured: false, language_levels: { swift: "basic" }, imports_not_read: ["swift"],
+      notes: ["Imports are not measured for any language here (swift), so no arrows are drawn."],
+    }));
     expect(none.filter((n) => n.includes("not measured"))).toHaveLength(1);
   });
 

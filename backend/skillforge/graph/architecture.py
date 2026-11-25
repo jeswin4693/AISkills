@@ -7,6 +7,7 @@ counted and said, never hidden. The answer is the same for the same repository, 
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from . import languages
@@ -39,6 +40,7 @@ def architecture(g: RepoGraph, max_boxes: int = MAX_BOXES) -> dict[str, Any]:
         a["back"] = (a["from"], a["to"]) in back
 
     levels = {lang: languages.level_of(lang) for lang in sorted({r.lang for r in g.files.values()})}
+    unread = [lang for lang in levels if not _reads_imports(lang)]  # languages here whose imports are not turned into file links
     modules = [
         {k: box[k] for k in ("id", "label", "kind", "files", "lines", "test_files", "tests_only", "symbols", "languages", "measured")}
         | {"column": column[box["id"]]} | {k: box[k] for k in ("top_functions", "file_list", "members")}
@@ -53,8 +55,9 @@ def architecture(g: RepoGraph, max_boxes: int = MAX_BOXES) -> dict[str, Any]:
         "columns": columns,
         "measured": measured,
         "language_levels": levels,
+        "imports_not_read": unread,
         "left_out": {"guess": len(guesses), "from_tests": len(from_tests)},
-        "notes": _notes(len(modules), measured, levels),
+        "notes": _notes(len(modules), measured, unread),
     }
 
 
@@ -88,6 +91,15 @@ def _levels(paths: list[str], base: int) -> int:
     return best
 
 
+@lru_cache(maxsize=None)
+def _reads_imports(lang: str) -> bool:
+    """Whether the graph turns this language's imports into links between files. The full-level languages do, and a standard one does when its
+    imports map to files. C# is standard, but `using Acme.B;` names a namespace and not a file, so the graph makes no import link for it: its
+    boxes must not look like folders that depend on nothing."""
+    level = languages.level_of(lang)
+    return level == "full" or (level == "standard" and languages.info(lang).import_style != "none")
+
+
 def _summary(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
     recs = [g.files[p] for p in paths]
     langs: dict[str, int] = {}
@@ -101,7 +113,7 @@ def _summary(g: RepoGraph, paths: list[str]) -> dict[str, Any]:
     return {
         "files": len(recs), "lines": sum(r.lines for r in recs), "test_files": tests, "tests_only": tests == len(recs),
         "symbols": sum(len(r.symbols) for r in recs), "languages": dict(sorted(langs.items())),
-        "measured": any(languages.level_of(lang) != "basic" for lang in langs),
+        "measured": any(_reads_imports(lang) for lang in langs),
         "top_functions": [{"name": s.name, "file": s.file, "line": s.line, "size": s.size} for s in biggest[:MAX_FUNCTIONS_LISTED]],
     }
 
@@ -230,12 +242,11 @@ def _components(nodes: list[str], succ: dict[str, list[str]]) -> list[list[str]]
     return out
 
 
-def _notes(boxes: int, measured: bool, levels: dict[str, str]) -> list[str]:
+def _notes(boxes: int, measured: bool, unread: list[str]) -> list[str]:
     """Only what the page cannot work out from the numbers: nothing to show, and nothing measured."""
     notes = []
     if boxes == 1:
         notes.append(ONE_PLACE)
     if boxes and not measured:
-        unread = ", ".join(lang for lang, level in levels.items() if level == "basic")
-        notes.append(f"Imports are not measured for any language here ({unread}), so no arrows are drawn.")
+        notes.append(f"Imports are not measured for any language here ({', '.join(unread)}), so no arrows are drawn.")
     return notes

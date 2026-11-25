@@ -148,8 +148,9 @@ class Builder:
         return job.id
 
     def start(self, description: str, with_scripts: bool = False, kind: str = "skill", seed: dict | None = None) -> dict:
-        """Begin a session. `seed` is {"repo", "focus", "nodes"}: a repository and the places in it the idea cited, so the built thing
-        carries evidence of them (docs/evidence.md). A half-given or unusable seed is refused before anything starts."""
+        """Begin a session. `seed` is {"repo", "focus", "nodes"} (and, for a GitHub link, "snapshot": the copy the idea was made from): a repository
+        and the places in it the idea cited, so the built thing carries evidence of them (docs/evidence.md). A half-given or unusable seed is
+        refused before anything starts."""
         try:
             spec = get_kind(kind)
             if not spec.conversational:
@@ -157,7 +158,7 @@ class Builder:
             words = check_description(description)
         except (UnknownKind, BuildError) as exc:
             raise BadRequest(str(exc)) from exc
-        kept_seed = check_seed(kind, (seed or {}).get("repo"), (seed or {}).get("focus"), (seed or {}).get("nodes"))
+        kept_seed = check_seed(kind, (seed or {}).get("repo"), (seed or {}).get("focus"), (seed or {}).get("nodes"), (seed or {}).get("snapshot"))
         sid, stamp = uuid.uuid4().hex, now_text()
         with self.db.session() as s:
             s.add(BuildSession(

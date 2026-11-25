@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -34,6 +35,8 @@ from ..graph.languages import language_of_path
 from ..graph.store import data_dir
 from .errors import BadRequest, UpstreamError
 
+log = logging.getLogger(__name__)
+
 CODELOAD_HOST = "codeload.github.com"
 MAX_DOWNLOAD = 80_000_000  # bytes of zip
 MAX_ENTRIES = 200_000  # members of the archive, before any is read
@@ -42,7 +45,7 @@ MAX_UNPACKED = 200_000_000  # bytes written
 MAX_FILE = MAX_BYTES  # the graph reads no file over this, so none is written
 MAX_PATH = 200  # characters of a file's path below the repository's folder
 # Characters of a whole path on this disk. Windows refuses a path of 260 (and a folder of about 248), so a file that would not fit is
-# skipped by name instead of failing half way. The temporary folder is never longer than the final one, so fitting there means fitting here.
+# skipped by name instead of failing half way. The temporary folder is never shorter than the final one, so fitting there means fitting here.
 PATH_LIMIT = 240 if os.name == "nt" else 4000
 TIMEOUT = 30.0  # seconds to wait for a connection or one read
 DEADLINE = 120.0  # seconds for the whole download
@@ -387,6 +390,7 @@ class Snapshot:
     bytes: int
     skipped: dict[str, int]
     reused: bool
+    stamp: str = ""  # this copy's own name: a later request can ask for exactly this one (open_snapshot's `stamp`)
 
 
 _GUARD = threading.Lock()
@@ -398,17 +402,39 @@ def snapshot_root() -> Path:
     return data_dir() / "github"
 
 
+def _digest(text: str, length: int) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
+
+
 def _key_dir(root: Path, link: GithubLink) -> Path:
-    return root / link.leaf / ("default" if link.ref is None else f"ref-{link.ref}")
+    """Where this repository's copies live. Both levels are hashes of the exact text, never the text itself: a branch called `Main` and one
+    called `main` (or `main.`) must not share a folder on a disk that ignores case or a trailing dot, and a long name must not eat the path.
+    GitHub treats owner and repository names as one whatever their case, so those are lower-cased before hashing; a branch is exact."""
+    repo_key = _digest(f"{link.owner}/{link.repo}".lower(), 12)
+    return root / repo_key / ("default" if link.ref is None else "ref-" + _digest(link.ref, 10))
+
+
+INNER_MAX = 48  # characters of the folder the source files are in
+
+
+def _inner(link: GithubLink) -> str:
+    """The folder the source files are in, named for the repository (an evidence file records this name, so it must be the same every time
+    for the same repository). Lower case, so a link typed with other capitals finds the same folder on a disk that cares; a very long name is
+    cut and given a hash, so it can never use up the path."""
+    leaf = link.leaf.lower()
+    return leaf if len(leaf) <= INNER_MAX else leaf[: INNER_MAX - 13] + "-" + _digest(leaf, 12)
 
 
 def _read_meta(stamp_dir: Path, link: GithubLink) -> dict | None:
+    """The record of a copy, only if it is well formed AND says it is a copy of this very repository and branch."""
     try:
         meta = json.loads((stamp_dir / "meta.json").read_text(encoding="utf-8"))
         ok = (
             isinstance(meta, dict) and isinstance(meta.get("epoch"), (int, float)) and isinstance(meta.get("fetched_at"), str)
             and isinstance(meta.get("files"), int) and isinstance(meta.get("bytes"), int) and isinstance(meta.get("skipped"), dict)
-            and (stamp_dir / link.leaf).is_dir()
+            and str(meta.get("owner", "")).lower() == link.owner.lower() and str(meta.get("repo", "")).lower() == link.repo.lower()
+            and meta.get("ref") == link.ref
+            and (stamp_dir / _inner(link)).is_dir()
         )
         return meta if ok else None
     except (OSError, ValueError):
@@ -424,7 +450,8 @@ def _stamps(key_dir: Path) -> list[Path]:
 
 def _snapshot(stamp_dir: Path, link: GithubLink, meta: dict, reused: bool) -> Snapshot:
     return Snapshot(
-        stamp_dir / link.leaf, link, meta["fetched_at"], float(meta["epoch"]), meta["files"], meta["bytes"], dict(meta["skipped"]), reused,
+        stamp_dir / _inner(link), link, meta["fetched_at"], float(meta["epoch"]), meta["files"], meta["bytes"], dict(meta["skipped"]), reused,
+        stamp_dir.name,
     )
 
 
@@ -481,10 +508,13 @@ def _prune(root: Path, key_dir: Path, link: GithubLink) -> None:
 
 def open_snapshot(
     link: GithubLink, *, fresh: bool = False, max_age: float | None = SNAPSHOT_TTL, root: Path | None = None,
-    now=time.time, fetch=None,
+    now=time.time, fetch=None, stamp: str | None = None,
 ) -> Snapshot:
     """The repository as a folder of source files on this computer, downloaded when there is none (or it is older than `max_age` seconds,
-    None meaning any age, or `fresh` asks for a new one). Requests for the same repository at the same moment share one download."""
+    None meaning any age, or `fresh` asks for a new one). Requests for the same repository at the same moment share one download.
+
+    `stamp` asks for one particular copy (a `Snapshot.stamp`): the one an idea was made from. If it is still kept it is returned, whatever its
+    age; if it has been pruned the usual rules apply and the caller can see from the returned stamp that it is another copy."""
     root = root if root is not None else snapshot_root()
     key_dir = _key_dir(root, link)
     key = str(key_dir)
@@ -492,6 +522,11 @@ def open_snapshot(
         lock = _LOCKS.setdefault(key, threading.Lock())
         generation = _GENERATION.get(key, 0)
     with lock:
+        if stamp is not None:
+            for d in _stamps(key_dir):
+                wanted = _read_meta(d, link) if d.name == stamp else None
+                if wanted is not None:
+                    return _snapshot(d, link, wanted, True)
         found = next(((d, m) for d in _stamps(key_dir) if (m := _read_meta(d, link)) is not None), None)
         if found is not None:
             stamp_dir, meta = found
@@ -504,11 +539,13 @@ def open_snapshot(
         # 16 characters: the time in milliseconds in base 36 (padded, so names sort by time) and 6 of the content's hash. Short on purpose:
         # the snapshot's path is part of every file's path, and Windows allows 260.
         stamp = _base36(int(epoch * 1000)).rjust(9, "0") + "-" + hashlib.sha256(data).hexdigest()[:6]
-        partial = key_dir / f"{uuid.uuid4().hex[:6]}.partial"  # shorter than the stamp, so a path that fits here fits in the final place
+        # 17 characters, at least as long as the stamp's 16: a file path that fits in the temporary folder is never longer than the room the final
+        # place has (the other way round, a file could pass the check while unpacking and still not fit where it is kept).
+        partial = key_dir / f"{uuid.uuid4().hex[:9]}.partial"
         final = key_dir / stamp
         try:
             partial.mkdir(parents=True, exist_ok=True)
-            got = extract_sources(data, partial / link.leaf)
+            got = extract_sources(data, partial / _inner(link))
             meta = {
                 "v": 1, "owner": link.owner, "repo": link.repo, "ref": link.ref, "epoch": epoch,
                 "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch)), "files": got.files, "bytes": got.bytes, "skipped": got.skipped,
@@ -520,6 +557,12 @@ def open_snapshot(
                 if final.exists():  # a folder of that name whose record is damaged: replaced by the good copy
                     shutil.rmtree(final, ignore_errors=True)
                 _move_into_place(partial, final)
+        except OSError as exc:  # a disk that cannot hold it (a path too long, no room): said without the path the system's own text repeats
+            shutil.rmtree(partial, ignore_errors=True)
+            log.warning("a downloaded repository could not be stored: %s", exc)
+            raise BadRequest(
+                f"The downloaded copy could not be stored on this computer ({type(exc).__name__}). Check the free space and the data folder."
+            ) from None
         except BaseException:
             shutil.rmtree(partial, ignore_errors=True)
             raise

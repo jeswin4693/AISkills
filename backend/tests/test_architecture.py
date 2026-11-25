@@ -134,8 +134,27 @@ def test_unmeasured_languages_are_said_not_drawn_as_independent():
     boxes = by_label(res)
     assert boxes["s"]["measured"] is False and boxes["p"]["measured"] is True and res["measured"] is True
     assert res["language_levels"] == {"python": "full", "swift": "basic"}
+    assert res["imports_not_read"] == ["swift"]
     only = architecture(mini({"s/a.swift": "swift", "t/b.swift": "swift"}))
     assert only["measured"] is False and only["arrows"] == [] and any("not measured" in n for n in only["notes"])
+
+
+def test_a_language_whose_imports_are_never_mapped_to_files_is_not_measured_even_at_the_standard_level():
+    """The review's finding: C# is a 'standard' language, but its imports (`using Acme.B;`) are not mapped to files, so the graph makes no import
+    edge for it. A C# solution was drawn as folders that depend on nothing, and the page said 'no imports between folders were found'."""
+    assert languages.level_of("csharp") == "standard" and languages.info("csharp").import_style == "none"
+    res = architecture(mini({"A/A.cs": "csharp", "B/B.cs": "csharp", "C/c.py": "python"}))
+    boxes = by_label(res)
+    assert boxes["A"]["measured"] is False and boxes["B"]["measured"] is False and boxes["C"]["measured"] is True
+    assert res["imports_not_read"] == ["csharp"] and res["language_levels"]["csharp"] == "standard"
+    only = architecture(mini({"A/A.cs": "csharp", "B/B.cs": "csharp"}))
+    assert only["measured"] is False and any("not measured" in n and "csharp" in n for n in only["notes"])
+
+
+def test_every_other_language_whose_imports_are_mapped_to_files_stays_measured():
+    for lang in ("python", "typescript", "tsx", "javascript", "java", "kotlin", "go", "rust", "c", "cpp", "ruby", "php"):
+        res = architecture(mini({f"A/x.{lang}": lang, f"B/y.{lang}": lang}))
+        assert res["measured"] is True and res["imports_not_read"] == [], lang
 
 
 # ---- cycles -------------------------------------------------------------------------------------------------------

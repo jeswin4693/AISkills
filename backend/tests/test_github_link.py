@@ -545,9 +545,9 @@ def test_a_file_whose_path_would_not_fit_on_this_disk_is_skipped_by_name_not_by_
     assert tree(dest) == ["short.py"] and out.skipped == {"path_too_long": 1}  # named, and not the vague 'unwritable'
 
 
-def test_the_folder_a_download_is_unpacked_into_is_never_longer_than_its_final_place(tmp_path, monkeypatch):
-    """Windows allows 260 characters of path. If the temporary folder were longer than the final one, a file that fits in its final
-    place could still fail while unpacking."""
+def test_the_folder_a_download_is_unpacked_into_is_never_shorter_than_its_final_place(tmp_path, monkeypatch):
+    """Windows allows 260 characters of path. A file that fits in the longer temporary path fits in the shorter final one; the other way round
+    (the review found it written that way) a file could pass the check while unpacking and still not fit where it is kept."""
     seen = []
     real = gh.extract_sources
 
@@ -557,7 +557,7 @@ def test_the_folder_a_download_is_unpacked_into_is_never_longer_than_its_final_p
 
     monkeypatch.setattr(gh, "extract_sources", spy)
     s = snap(tmp_path)
-    assert seen and seen[0] <= len(str(s.path))
+    assert seen and seen[0] >= len(str(s.path))
 
 
 def test_snapshot_folder_names_are_short_and_still_sort_by_time(tmp_path):
@@ -806,3 +806,96 @@ def test_a_long_branch_name_in_the_top_folder_does_not_stop_the_download(tmp_pat
     top = "shop-api-" + "feature-" * 30  # the top folder is dropped, never written
     gh.extract_sources(zip_of({"a.py": "x = 1\n"}, top=top), tmp_path / LEAF)
     assert tree(tmp_path / LEAF) == ["a.py"]
+
+
+# ---- what the independent review of slices Y and Z found (2026-11-25), each as a test that failed before the fix --------------
+
+
+def test_branches_whose_names_differ_only_in_case_or_a_trailing_dot_are_different_snapshots(tmp_path):
+    """On a disk that ignores case (Windows, macOS) the old folder name 'ref-Main' was 'ref-main': a different branch showed main's code."""
+    first = snap(tmp_path, LINK + "/tree/main", Fetcher({"main_only.py": "x = 1\n"}))
+    other_fetch = Fetcher({"other_only.py": "y = 2\n"})
+    for ref in ("Main", "main."):
+        other = snap(tmp_path, LINK + "/tree/" + ref, other_fetch)
+        assert other.reused is False and other.path != first.path and tree(other.path) == ["other_only.py"], ref
+    assert len(other_fetch.calls) == 2  # each was downloaded on its own
+
+
+def test_a_snapshot_whose_record_names_another_branch_is_not_reused(tmp_path):
+    fetch = Fetcher()
+    first = snap(tmp_path, LINK + "/tree/main", fetch)
+    meta_file = first.path.parent / "meta.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta["ref"] = "release"  # whatever put it there, this folder is not main's copy
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    again = snap(tmp_path, LINK + "/tree/main", fetch)
+    assert again.reused is False and len(fetch.calls) == 2
+
+
+def test_the_snapshot_path_leaves_room_for_deep_files(tmp_path):
+    """owner__repo was in every path twice: at the default data folder a file's own path had about 80 characters, and deep Java or Kotlin
+    layouts were skipped as 'path_too_long'. What is added in front of a file's own path must stay short."""
+    s = snap(tmp_path, "https://github.com/microsoft/vscode-python-environments")
+    assert len(str(s.path)) - len(str(tmp_path / "snaps")) <= 80
+
+
+def test_long_but_valid_names_still_make_a_short_folder_and_work(tmp_path):
+    link = "https://github.com/" + "a" * 39 + "/" + "b" * 100 + "/tree/" + "c" * 100  # every part is allowed by the parser
+    s = snap(tmp_path, link)
+    assert s.path.is_dir() and (s.path / "src" / "a.py").is_file() and len(str(s.path)) - len(str(tmp_path / "snaps")) <= 100
+
+
+def test_a_disk_error_while_storing_a_download_is_a_plain_message_with_no_path(tmp_path, monkeypatch):
+    def broken(data, dest):
+        raise OSError(2, "No such file or directory", "C:" + chr(92) + "SECRETDIR" + chr(92) + "x")
+
+    monkeypatch.setattr(gh, "extract_sources", broken)
+    with pytest.raises(BadRequest) as caught:
+        snap(tmp_path)
+    assert "SECRETDIR" not in str(caught.value) and "C:" not in str(caught.value) and not list((tmp_path / "snaps").rglob("*.partial"))
+
+
+def test_a_snapshot_can_be_asked_for_by_its_own_name_however_new_the_newest_is(tmp_path):
+    fetch, clock = Fetcher({"old.py": "a = 1\n"}), Tick()
+    first = snap(tmp_path, fetch=fetch, clock=clock)
+    clock.t += gh.SNAPSHOT_TTL + 100
+    fetch.files = {"new.py": "b = 2\n"}
+    newest = snap(tmp_path, fetch=fetch, clock=clock)
+    assert newest.stamp != first.stamp and tree(newest.path) == ["new.py"]
+    pinned = snap(tmp_path, fetch=fetch, clock=clock, max_age=None, stamp=first.stamp)
+    assert pinned.stamp == first.stamp and tree(pinned.path) == ["old.py"] and pinned.reused is True and len(fetch.calls) == 2
+
+
+def test_asking_for_a_snapshot_that_is_gone_gives_the_newest_and_says_which_it_is(tmp_path):
+    fetch, clock = Fetcher(), Tick()
+    first = snap(tmp_path, fetch=fetch, clock=clock)
+    for _ in range(3):
+        clock.t += 100
+        newest = snap(tmp_path, fetch=fetch, clock=clock, fresh=True)
+    assert not first.path.is_dir()  # only the newest two are kept
+    got = snap(tmp_path, fetch=fetch, clock=clock, max_age=None, stamp=first.stamp)
+    assert got.stamp == newest.stamp != first.stamp and got.reused is True
+
+
+def test_a_build_records_evidence_from_the_copy_its_idea_was_made_from_not_a_newer_one(served, make):
+    """The docs said so; the code took the newest copy of the link, so evidence could describe code the idea never saw."""
+    env = make([REVIEW, IDEAS, round_two(), draft()])
+    rid = env.client.post("/api/suggestions", json={"path": LINK}).json()["id"]
+    served["files"] = {**REPO, "core.py": "def other():\n    return 1\n"}  # the repository changes after the ideas were made
+    assert age_every_snapshot(3 * 24 * 3600) == 1
+    assert env.client.post("/api/repos/analyze", json={"path": LINK}).json()["source"]["reused"] is False  # somebody reads it again: a newer copy
+    session = env.get(finished(env, from_run=rid, idea=1))
+    assert session["status"] == "done" and session["result"]["evidence"]["places"] == 1
+    assert not any("no longer kept" in n for n in session["notes"]) and not managed_path_leaks(session)
+
+
+def test_a_build_says_so_when_the_copy_its_idea_was_made_from_is_no_longer_kept(served, make):
+    env = make([REVIEW, IDEAS, round_two(), draft()])
+    rid = env.client.post("/api/suggestions", json={"path": LINK}).json()["id"]
+    served["files"] = {**REPO, "extra.py": "z = 1\n"}
+    for _ in range(3):  # three newer copies: only the newest two of a repository are kept, so the idea's own copy is pruned
+        assert age_every_snapshot(3 * 24 * 3600) >= 1
+        assert env.client.post("/api/repos/analyze", json={"path": LINK}).status_code == 200
+    session = env.get(finished(env, from_run=rid, idea=1))
+    assert session["status"] == "done" and session["result"]["evidence"]["places"] == 1  # the place is still in the newer copy
+    assert any("no longer kept" in n for n in session["notes"])

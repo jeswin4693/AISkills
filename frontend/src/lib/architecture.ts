@@ -226,9 +226,9 @@ export function mapNotes(arch: Architecture): string[] {
   if (fromTests > 0) {
     notes.push(`${plural(fromTests, "import")} written by test files ${fromTests === 1 ? "is" : "are"} not drawn, so a tests folder does not point at every box.`);
   }
-  const unread = Object.entries(arch.language_levels).filter(([, level]) => level === "basic").map(([lang]) => lang).sort();
-  if (arch.measured && unread.length > 0) {
-    notes.push(`Imports are not measured for ${unread.join(", ")} (read for definitions only), so a folder holding only those files shows no arrows.`);
+  // from the answer, not guessed from the level: C# is a "standard" language whose imports are still not turned into links between files
+  if (arch.measured && arch.imports_not_read.length > 0) {
+    notes.push(`Imports are not measured for ${arch.imports_not_read.join(", ")} (the graph does not link their imports to files), so a folder holding only those files shows no arrows.`);
   }
   const hidden = arch.arrows.length - drawnArrows(arch).length;
   if (hidden > 0) {

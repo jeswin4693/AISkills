@@ -33,7 +33,7 @@ design: [superpowers/specs/2026-11-25-architecture-map-design.md](superpowers/sp
 | **Columns:** one left-to-right order. Folders that import each other (a cycle group) come in topological order; inside a group the folder that mostly imports comes first. A column is the longest chain of forward arrows. An arrow against the order is a **back arrow**. A repository with no loop has none. | The first real run: 11 of 14 boxes were one cycle group, and "a group shares a column" made one column and a hairball. |
 | Boxes inside a column are **ordered by the boxes they connect to** (a few sweeps), to cut crossings. | Readability; deterministic. |
 | At most **36 arrows** are drawn, the strongest; the page says how many weaker ones are only in the list. | Real run: 57 arrows were unreadable. |
-| A **language whose imports are not read** (the `basic` level) is said to be "not measured", never shown as depending on nothing. | Never claim more than a language's level gives. |
+| A **language whose imports are not read** is said to be "not measured", never shown as depending on nothing. That is the `basic` level **and C#**: C# is a `standard` language, but `using Acme.B;` names a namespace, not a file, so the graph makes no import link for it (found by the independent review: a C# solution had been drawn as folders that depend on nothing). The answer lists such languages (`imports_not_read`). | Never claim more than a language's level gives. |
 | If one folder holds **more than 40% of the files** (and at least 20), the page names it and the exact text to type in "Only this folder inside it" to zoom in. | Real run on the whole repository: `backend/skillforge` was one big box. |
 | The same repository always gives the same answer, whatever order the graph was built in. | Tested by building it in reverse order. |
 
@@ -41,15 +41,16 @@ design: [superpowers/specs/2026-11-25-architecture-map-design.md](superpowers/sp
 
 `base` (the stripped common folder, or `""`), `modules` (per box: `id`, `label`, `kind` folder / root / other, `files`, `lines`, `test_files`,
 `tests_only`, `symbols`, `languages`, `measured`, `column`, `top_functions` (3), `file_list` (12), `members`), `arrows` (`from`, `to`, `count`,
-`back`), `cycles` (groups of box ids that import each other), `columns`, `measured`, `language_levels`, `left_out` (`guess`, `from_tests`) and
-`notes`. Names and paths are relative to the repository: **the person's own folder path is never in it** (tested). Code: `backend/skillforge/graph/architecture.py`;
+`back`), `cycles` (groups of box ids that import each other), `columns`, `measured`, `language_levels`, `imports_not_read` (the languages here whose imports are not
+turned into file links), `left_out` (`guess`, `from_tests`) and `notes`. (`left_out.guess` is 0 today: every import link the graph makes is a proven one. The count is there so a
+guess could never be drawn without being said; it will only show a number if a language's imports ever become guesses.) Names and paths are relative to the repository: **the person's own folder path is never in it** (tested). Code: `backend/skillforge/graph/architecture.py`;
 page: `frontend/src/components/repository/ArchitectureMap.tsx` with the layout in `frontend/src/lib/architecture.ts` (pure, unit-tested).
 
 ## Limits (said plainly)
 
 - **Imports only.** An arrow says files in one folder *can* use files in another, not what the program does when it runs. A folder is a rough
   stand-in for a module; a repository may be organised another way.
-- **A language at the `basic` level has no imports read**, so its boxes have no arrows. This is said on the page, never hidden.
+- **A language at the `basic` level, and C#, have no imports read**, so their boxes have no arrows. This is said on the page, never hidden.
 - **A very connected codebase is still busy.** Arrows can pass behind boxes (they are straight between columns, not routed around boxes) and
   a wide map scrolls inside its frame. The 36-arrow cap, the ordering and click-to-highlight help; they do not make a dense project simple.
 - A box is one **folder level** (up to three); there is no zoom on the picture itself. To zoom, type a folder in "Only this folder inside it".
@@ -85,6 +86,14 @@ first run and got tests:** no arrow in the last column ever exercised the frame'
 Also run: the same answer for the public link `jeswin4693/AISkills` (265 files, 365 test imports left out): eight boxes, `backend/skillforge` one big box holding 128 files, which is
 what the zoom-in hint is for; and the page with `skillforge` as the focus folder, where the boxes become `api`, `library`, `build` and so on and 24 weaker arrows are left to the list.
 
+**One independent review (2026-11-25, together with slice Y; about 142,000 tokens).** A fresh reader on the strongest model read the whole of `graph/architecture.py` and the layout and page code, and wrote
+its own probes. **No Critical finding.** What it confirmed: the iterative Tarjan, the topological order and the columns are correct (300 random graphs gave the same answer whatever order the arrows came in, every loop-free
+graph had zero back arrows and every arrow pointed right), arrow direction is right on real Java, Go and Python repositories, imports from tests are counted and not drawn, and no path appears in the answer (checked on four real graphs).
+**One Important finding, reproduced and fixed test-first:** C# is a `standard` language but its imports are never turned into file links, so a C# solution was drawn as folders that depend on nothing and the page said "No imports
+between folders were found". Boxes now say "imports not measured" for it, the answer lists `imports_not_read`, and a test pins that every language whose imports *are* mapped stays measured (so nothing is over-excluded). The fix was broken on purpose
+(C# counted as measured again; the note not written) and both breaks are caught.
+**Found, not fixed (Minor):** in a loop of three or more folders the box in the middle gets no `⇄` mark although the warning names it (the mark is drawn from the back arrows, which is a design choice the page does not explain);
+`left_out.guess` is always 0 today (now said above). **Not reached by the reviewer:** the page at phone width and real keyboard focus (both were checked by me in the browser suite), and the Linux and macOS case rules.
+
 **Not verified:** macOS and Linux; a very large repository (the work is linear in files and edges and nothing was timed on a huge one); a screen reader (boxes are buttons with
-names and keyboard use, and the arrows have a text list, but it was not tried); any browser but Edge. **No independent review yet** (committed together with slice Y's missing
-review: one review can cover both).
+names and keyboard use, and the arrows have a text list, but it was not tried); any browser but Edge.

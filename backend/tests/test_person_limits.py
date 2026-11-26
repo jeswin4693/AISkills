@@ -144,7 +144,7 @@ def test_one_persons_files_never_count_against_another(lw):
 
 
 def test_the_size_of_a_persons_folder_never_follows_a_link_out_of_it(lw, tmp_path):
-    w = lw(limits=PersonLimits(disk_bytes=1000))
+    w = lw(limits=PersonLimits(disk_bytes=5 * 4096))  # the link itself costs a block; the 50 KB it points at (13 blocks) must not count
     ada = w.person(1)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -342,14 +342,14 @@ def test_the_app_does_not_open_the_database_for_a_local_library_upload(tmp_path)
 # ---- found by the deliberate breaks: the edges and the paths the first tests did not walk -------------------------------------------------------
 
 
-def test_a_person_exactly_at_the_disk_cap_is_refused_and_one_byte_under_is_not(lw):
-    w = lw(limits=PersonLimits(disk_bytes=1000))
+def test_a_person_exactly_at_the_disk_cap_is_refused_and_one_block_under_is_not(lw):
+    w = lw(limits=PersonLimits(disk_bytes=3 * 4096))
     ada = w.person(1)
-    fill(w, w.uid(1), 999)
-    assert post_build(ada).status_code == 201  # 999 of 1000: room
-    fill(w, w.uid(1), 1000)
+    fill(w, w.uid(1), 4096, "first.bin")  # the library folder (1 block) + this file (1 block) = 2 of 3 blocks
+    assert post_build(ada).status_code == 201  # room
+    fill(w, w.uid(1), 4096, "second.bin")  # 3 of 3 blocks
     refused = post_build(ada)
-    assert refused.status_code == 429 and refused.json()["limit"] == "disk"  # 1000 of 1000: full
+    assert refused.status_code == 429 and refused.json()["limit"] == "disk"  # exactly at the limit is full
 
 
 def test_a_person_at_the_active_cap_cannot_answer_a_question_either(lw):
@@ -421,3 +421,118 @@ def test_a_person_at_the_disk_cap_can_still_run_the_tests_of_what_they_have(lw):
     assert post_build(ada).status_code == 429  # full: no new build
     started = ada.post("/api/evals", json={"name": "commit-writer"})
     assert started.status_code == 201  # but a test run writes next to nothing, so it is allowed
+
+
+# ---- the independent review's two Important findings (each reproduced as a failing test before it was fixed) -----------------------------------
+# 1. The disk limit counted only file bytes, so a person under 500 MB could make millions of tiny files and fill a small server's disk (inodes and 4 KB blocks).
+# 2. The disk walk ran while holding the one lock every person's build start needs, so one person with a huge folder stalled everybody.
+
+BLOCK = 4096
+
+
+def test_every_file_and_folder_is_charged_at_least_one_block(tmp_path):
+    from skillforge.builder.limits import folder_bytes
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "b").mkdir()
+    (tmp_path / "one").write_bytes(b"x")  # 1 block
+    (tmp_path / "a" / "two").write_bytes(b"x" * (BLOCK + 1))  # 2 blocks
+    (tmp_path / "empty").write_bytes(b"")  # an empty file still takes an entry: 1 block
+    assert folder_bytes(tmp_path) == (2 + 1 + 2 + 1) * BLOCK  # two folders, then 1 + 2 + 1
+
+
+def test_many_tiny_files_cannot_dodge_the_disk_limit(lw):
+    w = lw(limits=PersonLimits(disk_bytes=10 * BLOCK))
+    ada = w.person(1)
+    folder = w.libraries.for_user(w.uid(1)).root
+    folder.mkdir(parents=True, exist_ok=True)
+    assert post_build(ada).status_code == 201  # an empty library folder takes one block
+    for i in range(20):
+        (folder / f"f{i}").write_bytes(b"x")  # twenty ONE-BYTE files: 20 bytes of text, 20 blocks of disk
+    refused = post_build(ada)
+    assert refused.status_code == 429 and refused.json()["limit"] == "disk"
+
+
+def test_the_walk_stops_as_soon_as_the_limit_is_passed(tmp_path):
+    from skillforge.builder.limits import folder_bytes
+
+    for i in range(1000):
+        (tmp_path / f"f{i}").write_bytes(b"x")
+    got = folder_bytes(tmp_path, stop_at=3 * BLOCK)
+    assert 3 * BLOCK <= got < 1000 * BLOCK  # it stopped after a few entries, not after all thousand
+
+
+def test_one_persons_slow_disk_walk_never_makes_another_person_wait(lw, monkeypatch):
+    from skillforge.builder import limits as limits_module
+
+    w = lw(runner=Parked(), limits=PersonLimits(disk_bytes=10 * MB, max_active=5))
+    w.person(1)
+    w.person(2)
+    ada, bob = w.uid(1), w.uid(2)
+    walking, release = threading.Event(), threading.Event()
+    real = limits_module.folder_bytes
+
+    def slow(root, stop_at=None):
+        if ada in str(root):  # Ada's folder is enormous: her walk takes as long as the test lets it
+            walking.set()
+            release.wait(timeout=20)
+        return real(root) if stop_at is None else real(root, stop_at)
+
+    monkeypatch.setattr(limits_module, "folder_bytes", slow)
+    errors: list[BaseException] = []
+
+    def start_for(user: str) -> None:
+        try:
+            w.builder.start(FULL, user=user)
+        except BaseException as exc:  # noqa: BLE001  (a refusal or a crash must not be swallowed silently)
+            errors.append(exc)
+
+    first = threading.Thread(target=start_for, args=(ada,))
+    second = threading.Thread(target=start_for, args=(bob,))
+    try:
+        first.start()
+        assert walking.wait(timeout=10), "Ada's disk walk never began"
+        second.start()
+        second.join(timeout=4)
+        assert not second.is_alive(), "Bob's build start was held up behind Ada's disk walk"
+    finally:
+        release.set()
+        first.join(timeout=30)
+        second.join(timeout=30)
+    assert errors == []
+
+
+def test_the_space_view_does_not_walk_the_folders_again_within_a_few_seconds(lw, monkeypatch):
+    from skillforge.builder import limits as limits_module
+
+    w = lw(limits=PersonLimits(disk_bytes=10 * MB))
+    ada = w.person(1)
+    now = [1000.0]
+    w.builder.space._clock = lambda: now[0]
+    walks: list[int] = []
+    real = limits_module.folder_bytes
+
+    def counting(root, stop_at=None):
+        walks.append(1)
+        return real(root) if stop_at is None else real(root, stop_at)
+
+    monkeypatch.setattr(limits_module, "folder_bytes", counting)
+    ada.get("/api/me/space")
+    first = len(walks)
+    assert first > 0
+    ada.get("/api/me/space")
+    assert len(walks) == first  # the second answer came from the measurement a moment ago
+    now[0] += 60
+    ada.get("/api/me/space")
+    assert len(walks) > first  # a minute later it measures again
+
+
+def test_admission_always_measures_fresh_even_when_the_view_has_a_recent_measurement(lw):
+    w = lw(limits=PersonLimits(disk_bytes=3 * BLOCK))
+    ada = w.person(1)
+    assert ada.get("/api/me/space").status_code == 200  # a measurement is now on hand
+    folder = w.libraries.for_user(w.uid(1)).root
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(5):
+        (folder / f"f{i}").write_bytes(b"x")
+    assert post_build(ada).status_code == 429  # the refusal is decided on today's files, not on a few seconds ago

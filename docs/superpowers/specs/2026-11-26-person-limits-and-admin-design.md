@@ -1,6 +1,6 @@
 # Per-person limits, an owner's admin page, and the small fixes (slice AJ): design and plan
 
-Status: **approved by the owner's "Yes, start step 2 now"** for the three parts below; the numbers and shapes are my calls, each marked *my call*, and every one is a setting or a one-line change.
+Status: **built (slice AJ), see [../../person-limits.md](../../person-limits.md) for what was built, checked and reviewed.** It was approved by the owner's "Yes, start step 2 now" for the three parts below; the numbers and shapes are my calls, each marked *my call*, and every one is a setting or a one-line change.
 
 ## Why
 

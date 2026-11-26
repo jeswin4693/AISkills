@@ -200,6 +200,7 @@ class Builder:
             raise BadRequest(str(exc)) from exc
         kept_seed = check_seed(kind, (seed or {}).get("repo"), (seed or {}).get("focus"), (seed or {}).get("nodes"), (seed or {}).get("snapshot"))
         sid, stamp = uuid.uuid4().hex, now_text()
+        self.space.check_disk(user)  # before the lock: walking a big folder must never hold up anybody else's start
         with self.space.lock, self.db.session() as s:  # the lock is held until this is written, so two starts at once cannot both take the last place
             self.space.admit(user, new_build=True)
             s.add(BuildSession(
@@ -212,6 +213,7 @@ class Builder:
         return self.get(sid, user)
 
     def answer(self, sid: str, answers: dict[str, str], user: str = LOCAL_USER_ID) -> dict:
+        self.space.check_disk(user)
         with self.space.lock, self.db.session() as s:
             row = self._row(s, sid, user)
             if row.status != "awaiting_answers":
@@ -233,6 +235,7 @@ class Builder:
         return self.get(sid, user)
 
     def approve(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
+        self.space.check_disk(user)
         with self.space.lock, self.db.session() as s:
             self._row(s, sid, user)
             self.space.admit(user)
@@ -243,6 +246,7 @@ class Builder:
         return self.get(sid, user)
 
     def retry(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
+        self.space.check_disk(user)
         with self.space.lock, self.db.session() as s:
             row = self._row(s, sid, user)
             if row.status != "failed" or not row.retryable:

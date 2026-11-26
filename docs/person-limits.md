@@ -26,9 +26,9 @@ Each is a whole number from 0 to 10,000,000, or the server refuses to start and 
 
 "At or over" refuses. The refusal is HTTP **429** with `{"detail": "...", "limit": "disk" | "builds" | "active"}`; the words name the person's **own** numbers and say what to do ("Discard builds you no longer need, then try again"). A Testing Lab run is allowed at the disk limit: it writes next to nothing, and a person who is full can still test what they have.
 
-**How it is measured.** The size is measured **on demand** (a walk of the person's folder and of the folders of their own builds), not kept as a counter that could drift; a link inside a folder (a symbolic link or a Windows junction) is counted as the small thing it is and **never followed**, so it can neither make another folder count as theirs nor make the walk leave their space. The two counts come from the database.
+**How it is measured.** The size is measured **on demand** (a walk of the person's folder and of the folders of their own builds), not kept as a counter that could drift. **Every file is charged in whole 4 KB blocks, at least one, and every folder and link one block**: what it really takes on a disk, so a million one-byte files cannot hide under a limit counted in bytes (the independent review reproduced 28 imports of 400 tiny files each passing a 1 MB limit). A link inside a folder (a symbolic link or a Windows junction) is **never followed**, so it can neither make another folder count as theirs nor make the walk leave their space. **The walk stops as soon as the limit is passed**, so a huge folder costs a bounded amount to look at (at the default 500 MB, about 128,000 entries at most). The two counts come from the database. The space card and the People page reuse a measurement up to 5 seconds old; **admission always measures fresh**.
 
-**At the same moment.** The check and the write that takes the place happen under one lock, so eight starts at the same instant with two places left give exactly two (a test starts eight threads together). The lock is in this process: the hosted image runs one process.
+**At the same moment.** For the counts kept in the database (builds kept, runs working), the check and the write that takes the place happen under one lock, so eight starts at the same instant with two places left give exactly two (a test starts eight threads together). **The disk is measured before that lock is taken**, never while holding it: walking one person's big folder used to hold the lock every other person's build start needs (the review reproduced Bob waiting for Ada's walk). The price: an action can overshoot the disk limit by what one action writes (a few MB), never a runaway. The lock is in this process: the hosted image runs one process.
 
 **What a person sees.** `GET /api/me/space` and a **Your space on this server** card on Settings: disk used of the limit, builds kept of the limit, runs working of the limit, each with a bar, and what to do when one is full. Only their own numbers; the owner sees nothing there.
 
@@ -55,13 +55,35 @@ The owner of a hosted server sees **People** in the menu (nobody else does). It 
 
 - **No deleting a person's data from the admin page, no per-person custom limits** (one number for everybody), no limits on the owner, none in local mode.
 - **The library cannot be shrunk by a person**: there is no "delete a skill". A person whose library alone passes the disk limit is stuck until the owner raises the setting; discarding builds frees only the build folders.
-- The disk walk costs a pass over a person's files on each start, save or import: cheap at these sizes (a few hundred files), and the People page does one per person, so it is meant for a small server.
+- The disk walk is bounded (it stops at the limit) but still a pass over up to about 128,000 entries for a person near the default limit, on each start, answer, approve, retry, save or import; the People page does one per person (reused for 5 seconds). It is meant for a small server.
+- **One person with several Google accounts gets several sets of limits** (the open allow-list is the owner's choice). A person can also repeat a limit-checked call as often as they like; there is no rate limit on any route.
+- `POST /api/library/import?test_scripts=true` (the sandbox runs inside the request) and the model checks (`/api/me/model/test`, `/api/provider/check`) are not counted as "runs working": they are requests, not background runs, and the hosted image has no container engine for the first.
 - **The lock and the in-flight places live in one process.** The hosted image runs one instance; several would each count the same rows but hold their own lock.
 - A checklist item answered in an earlier builder round can still be lost in a later one (the spec is recomputed each round); the quote fix removed the cause seen so far, not the design.
 
+## The independent review (2026-11-26)
+
+A fresh reviewer on the most capable model (186k tokens, 42 tool calls), given the code, the rules and the failure modes to test but none of my conclusions: **no Critical finding, two Important, seven Minor.** Both Important findings were reproduced as failing tests first and are fixed (`tests/test_person_limits.py`, 6 tests): **(1)** the disk limit counted only file bytes, so many tiny files dodged it (now charged in blocks, see above); **(2)** the disk walk ran while holding the lock every person's build start needs, so one person with a huge folder stalled everybody (now measured before the lock, stopping at the limit, and cached for display). The five focus points (off-by-one at the cap, two starts at the same instant, a blocked person with a valid session, odd ids on the admin routes, links out of a folder) held up, and migration 0008 is safe both ways.
+
+**Minor findings, not fixed (listed so they are not lost):**
+
+- A turned-off person's refused sign-in still rewrites their record (name, picture, last sign-in), so they can change what the People page shows and appear at the top as "last seen just now". The fix is to look the person up and check the block before updating the record.
+- "Last seen" is the last **sign-in**, not the last activity (a session lasts days); the label should say so.
+- The People list is capped at 1,000 people, latest sign-in first: on a very open server a turned-off person could fall past the cap and not be found to turn back on from the page (list turned-off people first, or page the list).
+- The sign-in middleware asks the database (is this person turned off?) from async code on every request of a person: each lookup is a primary-key read, a failure answers 500 (it fails closed), but it blocks the event loop for that moment (a thread pool would not).
+- The browser check's launcher passes `limits=hosted.person_limits` by hand instead of calling `builder_options`, so the helper's "so none can forget" is true for two of the three places a builder is made (a test covers the real `serve`; the launcher is the third).
+- Errors raised by the engine's own guards (`LLM_MAX_CALLS`, `LLM_MAX_INPUT_TOKENS`) still name owner settings when a person's own key hits them.
+- This file said "a few hundred files" for the walk's cost: corrected above.
+
 ## What was checked
 
-(filled in after the verification)
+- **Backend: 3,779 tests passed, 4 skipped** (they need a Linux Docker), none failed; 71 of them are new for this slice (the small fixes, the limits, the People routes and the block, and the tests the breaks and the review added). All offline, none reads the real `.env`.
+- **Web: 424 unit tests passed, the typecheck is clean.** The main real-browser suite passed **100 of 100**.
+- **The hosted version at phone size** (`npm run e2e:phone`, 390 px, touch, a throwaway hosted server with no real model): **44 of 44** checks, 15 of them new: a person's own space card with its three bars, the owner's People page (the person listed, a 44 px Turn off button, asking first), turning the account off (the person told so on the sign-in screen, every call of theirs a 403), and turning it back on (the same session works again, everything kept).
+- **Deliberate breaks** (a break is a small wrong change made to the code on purpose, to see that a test fails): the first run of 60 caught 52 and **8 survived, and every one was a weak test of mine** (no test at exactly the limit; the answer, retry and Lab-retry paths never walked; a documented rule, "a Lab run is allowed at the disk limit", with no test; a leak test that searched the wrong form of a secret; the own-key and server call counts never compared; one clamp that did nothing). All were strengthened and re-broken (7 caught, the redundant line deleted). After the review's fix the whole script, now **65 breaks**, was run again on the final code: **all 65 caught, none survived.**
+- **Two real defects were found by the review, not by my tests** (see above), and the earlier real sign-in of slice AI had found that `serve` forgot the model options: that is why `builder_options` is now the one place a hosted builder's options are made, with a test through the real `serve` command.
+- **Not tried:** a real Google sign-in of a person who is then turned off, a real phone, a real host, many people at once, more than one server instance, and the walk on a real folder of hundreds of thousands of files (the early stop is tested on a thousand).
+
 
 ## Where the code is
 

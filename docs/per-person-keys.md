@@ -53,7 +53,7 @@ Only GET, POST and DELETE exist: the API's CORS policy allows nothing else.
 - **The unit is attempts, not calls or tokens or money.** A retry is a row. The allowance can be passed by the few attempts already in flight when it runs out, no more.
 - **The in-flight slots live in one process's memory.** The hosted version already runs **one** instance (see [hosting.md](hosting.md)); several would each hold their own slots (the count of rows is shared through the database, the reservation is not).
 - One provider and one model per person; no backup models for a person (backups stay a server feature). A key the provider refuses fails the job with the provider's own error, with the key removed.
-- No admin page, no per-person limit set by the owner (one number for everybody), no rate limit on saving a key, and no way to see who spent what except the usage rows in the database.
+- No per-person allowance set by the owner (one number for everybody) and no rate limit on saving a key. The owner can see each person's calls today, on the server's model and on their own key, on the People page ([person-limits.md](person-limits.md)).
 - The allowance resets at **midnight UTC**, not the person's midnight.
 - Four small things the independent review found and that are **not fixed yet** (none loses a key or lets anyone past the allowance on purpose):
   - An attempt that fails with an error that is not the engine's own (an unexpected one from a provider's library) writes no usage row, so it is not counted; its in-flight slot frees itself after 10 minutes. A small under-count, hard to trigger.

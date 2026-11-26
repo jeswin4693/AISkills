@@ -115,7 +115,7 @@ class EvalRuns:
 
     def _admit(self, user: str) -> None:
         if self.space is not None:
-            self.space.admit(user, disk=False)  # a Lab run writes next to nothing: a person at their disk limit can still test what they have
+            self.space.admit(user)  # the counts only: a Lab run writes next to nothing, so a person at their disk limit can still test what they have
 
     def _library(self, user: str) -> Library:
         """A person's library. Fails closed: with no resolver only the owner has one."""

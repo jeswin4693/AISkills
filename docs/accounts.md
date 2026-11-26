@@ -78,7 +78,7 @@ An **exact address** or `*` needs no Workspace. A refused person at a listed dom
 - **Whose model a person's calls use is now their own choice** ([per-person-keys.md](per-person-keys.md)): by default a person with no key of their own cannot use the host's model at all; the host may share it with a daily cap. The allow-list is still mandatory (signing in proves who someone is, not that they are welcome), and `*` should only be used knowingly.
 - **A hosted copy still has no sandbox**: skills with scripts and MCP servers are built as drafts there, for everyone.
 - **One server process, one SQLite file**: fine for a few people, not for a crowd. PostgreSQL has never been tried with this app.
-- **No admin page**: the list of people is a setting. There is no account deletion, no teams and no sharing between people.
+- The list of people is a setting, and the owner has a **People page** to see who uses the server and turn an account off (slice AJ, [person-limits.md](person-limits.md)); each person has limits on disk, kept builds and runs at once. There is no account deletion, no teams and no sharing between people.
 - **A person's files are not limited in size** except by the library's own per-skill limits.
 - **Not verified:** the real round trip with Google in a browser (it needs your Google account and an authorised origin; the tests sign their own tickets), a real phone, several people signing in at the same moment, and any host. See [hosting.md](hosting.md).
 

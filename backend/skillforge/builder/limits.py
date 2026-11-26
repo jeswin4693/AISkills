@@ -4,13 +4,16 @@ The hosted version is meant to be open to any Google account, and a free server 
 workers busy. The OWNER (and local use) is never limited, a limit of 0 means "none", and one person's numbers never include another's.
 
 The size of a person's space is measured on demand (their folder plus the folders of their own builds), not kept as a running counter: a counter drifts when a
-write fails halfway or a folder is changed by hand, a measurement cannot.
+write fails halfway or a folder is changed by hand, a measurement cannot. Every file and folder is charged at least one 4 KB block (what it really takes on a
+disk), so a million one-byte files cannot hide under a limit counted in bytes. A walk stops as soon as the limit is passed, so a huge folder costs a bounded
+amount to look at, and it is never done while holding the lock the other people's build starts need.
 """
 
 from __future__ import annotations
 
 import os
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +23,8 @@ from sqlalchemy import func, select
 from ..db import LOCAL_USER_ID, BuildSession, Database, EvalRun
 
 MB = 1024 * 1024
+BLOCK = 4096  # what the smallest file or folder takes on a disk
+CACHE_SECONDS = 5.0  # how long a measurement may be shown again (the space card, the People page); admission always measures fresh
 
 
 @dataclass(frozen=True)
@@ -41,9 +46,15 @@ class LimitReached(Exception):
         self.limit = limit  # "disk", "builds" or "active"
 
 
-def folder_bytes(root: Path) -> int:
-    """The size of the files under `root`. A link (a symbolic link, or a junction on Windows) is counted as the small thing it is and never followed, so a
-    link inside someone's folder can neither make another folder count as theirs nor make this walk leave their space."""
+def charged(size: int) -> int:
+    """What a file of this many bytes takes on a disk: whole blocks, and at least one (an empty file still takes an entry)."""
+    return -(-max(size, 1) // BLOCK) * BLOCK
+
+
+def folder_bytes(root: Path, stop_at: int | None = None) -> int:
+    """What the files and folders under `root` take on a disk: each file in whole blocks, each folder and each link one block. A link (a symbolic link, or a
+    junction on Windows) is never followed, so a link inside someone's folder can neither make another folder count as theirs nor make this walk leave their
+    space. With `stop_at` the walk ends as soon as the total reaches it: "at least this much" is all a limit needs to know."""
     total = 0
     pending = [str(root)]
     while pending:
@@ -52,13 +63,16 @@ def folder_bytes(root: Path) -> int:
                 for entry in entries:
                     try:
                         if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
-                            total += entry.stat(follow_symlinks=False).st_size
+                            total += BLOCK
                         elif entry.is_dir(follow_symlinks=False):
+                            total += BLOCK
                             pending.append(entry.path)
                         else:
-                            total += entry.stat(follow_symlinks=False).st_size
+                            total += charged(entry.stat(follow_symlinks=False).st_size)
                     except OSError:
                         continue
+                    if stop_at is not None and total >= stop_at:
+                        return total
         except OSError:
             continue
     return total
@@ -71,11 +85,16 @@ def size_text(size: int) -> str:
 class PersonSpace:
     """What each person uses and what they may use. `folders(user)` says which folders on disk are that person's."""
 
-    def __init__(self, db: Database, limits: PersonLimits, folders: Callable[[str], list[Path]] | None = None) -> None:
+    def __init__(
+        self, db: Database, limits: PersonLimits, folders: Callable[[str], list[Path]] | None = None, clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.db = db
         self.limits = limits
         self._folders = folders or (lambda user: [])
-        # Held from the check until the work it admits is written down, so two requests at the same instant cannot both take the last place.
+        self._clock = clock
+        self._seen: dict[str, tuple[float, int]] = {}  # the last measurement of each person, for display only
+        # Held from the check until the work it admits is written down, so two requests at the same instant cannot both take the last place. It guards the
+        # database counts only (which are quick): the disk is measured BEFORE it is taken, so one person's huge folder never holds up anybody else's start.
         self.lock = threading.Lock()
 
     def limited(self, user: str) -> bool:
@@ -83,8 +102,25 @@ class PersonSpace:
 
     # ---- measuring --------------------------------------------------------------------------------------------------
 
-    def used(self, user: str) -> int:
-        return sum(folder_bytes(folder) for folder in self._folders(user))
+    def used(self, user: str, stop_at: int | None = None) -> int:
+        """What this person's files take. With `stop_at`, "at least this much" is enough and the walk ends there."""
+        total = 0
+        for folder in self._folders(user):
+            total += folder_bytes(folder, None if stop_at is None else max(1, stop_at - total))
+            if stop_at is not None and total >= stop_at:
+                break
+        return total
+
+    def used_for_display(self, user: str) -> int:
+        """The same, for showing (the space card, the People page): a measurement up to a few seconds old is reused, so repeating the request costs nothing. A person at
+        their limit is shown as at least the limit. Admission never uses this: it measures fresh."""
+        now = self._clock()
+        seen = self._seen.get(user)
+        if seen is not None and now - seen[0] < CACHE_SECONDS:
+            return seen[1]
+        value = self.used(user, stop_at=self.limits.disk_bytes or None)
+        self._seen[user] = (now, value)
+        return value
 
     def kept(self, user: str) -> int:
         with self.db.session() as s:
@@ -101,7 +137,7 @@ class PersonSpace:
     def check_disk(self, user: str) -> None:
         if not self.limited(user) or not self.limits.disk_bytes:
             return
-        used = self.used(user)
+        used = self.used(user, stop_at=self.limits.disk_bytes)
         if used >= self.limits.disk_bytes:
             raise LimitReached(
                 "disk",
@@ -109,8 +145,10 @@ class PersonSpace:
                 "Discard builds you no longer need, then try again. If that is not enough, ask whoever runs this server.",
             )
 
-    def admit(self, user: str, *, new_build: bool = False, disk: bool = True) -> None:
-        """Say yes (return) or raise LimitReached. Called with `self.lock` held, right before the work is written down."""
+    def admit(self, user: str, *, new_build: bool = False) -> None:
+        """Say yes (return) or raise LimitReached, for the counts kept in the database (builds kept, runs working). Called with `self.lock` held, right before the
+        work is written down. The disk is NOT looked at here: `check_disk` is called before the lock is taken, because walking a big folder must never hold
+        the lock other people's starts need. (An action can therefore overshoot the disk limit by what one action writes: a few MB, never a runaway.)"""
         if not self.limited(user):
             return
         limits = self.limits
@@ -124,8 +162,6 @@ class PersonSpace:
                 "active",
                 f"You already have {limits.max_active} runs working at once, the most this server allows. Wait for one to finish, then try again.",
             )
-        if disk:
-            self.check_disk(user)
 
     # ---- showing ----------------------------------------------------------------------------------------------------
 
@@ -136,7 +172,7 @@ class PersonSpace:
         limits = self.limits
         return {
             "mode": "person",
-            "disk": {"used": self.used(user), "limit": limits.disk_bytes},
+            "disk": {"used": self.used_for_display(user), "limit": limits.disk_bytes},
             "builds": {"kept": self.kept(user), "limit": limits.max_builds},
             "active": {"now": self.active(user), "limit": limits.max_active},
         }

@@ -52,7 +52,7 @@ def admin_router() -> APIRouter:
         for person in UserStore(builder.db).all():
             rows.append({
                 "id": person.id, "name": person.name, "email": person.email, "joined": person.joined, "last_seen": person.last_seen, "blocked": person.blocked,
-                "builds": builder.space.kept(person.id), "disk_used": builder.space.used(person.id), "active": builder.space.active(person.id),
+                "builds": builder.space.kept(person.id), "disk_used": builder.space.used_for_display(person.id), "active": builder.space.active(person.id),
                 "calls_today": {"server": builder.access.used_today(person.id), "own": builder.access.used_today(person.id, "own")},
                 "has_key": builder.access.store.get(person.id) is not None,
             })

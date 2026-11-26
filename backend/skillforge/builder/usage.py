@@ -9,19 +9,23 @@ from ..db import LOCAL_USER_ID, Database, ModelCall, now_text
 
 
 class DbUsageRecorder:
-    """Writes one row per attempt for one job of one session. Plugged into the AI service by the builder."""
+    """Writes one row per attempt, for one job of one session (a builder job) or for no session (a suggestion run, a Testing Lab run).
+    Plugged into the AI service by builder/model_access.py."""
 
-    def __init__(self, db: Database, session_id: str, job_id: int | None = None, user_id: str = LOCAL_USER_ID) -> None:
+    def __init__(
+        self, db: Database, session_id: str | None, job_id: int | None = None, user_id: str = LOCAL_USER_ID, key_source: str = "server",
+    ) -> None:
         self.db = db
         self.session_id = session_id
         self.job_id = job_id
-        self.user_id = user_id  # whose quota this attempt used
+        self.user_id = user_id  # whose spending this attempt was
+        self.key_source = key_source  # "server" (the host's model: counts toward a person's allowance) or "own" (their key: never does)
 
     def record(self, rec: UsageRecord) -> None:
         with self.db.session() as s:
             s.add(ModelCall(
-                session_id=self.session_id, job_id=self.job_id, user_id=self.user_id, created_at=now_text(), task=rec.task, tier=rec.tier,
-                provider=rec.provider, model=rec.model, attempt=rec.attempt, status=rec.status, error_kind=rec.error_kind,
+                session_id=self.session_id, job_id=self.job_id, user_id=self.user_id, key_source=self.key_source, created_at=now_text(), task=rec.task,
+                tier=rec.tier, provider=rec.provider, model=rec.model, attempt=rec.attempt, status=rec.status, error_kind=rec.error_kind,
                 input_tokens=rec.input_tokens, output_tokens=rec.output_tokens, latency_ms=rec.latency_ms,
             ))
 

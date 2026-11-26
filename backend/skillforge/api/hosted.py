@@ -75,6 +75,7 @@ class Hosted:
     session_days: int = 14
     google_client_id: str = ""  # public; "" means there is no Sign in with Google
     allowed_emails: frozenset[str] = frozenset()  # lower-case: "a@b.c", "@domain", or "*"
+    shared_calls_per_day: int = 0  # model calls a signed-in person without a key of their own may make on the server's model each day (UTC); 0 means none
 
     @property
     def google(self) -> bool:
@@ -130,12 +131,24 @@ class Hosted:
                     raise HostedConfigError(f"'{entry}' in SKILLFORGE_ALLOWED_EMAILS is not an email address, an @domain, or *.")
         elif emails:
             raise HostedConfigError("SKILLFORGE_ALLOWED_EMAILS is set but SKILLFORGE_GOOGLE_CLIENT_ID is not: set the Google Client ID, or remove the list.")
+        shared_text = env.get("SKILLFORGE_SHARED_KEY_CALLS_PER_DAY", "").strip()
+        shared = 0
+        if shared_text:
+            if not re.fullmatch(r"[0-9]{1,7}", shared_text) or int(shared_text) > 1_000_000:
+                raise HostedConfigError("SKILLFORGE_SHARED_KEY_CALLS_PER_DAY must be a whole number from 0 to 1000000 (model calls per person per day on the server's model; 0 means not shared).")
+            shared = int(shared_text)
+            if shared and not client_id:
+                raise HostedConfigError(
+                    "SKILLFORGE_SHARED_KEY_CALLS_PER_DAY is set but Google sign-in is not: only the owner can sign in then, and the owner is never limited. "
+                    "Set the Google settings, or remove it."
+                )
         return cls(
             token=token,
             allowed_hosts=frozenset(host_name(h) for h in env.get("SKILLFORGE_ALLOWED_HOSTS", "").split(",") if h.strip()),
             secure_cookie=True if secure in ("1", "true", "yes") else False if secure in ("0", "false", "no") else None,
             google_client_id=client_id,
             allowed_emails=emails,
+            shared_calls_per_day=shared,
         )
 
 

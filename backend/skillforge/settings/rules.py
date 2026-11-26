@@ -84,6 +84,58 @@ def _backups(value: str) -> str:
     return ",".join(clean)
 
 
+# ---- a person's own model (slice AI) ------------------------------------------------------------------------------
+# The same safe characters as the Settings page. A key travels in an HTTP header, so a control or invisible character in it is never allowed.
+
+# `custom` is left out: it takes an ADDRESS from whoever sets it, which would let a person send the server to any address they type.
+PERSON_PROVIDERS: tuple[str, ...] = tuple(name for name in supported_names() if name != "custom")
+PERSON_MODEL_LIMIT = 128  # as wide as model_calls.model, so a usage row can always hold it
+_QUOTES = "\"'`"
+
+
+def _person_provider(raw: str) -> str:
+    name = raw.strip().lower()
+    if name == "custom":
+        raise ValueError("The 'custom' provider sends the server to an address you type, so it is not offered here. Choose one of: " + ", ".join(PERSON_PROVIDERS) + ".")
+    if name not in PERSON_PROVIDERS:
+        raise ValueError("That is not a provider this app supports. Use one of: " + ", ".join(PERSON_PROVIDERS) + ".")
+    return name
+
+
+def _person_model(raw: str) -> str:
+    model = raw.strip()
+    if not model:
+        raise ValueError("Give the model name your key can use, for example the one in your provider's documentation.")
+    _safe(model, PERSON_MODEL_LIMIT)
+    return model
+
+
+def _person_key(raw: str) -> str:
+    key = raw.strip()  # a pasted key often carries a space or a newline at either end
+    if not key:
+        raise ValueError("Paste your key.")
+    if key[0] in _QUOTES or key[-1] in _QUOTES:
+        raise ValueError("Remove the quotes around the key: paste only the key itself.")
+    if re.match(r"bearer(\s|$)", key, re.IGNORECASE):
+        raise ValueError("Paste only the key, without the word Bearer in front of it.")
+    _safe(key, LIMITS["secret"])
+    return key
+
+
+def check_person_model(provider: str, model: str, key: str) -> tuple[str, str, str]:
+    """(provider, model, key), cleaned, or SettingsError naming every field that is wrong. A refusal never repeats the key."""
+    cleaned: dict[str, str] = {}
+    problems: list[dict[str, str]] = []
+    for name, check, raw in (("provider", _person_provider, provider), ("model", _person_model, model), ("key", _person_key, key)):
+        try:
+            cleaned[name] = check(raw)
+        except ValueError as exc:
+            problems.append({"name": name, "message": str(exc)})
+    if problems:
+        raise SettingsError(problems)
+    return cleaned["provider"], cleaned["model"], cleaned["key"]
+
+
 def check_value(setting: Setting, raw: str) -> str:
     """The value as it will be written, or ValueError saying what is wrong (never the value itself)."""
     value = raw.strip()

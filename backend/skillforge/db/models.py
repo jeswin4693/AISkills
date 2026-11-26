@@ -6,7 +6,7 @@ what changes while someone is working: builder sessions and the background jobs 
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 LOCAL_USER_ID = "local"  # the one person who used the app before accounts existed: local mode, the access token and Bearer. Not a random id, and not a row of `users`.
@@ -61,6 +61,19 @@ class UserRow(Base):
     picture: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[str] = mapped_column(String(32))
     last_login_at: Mapped[str] = mapped_column(String(32))
+
+
+class UserModelRow(Base):
+    """A person's own model choice and key. The key is CIPHERTEXT (builder/keybox.py): this table never holds a key in the clear. One row per person."""
+
+    __tablename__ = "user_models"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))  # as wide as model_calls.model, so a usage row can always hold it
+    key_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    key_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    updated_at: Mapped[str] = mapped_column(String(32))
 
 
 class Job(Base):
@@ -143,3 +156,6 @@ class ModelCall(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer)
     user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)  # who spent it (for per-person limits)
+    # Whose key paid for the attempt: "server" (the host's model) or "own" (the person's). Only "server" attempts use up a person's daily allowance.
+    # Every row from before this column was the server's: it was the only model there was.
+    key_source: Mapped[str] = mapped_column(String(8), default="server", server_default="server")

@@ -40,6 +40,7 @@ from .builds import builds_router, get_builder
 from .evals import evals_router
 from .google_auth import GoogleKeys
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
+from .me import me_router
 from .plugins import plugins_router
 from .quality import quality_router
 from .repos import repos_router
@@ -333,6 +334,7 @@ def create_app(
         hosted, LoginGuard(), keys=google_keys or GoogleKeys(), users=lambda: UserStore(get_builder(app).db),
     ))
     api.include_router(builds_router())
+    api.include_router(me_router())
     api.include_router(evals_router())
     api.include_router(quality_router())
     api.include_router(repos_router())

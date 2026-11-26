@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from .database import Database, now_text
@@ -60,10 +60,21 @@ class UserStore:
         raise RuntimeError("could not record the sign-in")
 
     def all(self, limit: int = 1000) -> list[UserRecord]:
-        """Everyone who has signed in, the latest sign-in first (the owner's People page; capped, so a very open server cannot make one answer enormous)."""
+        """Everyone who has signed in, TURNED-OFF people first (so one can always be found to turn back on), then the latest sign-in first. Capped, so a very open
+        server cannot make one answer enormous: `count()` says how many there are in all."""
         with self.db.session() as s:
-            rows = s.execute(select(UserRow).order_by(UserRow.last_login_at.desc(), UserRow.id).limit(limit)).scalars().all()
+            rows = s.execute(select(UserRow).order_by(UserRow.blocked.desc(), UserRow.last_login_at.desc(), UserRow.id).limit(limit)).scalars().all()
             return [_record(r) for r in rows]
+
+    def count(self) -> int:
+        with self.db.session() as s:
+            return s.execute(select(func.count()).select_from(UserRow)).scalar_one()
+
+    def find_by_sub(self, sub: str) -> UserRecord | None:
+        """The person for this Google account id, or None. Reads only: nothing about them is written."""
+        with self.db.session() as s:
+            row = s.execute(select(UserRow).where(UserRow.google_sub == sub)).scalar_one_or_none()
+            return _record(row) if row else None
 
     def is_blocked(self, user_id: object) -> bool:
         """Is this person turned off? Asked on every request of a signed-in person, so it is one primary-key lookup. Not a person we made: not blocked."""

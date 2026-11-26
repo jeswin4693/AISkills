@@ -266,6 +266,7 @@ try {
   await boss.getByRole("link", { name: "People", exact: true }).tap();
   await boss.getByText("tester@example.com").waitFor({ timeout: 15_000 });
   note(await boss.getByRole("heading", { name: "Phone Tester" }).isVisible(), "the People page lists the person, with their name and address");
+  note(await boss.getByText("Last sign-in").first().isVisible(), "the People page says Last sign-in (what the date really is), not Last seen");
   const off = boss.getByRole("button", { name: "Turn off this account" });
   const offBox = await off.boundingBox();
   note(offBox !== null && offBox.height >= 44, "the Turn off button is a 44 px tap target", offBox ? `${Math.round(offBox.height)} px` : "not found");

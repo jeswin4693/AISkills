@@ -53,11 +53,17 @@ export default function PeoplePage() {
     );
   }
   const people = loaded.data.people;
+  const total = loaded.data.total ?? people.length;
 
   return (
     <>
       {header}
       {error && <ErrorBox error={error} />}
+      {total > people.length && (
+        <Alert tone="info" title={`Showing ${people.length} of ${total} people`}>
+          <p>Turned-off people come first, then the latest sign-ins.</p>
+        </Alert>
+      )}
       {people.length === 0 ? (
         <Empty title="Nobody has signed in yet">When someone signs in with Google for the first time, they appear here.</Empty>
       ) : (
@@ -88,7 +94,7 @@ export default function PeoplePage() {
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-muted">Last seen</dt>
+                    <dt className="text-xs text-muted">Last sign-in</dt>
                     <dd>{sinceText(p.last_seen)}</dd>
                   </div>
                 </dl>

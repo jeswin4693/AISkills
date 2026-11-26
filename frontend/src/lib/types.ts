@@ -219,6 +219,8 @@ export interface AdminPerson {
 export interface AdminPeople {
   hosted: boolean;
   people: AdminPerson[];
+  /** How many people there are in all (the list shows the first few when there are very many). */
+  total?: number;
 }
 
 export type SaveMyModelResult = { ok: true; view: MyModelView } | { ok: false; detail: string; problems: { name: string; message: string }[] };

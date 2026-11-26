@@ -65,7 +65,7 @@ The owner of a hosted server sees **People** in the menu (nobody else does). It 
 
 A fresh reviewer on the most capable model (186k tokens, 42 tool calls), given the code, the rules and the failure modes to test but none of my conclusions: **no Critical finding, two Important, seven Minor.** Both Important findings were reproduced as failing tests first and are fixed (`tests/test_person_limits.py`, 6 tests): **(1)** the disk limit counted only file bytes, so many tiny files dodged it (now charged in blocks, see above); **(2)** the disk walk ran while holding the lock every person's build start needs, so one person with a huge folder stalled everybody (now measured before the lock, stopping at the limit, and cached for display). The five focus points (off-by-one at the cap, two starts at the same instant, a blocked person with a valid session, odd ids on the admin routes, links out of a folder) held up, and migration 0008 is safe both ways.
 
-**Minor findings, not fixed (listed so they are not lost):**
+**Minor findings (all fixed afterwards, in the completion batch's first task: see the end of this section):**
 
 - A turned-off person's refused sign-in still rewrites their record (name, picture, last sign-in), so they can change what the People page shows and appear at the top as "last seen just now". The fix is to look the person up and check the block before updating the record.
 - "Last seen" is the last **sign-in**, not the last activity (a session lasts days); the label should say so.
@@ -74,6 +74,8 @@ A fresh reviewer on the most capable model (186k tokens, 42 tool calls), given t
 - The browser check's launcher passes `limits=hosted.person_limits` by hand instead of calling `builder_options`, so the helper's "so none can forget" is true for two of the three places a builder is made (a test covers the real `serve`; the launcher is the third).
 - Errors raised by the engine's own guards (`LLM_MAX_CALLS`, `LLM_MAX_INPUT_TOKENS`) still name owner settings when a person's own key hits them.
 - This file said "a few hundred files" for the walk's cost: corrected above.
+
+**Fixed afterwards (slice AK, task 1; `tests/test_batch_fixes.py`, each also broken on purpose and caught):** a turned-off person's refused sign-in is now looked up and refused **before** anything about them is written, so it changes neither their name, their picture nor their last sign-in; the People page says **Last sign-in** (that is what the date is); the list shows **turned-off people first** (so one can always be found to turn back on) and says "Showing N of M people" when it is cut at 1,000; the sign-in check's database lookup runs in a thread pool and no longer blocks the event loop; the browser check's launcher builds its builder through `builder_options`, so none of the three places that make a hosted builder can forget the limits; and the engine's own guard errors (`LLM_MAX_CALLS`, `LLM_MAX_INPUT_TOKENS`), which a person on the **shared** model could see, now say "a limit set by the person who runs this server" instead of naming owner settings (the owner still sees the setting's name).
 
 ## What was checked
 

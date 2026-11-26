@@ -17,6 +17,7 @@ import uvicorn
 from skillforge.ai import AIService
 from skillforge.ai.doctor import Ping
 from skillforge.api import create_app
+from skillforge.api.builds import builder_options
 from skillforge.api.hosted import Hosted, User, make_cookie
 from skillforge.builder import Builder, JobRunner, ModelOptions
 from skillforge.builder.keybox import KeyBox
@@ -40,6 +41,15 @@ def fake_build(_env):
     return AIService.single(MockProvider([Ping(reply="ok")] * 20))
 
 
+def make_builder(hosted, library, database, builds) -> Builder:
+    """The builder of this throwaway server: made through `builder_options` like the real `serve` command (so it can never forget the limits), with only the
+    person's model replaced by a fake that answers the check's tiny question."""
+    options = builder_options(hosted)
+    options["model_options"] = ModelOptions(keybox=KeyBox(hosted.token), shared_calls_per_day=hosted.shared_calls_per_day, build=fake_build)
+    return Builder(database, library, builds, provider_factory=no_model, runner=JobRunner(),
+                   sandbox_note=lambda: "unavailable. (the browser check does not use the sandbox)", **options)
+
+
 def main() -> None:
     hosted = Hosted.from_env(os.environ)
     if hosted is None:
@@ -47,10 +57,7 @@ def main() -> None:
     library = Library(DATA / "library")
     database = Database(f"sqlite:///{(DATA / 'phone.db').as_posix()}")
     database.migrate()
-    options = ModelOptions(keybox=KeyBox(hosted.token), shared_calls_per_day=hosted.shared_calls_per_day, build=fake_build)
-    builder = Builder(database, library, DATA / "builds", provider_factory=no_model, runner=JobRunner(),
-                      sandbox_note=lambda: "unavailable. (the browser check does not use the sandbox)", model_options=options,
-                      limits=hosted.person_limits)  # the same limits the real `serve` gives a hosted server: a launcher that forgot them would hide a missing wiring
+    builder = make_builder(hosted, library, database, DATA / "builds")
     # One made-up person, with a real session cookie made by the product's own make_cookie, so the browser check can be a signed-in PERSON without a Google ticket.
     # tester@example.com is on the allow-list the check sets, which is what a real sign-in would have needed.
     person = UserStore(database).upsert_google("phone-check-sub", "tester@example.com", "Phone Tester")

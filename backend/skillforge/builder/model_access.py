@@ -49,7 +49,10 @@ _KEY_HINT = re.compile(r"Check [A-Z][A-Z0-9_]* in \.env\.?")
 def _for_a_person(message: str) -> str:
     """A provider's error says "Check GROQ_API_KEY in .env": advice for the owner. A person's own key is fixed under Settings, My model."""
     message = _MODEL_HINT.sub("Check the model name under Settings, My model.", message)
-    return _KEY_HINT.sub("Check your key under Settings, My model.", message)
+    message = _KEY_HINT.sub("Check your key under Settings, My model.", message)
+    for setting in ("LLM_MAX_CALLS", "LLM_MAX_INPUT_TOKENS"):  # limits the owner set on the server's own service
+        message = message.replace(f"({setting})", "(a limit set by the person who runs this server)")
+    return message
 
 
 class ModelAccessError(Exception):
@@ -113,7 +116,10 @@ class ModelAccess:
                 recorder: DbUsageRecorder = DbUsageRecorder(self.db, session_id, job_id, user_id, source)
             else:
                 recorder = _GivesBackASlot(self.db, session_id, job_id, user_id, source, release=lambda: self._release(user_id))
-            return provider.with_recorder(recorder, gate=gate)
+            wrapped = provider.with_recorder(recorder, gate=gate)  # a copy: the wording set on it never touches the server's own service
+            if user_id != LOCAL_USER_ID:
+                wrapped.reword = _for_a_person  # a person is never pointed at the owner's settings, whichever model answers for them
+            return wrapped
         return provider
 
     def _own_provider(self, user_id: str, stored: StoredModel) -> LLMProvider:

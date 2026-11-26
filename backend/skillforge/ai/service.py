@@ -219,7 +219,7 @@ class AIService:
             try:
                 generation = self._attempt(profile, schema, current, system)
             except ProviderError as exc:
-                error = _clone(exc, self.reword(str(exc)) if self.reword else str(exc), secrets)
+                error = _clone(exc, self._say(str(exc)), secrets)
                 self._record(task, tier_name, profile, tries, "error", error.kind, Usage(), time.monotonic() - started)
                 cap = attempts if not more else 2 if attempts is None else min(attempts, 2)
                 decision = decide(error, tries, self.policy, cap=cap, rng=self._rng)
@@ -269,17 +269,21 @@ class AIService:
             return generate(schema, prompt, system=system, options=profile.options)
         return Generation(provider.generate_structured(schema, prompt, system=system))  # a bare provider reports no usage
 
+    def _say(self, message: str) -> str:
+        """A message as the reader should see it: reworded when this service is for a person (builder/model_access.py)."""
+        return self.reword(message) if self.reword else message
+
     def _guard(self, profile: Profile, system: str | None, prompt: str) -> None:
         if self.max_calls is not None and self.usage.calls >= self.max_calls:
             raise ProviderError(
-                f"Stopped: this run has used its limit of {self.max_calls} model calls (LLM_MAX_CALLS).", kind="budget"
+                self._say(f"Stopped: this run has used its limit of {self.max_calls} model calls (LLM_MAX_CALLS)."), kind="budget"
             )
         if profile.max_input_tokens is not None:
             estimate = _estimate(system or "", prompt)
             if estimate > profile.max_input_tokens:
                 raise ProviderError(
-                    f"Not sent: the request is about {estimate} tokens, over the limit of {profile.max_input_tokens} "
-                    "(LLM_MAX_INPUT_TOKENS).", kind="too_long",
+                    self._say(f"Not sent: the request is about {estimate} tokens, over the limit of {profile.max_input_tokens} (LLM_MAX_INPUT_TOKENS)."),
+                    kind="too_long",
                 )
         if self.gate is not None:
             # LAST, so a slot a gate reserves is taken only for an attempt that really goes out: before anything is counted or sent, a refused attempt is

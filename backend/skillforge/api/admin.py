@@ -17,6 +17,7 @@ from .builds import get_builder
 from .scope import user_id
 
 _HEX32 = re.compile(r"[0-9a-f]{32}\Z")
+PEOPLE_LIMIT = 1000  # people shown at once: turned-off people first, then the latest sign-in; `total` says how many there are
 OWNER_ONLY = "Only the person who runs this server can do this."
 
 
@@ -49,14 +50,15 @@ def admin_router() -> APIRouter:
             return {"hosted": False, "people": []}
         builder = get_builder(request.app)
         rows = []
-        for person in UserStore(builder.db).all():
+        store = UserStore(builder.db)
+        for person in store.all(PEOPLE_LIMIT):
             rows.append({
                 "id": person.id, "name": person.name, "email": person.email, "joined": person.joined, "last_seen": person.last_seen, "blocked": person.blocked,
                 "builds": builder.space.kept(person.id), "disk_used": builder.space.used_for_display(person.id), "active": builder.space.active(person.id),
                 "calls_today": {"server": builder.access.used_today(person.id), "own": builder.access.used_today(person.id, "own")},
                 "has_key": builder.access.store.get(person.id) is not None,
             })
-        return {"hosted": True, "people": rows}
+        return {"hosted": True, "people": rows, "total": store.count()}
 
     @r.post("/admin/people/{who}/block")
     def block(who: str, request: Request) -> dict:

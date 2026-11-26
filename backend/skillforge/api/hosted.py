@@ -33,6 +33,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import cookie_parser
 
 from ..builder.limits import PersonLimits
@@ -375,7 +376,8 @@ class AuthMiddleware:
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         user = identify(self.hosted, headers)
-        if user is not None and user.id != LOCAL_USER.id and self.blocked is not None and self.blocked(user.id):
+        # a primary-key read from the database: done in a thread, so a slow disk never holds up the server's other requests
+        if user is not None and user.id != LOCAL_USER.id and self.blocked is not None and await run_in_threadpool(self.blocked, user.id):
             await JSONResponse({"detail": BLOCKED}, status_code=403)(scope, receive, send)
             return
         if user is not None:
@@ -470,8 +472,13 @@ def auth_router(hosted: Hosted | None, guard: LoginGuard, *, keys: Callable[[str
             if "@" + domain in hosted.allowed_emails and who.hd != domain:
                 detail += f" (Everyone at {domain} is allowed, but only with a Google Workspace account of that organisation, not a personal Google account.)"
             return JSONResponse({"detail": detail}, status_code=403)
+        known = users().find_by_sub(who.sub)
+        if known is not None and known.blocked:  # turned off: told so, and NOTHING about them is rewritten (name, picture, last sign-in)
+            refused = JSONResponse({"detail": BLOCKED}, status_code=403)
+            refused.delete_cookie(NONCE_COOKIE, path=NONCE_PATH)
+            return refused
         record = users().upsert_google(who.sub, who.email, who.name, who.picture)
-        if record.blocked:  # a turned-off person is told so and gets no session
+        if record.blocked:  # turned off between the look-up and the write (two requests at once)
             response = JSONResponse({"detail": BLOCKED}, status_code=403)
             response.delete_cookie(NONCE_COOKIE, path=NONCE_PATH)
             return response

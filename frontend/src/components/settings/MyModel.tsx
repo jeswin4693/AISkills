@@ -40,7 +40,7 @@ export function MyModel() {
 
   if (view.mode === "owner") {
     return (
-      <Alert tone="info" title="You are the owner of this server">
+      <Alert tone="info" title="Your model is the server's own">
         <p>{view.message}</p>
       </Alert>
     );
@@ -197,7 +197,7 @@ export function MyModel() {
               type="password"
               value={key}
               onChange={(e) => setKey(e.target.value)}
-              placeholder={view.key_saved ? "Saved. Paste a new key to replace it." : "Paste the key"}
+              placeholder={view.key_saved ? "Saved. Paste to replace." : "Paste the key"}
               autoComplete="off"
               autoCapitalize="none"
               spellCheck={false}

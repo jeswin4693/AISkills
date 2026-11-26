@@ -69,10 +69,11 @@ try {
   }
 
   browser = await chromium.launch({ channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge", headless: true });
-  const context = await browser.newContext({
+  const PHONE = {
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
     userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-  });
+  };
+  const context = await browser.newContext(PHONE);
   const page = await context.newPage();
   const problems = [];
   page.on("pageerror", (e) => problems.push("page error: " + e.message));
@@ -80,6 +81,7 @@ try {
     if (m.type() === "error") problems.push("console: " + m.text().slice(0, 200));
   });
   const shot = (name) => page.screenshot({ path: path.join(out, name), fullPage: true });
+  const shotOf = (p, name) => p.screenshot({ path: path.join(out, name), fullPage: true });
   const sideways = () => page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   const signInButton = () => page.getByRole("button", { name: "Sign in", exact: true }); // Google's own button also has "Sign in" in its name
 
@@ -128,6 +130,17 @@ try {
   note(w2.scroll <= w2.inner, "the signed-in page does not scroll sideways", `${w2.scroll} px wide in a ${w2.inner} px window`);
   await shot("04-signed-in.png");
 
+  // The owner's Settings page: no personal model, and they are told so (their model is the server's own settings).
+  await page.goto(`http://127.0.0.1:${UI}/settings`);
+  await page.getByText("You are the owner of this server").waitFor({ timeout: 15_000 }).then(
+    () => note(true, "the owner is told on the Settings page that the server's own settings are used"),
+    async () => {
+      const seen = ((await page.locator("body").innerText().catch(() => "")) || "").replace(/\s+/g, " ").slice(0, 300);
+      await shot("owner-settings-failed.png").catch(() => {});
+      note(false, "the owner is told on the Settings page that the server's own settings are used", `the page said: ${seen}`);
+    },
+  );
+
   let signOut = page.getByRole("button", { name: /sign out/i }).first();
   if (!(await signOut.isVisible().catch(() => false))) {
     const menu = page.getByRole("button", { name: /menu|navigation/i }).first();
@@ -146,6 +159,77 @@ try {
       () => note(false, "signing out returns to the sign-in screen"),
     );
   }
+
+  // ---- a signed-in PERSON (not the owner): their own model and key on the Settings page ----
+  // hosted_server.py wrote a real session cookie for one made-up person (made by the product's own make_cookie), so no Google ticket is needed.
+  const personCookie = fs.readFileSync(path.join(out, "data", "person-cookie.txt"), "utf8").trim();
+  const personContext = await browser.newContext(PHONE);
+  await personContext.addCookies([{ name: "skillforge_session", value: personCookie, domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Lax" }]);
+  const me = await personContext.newPage();
+  me.on("pageerror", (e) => problems.push("page error: " + e.message));
+  me.on("console", (m) => {
+    if (m.type() === "error") problems.push("console: " + m.text().slice(0, 200));
+  });
+  const answers = []; // every body the server sent about models: the key must be in none of them
+  me.on("response", async (r) => {
+    if (/\/api\/(me\/model|provider)/.test(r.url())) await r.text().then((t) => answers.push(t), () => {});
+  });
+  const KEY = "PHONE-CHECK-KEY-0123456789";
+
+  await me.goto(`http://127.0.0.1:${UI}/builder`);
+  await me.getByText("No AI model is set up yet").waitFor({ timeout: 15_000 });
+  note(await me.getByText(/Add your own model key in/).first().isVisible(), "with no model, a person is told to add their own key in Settings (not to edit a .env file)");
+
+  await me.goto(`http://127.0.0.1:${UI}/settings`);
+  await me.getByRole("heading", { name: "Use your own model" }).waitFor({ timeout: 15_000 });
+  note(true, "a signed-in person sees My model on the Settings page");
+  const provider2 = me.getByLabel("Provider");
+  const model2 = me.getByLabel("Model", { exact: true });
+  const key2 = me.getByLabel("Key", { exact: true });
+  const save2 = me.getByRole("button", { name: "Save my model" });
+  const options = await provider2.locator("option").allTextContents();
+  note(options.length > 0 && !options.includes("custom"), "the providers offered leave out custom (it takes an address)", options.join(", "));
+  const boxes = await Promise.all([provider2, model2, key2, save2].map((l) => l.boundingBox()));
+  note(boxes.every((b) => b !== null && b.height >= 44), "the form's fields and Save button are 44 px tall", boxes.map((b) => (b ? Math.round(b.height) : "?")).join(", "));
+  note((await key2.getAttribute("type")) === "password" && (await key2.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))) >= 16, "the key box is a password field with 16 px text");
+  const w3 = await me.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  note(w3.scroll <= w3.inner, "My model does not scroll sideways", `${w3.scroll} px wide in a ${w3.inner} px window`);
+
+  await provider2.selectOption("groq");
+  await model2.fill("llama-phone-check");
+  await key2.fill(`"${KEY}"`);
+  await me.getByText(/Remove the quotes/).waitFor({ timeout: 5_000 });
+  note(await save2.isDisabled(), "a key pasted in quotes is refused before Save, saying what to remove");
+  await key2.fill(` ${KEY} `); // a space at either end is fine: it is trimmed
+  await save2.tap();
+  await me.getByText(/Saved\. It is used/).waitFor({ timeout: 10_000 }).then(
+    () => note(true, "saving works and says so"),
+    () => note(false, "saving works and says so"),
+  );
+  note((await key2.inputValue()) === "", "the key box is empty again the moment it is saved");
+  const pageText = await me.locator("body").innerText();
+  const pageHtml = await me.content();
+  note(!pageText.includes(KEY) && !pageHtml.includes(KEY), "the key is nowhere on the page after saving");
+  note(!answers.join(" ").includes(KEY) && answers.length > 0, "the key is in no answer the server gave", `${answers.length} answers checked`);
+  await shotOf(me, "05-my-model-saved.png");
+
+  await me.reload();
+  await me.getByText("Your own key").first().waitFor({ timeout: 15_000 });
+  note((await me.getByLabel("Key", { exact: true }).inputValue()) === "", "after a reload the model is still saved and the key box is still empty");
+
+  await me.getByRole("button", { name: "Test my key" }).tap();
+  await me.getByText("Works", { exact: true }).waitFor({ timeout: 10_000 }).then(
+    () => note(true, "testing the key works (against the launcher's fake model: no network is used)"),
+    () => note(false, "testing the key works (against the launcher's fake model: no network is used)"),
+  );
+
+  await me.getByRole("button", { name: "Remove my key" }).tap();
+  await me.getByText("Not set up", { exact: true }).waitFor({ timeout: 10_000 }).then(
+    () => note(true, "removing the key puts the person back to having no model"),
+    () => note(false, "removing the key puts the person back to having no model"),
+  );
+  const w4 = await me.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  note(w4.scroll <= w4.inner, "My model does not scroll sideways afterwards either", `${w4.scroll} px wide in a ${w4.inner} px window`);
 
   // Google's own script logs its own complaints (a made-up Client ID, third-party cookies): only errors from OUR pages and API count.
   const ours = problems.filter((p) => !/accounts\.google\.com|gsi|googleusercontent|GSI_LOGGER|Failed to load resource/i.test(p));

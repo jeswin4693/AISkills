@@ -38,8 +38,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     for table in OWNED:
         op.drop_index(f"ix_{table}_user_id", table_name=table)
-        with op.batch_alter_table(table) as batch:
-            batch.drop_column("user_id")
+        # A plain DROP COLUMN (SQLite 3.35 or newer), NOT batch_alter_table: that rebuilds the table, and with foreign keys on the rebuild of build_sessions
+        # cascade-deletes every job and usage row that points at it (found by the independent review). An older SQLite refuses loudly and loses nothing.
+        op.drop_column(table, "user_id")
     op.drop_index("ix_users_email", table_name="users")
     op.drop_index("ix_users_google_sub", table_name="users")
     op.drop_table("users")

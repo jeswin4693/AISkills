@@ -78,7 +78,7 @@ export function LoginPanel() {
         onChange={(e) => setToken(e.target.value)}
         className="w-full rounded-md border border-border bg-surface px-3 py-2 text-base"
       />
-      <Button type="submit" variant="primary" busy={busy} disabled={!token.trim()} className="w-full justify-center">
+      <Button type="submit" variant="primary" busy={busy} disabled={!token.trim()} className="min-h-11 w-full justify-center">
         Sign in
       </Button>
     </form>
@@ -106,8 +106,9 @@ export function LoginPanel() {
                 </Alert>
               </div>
             )}
-            <details className="mt-5 text-sm" open={Boolean(googleError)}>
-              <summary className="cursor-pointer text-muted">Owner of this server? Use the access token</summary>
+            <details className="mt-2 text-sm" open={Boolean(googleError)}>
+              {/* py-3 makes the line 44 px tall: a thumb can hit it (it was 20 px, found by driving the page at phone size) */}
+              <summary className="cursor-pointer py-3 text-muted">Owner of this server? Use the access token</summary>
               {tokenForm}
             </details>
           </>

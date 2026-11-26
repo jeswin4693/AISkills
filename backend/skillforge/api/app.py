@@ -139,12 +139,14 @@ def create_app(
     app.state.builder_lock = threading.Lock()
     app.state.env_settings = env_settings or default_settings()
     trusted = allowed_origins(origins)
+    # The innermost layer is added first. The sign-in check goes INSIDE the CORS layer, so its 401 carries the CORS headers a trusted page on another address
+    # needs to read it (outside it, the browser reported "blocked by CORS policy" and the page could not tell "sign in" from "the server is down").
+    if hosted is not None:
+        app.add_middleware(AuthMiddleware, hosted=hosted)
     app.add_middleware(
         CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
         expose_headers=["Content-Disposition"],
     )
-    if hosted is not None:
-        app.add_middleware(AuthMiddleware, hosted=hosted)
     app.add_middleware(LocalOnlyMiddleware, origins=trusted, hosts=hosted.allowed_hosts if hosted else None)  # added last, so it runs first
 
     @app.exception_handler(RequestValidationError)

@@ -103,7 +103,8 @@ def test_only_listed_addresses_are_allowed_whatever_their_case(email, allowed):
     ("a@evilteam.example.org", False), ("team.example.org", False), ("a@b@team.example.org", False),
 ])
 def test_a_domain_entry_allows_that_domain_only(email, allowed):
-    assert hosted(allowed_emails=frozenset({"@team.example.org"})).email_allowed(email) is allowed
+    # The address-shape rules, for a person Google says belongs to the listed Workspace. (Without that claim a domain entry lets nobody in: test_accounts_review.py, finding 4.)
+    assert hosted(allowed_emails=frozenset({"@team.example.org"})).email_allowed(email, "team.example.org") is allowed
 
 
 def test_a_star_allows_any_google_account_but_not_nothing():
@@ -258,7 +259,7 @@ def test_someone_not_on_the_list_is_refused_kindly_and_leaves_no_trace(tmp_path)
 
 
 def test_a_whole_domain_or_a_star_lets_those_people_in(tmp_path):
-    assert sign_in(make_client(tmp_path, h=hosted(allowed_emails=frozenset({"@example.com"})))).status_code == 200
+    assert sign_in(make_client(tmp_path, h=hosted(allowed_emails=frozenset({"@example.com"}))), {"hd": "example.com"}).status_code == 200  # a Workspace account of that domain
 
 
 def test_a_star_lets_in_any_google_account(tmp_path):
@@ -322,12 +323,8 @@ def test_google_being_unreachable_is_a_503_not_a_wrong_ticket_and_is_not_counted
     assert c.post("/api/auth/login", json={"token": "wrong"}).status_code == 401  # still not locked
 
 
-def test_too_many_wrong_tickets_lock_sign_in_for_a_minute_and_a_good_one_still_works_after(tmp_path):
-    c = make_client(tmp_path)
-    for _ in range(5):
-        assert sign_in(c, {"aud": "another.apps.googleusercontent.com"}).status_code == 401
-    locked = sign_in(c)
-    assert locked.status_code == 429 and int(locked.headers["retry-after"]) > 0
+# (A test here used to say that five wrong Google tickets lock every sign-in for a minute. The independent review showed that was a lever for anybody to lock
+# the owner out, and that a good Google sign-in cleared a token guesser's count: wrong tickets now touch no lock, see test_accounts_review.py, findings 1, 2 and 6.)
 
 
 def test_asking_to_sign_in_with_google_on_a_server_without_it_is_a_clear_400(tmp_path):

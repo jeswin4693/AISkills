@@ -25,14 +25,15 @@ import re
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from http.cookies import CookieError, SimpleCookie
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.requests import cookie_parser
 
 from ..db.models import LOCAL_USER_ID
 from .google_auth import GoogleAuthError, verify_credential
@@ -60,6 +61,7 @@ class User:
 
     id: str
     email: str = ""
+    hd: str = ""  # the Google Workspace domain Google vouched for when they signed in ("" for the owner and for personal accounts)
 
 
 LOCAL_USER = User(LOCAL_USER_ID)  # local mode, the access token and Bearer: the one person who used the app before accounts, and whose data that is
@@ -78,12 +80,18 @@ class Hosted:
     def google(self) -> bool:
         return bool(self.google_client_id)
 
-    def email_allowed(self, email: str) -> bool:
-        """Is this address on the list? Exact address or its whole domain (not a subdomain), whatever the letter case; `*` lets any address in, but never nothing."""
+    def email_allowed(self, email: str, hd: str = "") -> bool:
+        """Is this person on the list? An exact address, whatever the letter case; `*` lets any address in, but never nothing.
+        A whole-domain entry (`@company.com`) means that company's Google Workspace: the domain must be the address's own (not a subdomain)
+        AND Google must have said (`hd`) that the account belongs to that Workspace. Without the second part, a personal Google account that merely
+        uses a company address (and stays verified after its owner leaves) would pass for an employee."""
         address = email.strip().lower()
         if not address or address.count("@") != 1:
             return False
-        return "*" in self.allowed_emails or address in self.allowed_emails or "@" + address.split("@", 1)[1] in self.allowed_emails
+        if "*" in self.allowed_emails or address in self.allowed_emails:
+            return True
+        domain = address.split("@", 1)[1]
+        return "@" + domain in self.allowed_emails and hd.strip().lower() == domain
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Hosted | None:
@@ -152,15 +160,16 @@ def _now(now: float | None) -> float:
 
 
 def make_cookie(hosted: Hosted, now: float | None = None, user: User | None = None) -> str:
-    """A signed session. For the owner it is the original `v1.<expiry>` cookie. For a person it is `v2.<id>.<email>.<expiry>`, so every request knows who it is
-    (and can check that the email is still on the list); the id must be one we made, so nothing odd is ever signed."""
+    """A signed session. For the owner it is the original `v1.<expiry>` cookie. For a person it is `v2.<id>.<email>.<workspace domain>.<expiry>`, so every request
+    knows who it is and HOW they got in (the list is re-checked with both: a `@company.com` entry needs the Workspace domain Google vouched for at sign-in);
+    the id must be one we made, so nothing odd is ever signed."""
     expiry = int(_now(now) + hosted.session_days * 86400)
     if user is None or user.id == LOCAL_USER.id:
         message = f"v1.{expiry}"
     else:
         if not _UID.match(user.id):
             raise ValueError("A session can only be made for the owner or for a person id this server made.")
-        message = f"v2.{user.id}.{_b64(user.email)}.{expiry}"
+        message = f"v2.{user.id}.{_b64(user.email)}.{_b64(user.hd)}.{expiry}"
     return f"{message}.{_sign(hosted, message)}"
 
 
@@ -174,17 +183,17 @@ def read_cookie(hosted: Hosted, value: object, now: float | None = None) -> User
         if not parts[1].isdigit() or not hmac.compare_digest(parts[2].encode("utf-8"), _sign(hosted, f"v1.{parts[1]}").encode("utf-8")):
             return None
         return LOCAL_USER if int(parts[1]) > current else None
-    if parts[0] == "v2" and len(parts) == 5 and hosted.google:
-        _, uid, email_text, expiry, signature = parts
-        if not (_UID.match(uid) and expiry.isdigit() and hmac.compare_digest(signature.encode("utf-8"), _sign(hosted, ".".join(parts[:4])).encode("utf-8"))):
+    if parts[0] == "v2" and len(parts) == 6 and hosted.google:
+        _, uid, email_text, hd_text, expiry, signature = parts
+        if not (_UID.match(uid) and expiry.isdigit() and hmac.compare_digest(signature.encode("utf-8"), _sign(hosted, ".".join(parts[:5])).encode("utf-8"))):
             return None
         if int(expiry) <= current:
             return None
         try:
-            email = _unb64(email_text)
+            email, hd = _unb64(email_text), _unb64(hd_text)
         except (ValueError, UnicodeError):
             return None
-        return User(uid, email) if hosted.email_allowed(email) else None
+        return User(uid, email, hd) if hosted.email_allowed(email, hd) else None
     return None
 
 
@@ -222,12 +231,10 @@ def identify(hosted: Hosted, headers: Mapping[str, str]) -> User | None:
     """Who is asking. `headers` has lower-case names. The Bearer token is the owner; a valid cookie is whoever it was made for."""
     if bearer_ok(hosted, headers.get("authorization")):
         return LOCAL_USER
-    try:
-        jar = SimpleCookie(headers.get("cookie", ""))
-    except CookieError:
-        return None
-    morsel = jar.get(COOKIE)
-    return read_cookie(hosted, morsel.value) if morsel is not None else None
+    # Starlette's own parser (what `request.cookies` uses): it skips a cookie it cannot read and goes on. Python's SimpleCookie stops at the first one it
+    # cannot parse (Google's own `g_state={"i_l":0}` is one), which hid the session cookie that came after it.
+    value = cookie_parser(headers.get("cookie", "")).get(COOKIE)
+    return read_cookie(hosted, value) if value is not None else None
 
 
 def is_signed_in(hosted: Hosted, headers: Mapping[str, str]) -> bool:
@@ -236,13 +243,50 @@ def is_signed_in(hosted: Hosted, headers: Mapping[str, str]) -> bool:
 
 
 def current_user(request: Request) -> User:
-    """Who this request is for: the person the sign-in middleware identified, or the owner (local mode has no sign-in and one person)."""
-    return getattr(request.state, "user", None) or LOCAL_USER
+    """Who this request is for: the person the sign-in middleware identified. Local mode has no sign-in and one person, the owner. On a hosted server a request
+    nobody identified is refused: it is never taken for the owner just because nothing said otherwise (a route the middleware did not see, for example
+    when the app is served under a path prefix, must not become the owner's)."""
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        return user
+    if getattr(request.app.state, "hosted", None) is not None:
+        raise HTTPException(401, "Sign in first.")
+    return LOCAL_USER
+
+
+class SpentNonces:
+    """Nonces already used, remembered for as long as their cookie could still be sent. The browser is told to delete a used nonce cookie, but that is only
+    a request: a copy of the cookie and the ticket would otherwise work again until the ten minutes ran out. Bounded, so a flood cannot grow it without end:
+    every nonce lives the same time, so the oldest is the first to expire and the first to be forgotten (a flood that pushes one out early only lets a
+    ticket made for that person be used once more, within its own ten minutes: it gives them nothing they did not already have)."""
+
+    def __init__(self, limit: int = 10_000) -> None:
+        self.limit = limit
+        self._lock = threading.Lock()
+        self._seen: OrderedDict[str, float] = OrderedDict()
+
+    def claim(self, nonce: str, *, expires: float, now: float) -> bool:
+        """True the first time a nonce is presented; False for every later time while it could still be valid."""
+        with self._lock:
+            while self._seen and next(iter(self._seen.values())) <= now:
+                self._seen.popitem(last=False)
+            if nonce in self._seen:
+                return False
+            self._seen[nonce] = expires
+            while len(self._seen) > self.limit:
+                self._seen.popitem(last=False)
+            return True
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._seen)
 
 
 class LoginGuard:
-    """After five wrong tokens in five minutes, sign-in is locked for a minute. One guard for the whole server on purpose: it cannot
-    be dodged by changing an address, and a long random token cannot be guessed at five tries a minute. Wrong Google tickets count too."""
+    """After five wrong access tokens in five minutes, signing in BY TOKEN is locked for a minute. One guard for the whole server on purpose: it cannot
+    be dodged by changing an address, and a long random token cannot be guessed at five tries a minute. It belongs to the access token alone: Google
+    tickets neither count toward it nor clear it (a ticket is a signature from Google, so there is nothing to guess, and letting them touch this lock
+    would give anybody a way to lock the owner out, or to reset a guesser's count with any Google account)."""
 
     def __init__(
         self, max_failures: int = 5, window_s: float = 300.0, lock_s: float = 60.0, clock: Callable[[], float] = time.monotonic
@@ -283,7 +327,14 @@ class AuthMiddleware:
         self.hosted = hosted
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["method"] == "OPTIONS" or not scope["path"].startswith("/api/") or scope["path"] in PUBLIC_PATHS:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        root = scope.get("root_path") or ""
+        if root and path.startswith(root + "/"):  # served under a prefix (a proxy mount, --root-path): the route is matched without it, so the guard must be too
+            path = path[len(root):]
+        if scope["method"] == "OPTIONS" or not path.startswith("/api/") or path in PUBLIC_PATHS:
             await self.app(scope, receive, send)
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
@@ -313,8 +364,10 @@ def _secure(hosted: Hosted, request: Request) -> bool:
 
 def auth_router(hosted: Hosted | None, guard: LoginGuard, *, keys: Callable[[str], Any] | None = None, users: Callable[[], Any] | None = None) -> APIRouter:
     """`keys(ticket)` returns the public key that signed a Google ticket (the real one asks Google; a test hands in its own).
-    `users()` returns the store of people (made on first use, so a server that never uses Google never opens the database for it)."""
+    `users()` returns the store of people (made on first use, so a server that never uses Google never opens the database for it).
+    `guard` is the access token's lock; Google sign-in has none of its own (see LoginGuard), and every attempt uses up its nonce instead."""
     r = APIRouter()
+    spent = SpentNonces()
 
     @r.get("/auth/status")
     def status(request: Request) -> dict:
@@ -359,27 +412,27 @@ def auth_router(hosted: Hosted | None, guard: LoginGuard, *, keys: Callable[[str
     def google(body: GoogleBody, request: Request) -> JSONResponse:
         if hosted is None or not hosted.google or keys is None or users is None:
             raise HTTPException(400, "Sign in with Google is not set up on this server.")
-        wait = guard.locked_for()
-        if wait:
-            return JSONResponse({"detail": f"Too many wrong tries. Try again in {wait} seconds."}, status_code=429, headers={"Retry-After": str(wait)})
+        nonce = read_nonce(hosted, request.cookies.get(NONCE_COOKIE))
+        if nonce:
+            now = time.time()
+            if not spent.claim(nonce, expires=now + NONCE_SECONDS, now=now):  # every attempt, good or bad, uses its nonce up: a replay finds none
+                nonce = ""
         try:
-            who = verify_credential(
-                body.credential, client_id=hosted.google_client_id, nonce=read_nonce(hosted, request.cookies.get(NONCE_COOKIE)), key_for=keys,
-            )
+            who = verify_credential(body.credential, client_id=hosted.google_client_id, nonce=nonce, key_for=keys)
         except GoogleAuthError as exc:
-            if exc.code == "keys_unavailable":  # Google could not be reached: nobody guessed anything, so it is not counted
+            if exc.code == "keys_unavailable":  # Google could not be reached: nobody guessed anything
                 return JSONResponse({"detail": str(exc)}, status_code=503)
-            guard.failed()
             return JSONResponse({"detail": str(exc)}, status_code=401)
-        if not hosted.email_allowed(who.email):
-            return JSONResponse(
-                {"detail": "That Google account is not allowed on this server. Ask the person who runs it to add your email address."}, status_code=403
-            )
+        if not hosted.email_allowed(who.email, who.hd):
+            detail = "That Google account is not allowed on this server. Ask the person who runs it to add your email address."
+            domain = who.email.rsplit("@", 1)[-1]
+            if "@" + domain in hosted.allowed_emails and who.hd != domain:
+                detail += f" (Everyone at {domain} is allowed, but only with a Google Workspace account of that organisation, not a personal Google account.)"
+            return JSONResponse({"detail": detail}, status_code=403)
         record = users().upsert_google(who.sub, who.email, who.name, who.picture)
-        guard.succeeded()
         response = JSONResponse({"authenticated": True, "user": {"email": record.email, "name": record.name, "picture": record.picture}})
         response.set_cookie(
-            COOKIE, make_cookie(hosted, user=User(record.id, record.email)), max_age=hosted.session_days * 86400, httponly=True, samesite="lax",
+            COOKIE, make_cookie(hosted, user=User(record.id, record.email, who.hd)), max_age=hosted.session_days * 86400, httponly=True, samesite="lax",
             secure=_secure(hosted, request), path="/",
         )
         response.delete_cookie(NONCE_COOKIE, path=NONCE_PATH)  # used once

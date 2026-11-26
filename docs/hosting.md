@@ -32,7 +32,7 @@ Turning hosted mode on changes nothing for local use: with no `SKILLFORGE_MODE`,
 | `SKILLFORGE_MODE=hosted` | turns the hosted version on (the image sets it) |
 | `SKILLFORGE_ACCESS_TOKEN` | **required**: a long random string. Set it as a secret on the host |
 | `SKILLFORGE_ALLOWED_HOSTS` | the host name people open (`skillforge.example.com`); comma separated; `*` allows any (the sign-in still applies) |
-| `SKILLFORGE_UI_ORIGINS` | extra page addresses to trust, only if you serve the pages from a different address than the API |
+| `SKILLFORGE_UI_ORIGINS` | extra page addresses to trust, only if you serve the pages from a different address than the API. **A signed-in session cannot work that way**: the session is a cookie, and a browser neither stores nor sends a cookie between two different origins (found by driving the sign-in screen: after a correct token the browser held no session cookie). The supported hosted setup serves the pages and the API from **one address**, as the image does |
 | `SKILLFORGE_COOKIE_SECURE=1` | set on any https site, so the cookie is never sent over plain http |
 | `SKILLFORGE_DATA_DIR` | where the library, the database and the builds live (`/data` in the image): **keep it on a persistent disk** |
 | `SKILLFORGE_GOOGLE_CLIENT_ID`, `SKILLFORGE_ALLOWED_EMAILS` | optional, **both or neither**: "Sign in with Google" for other people, and who may sign in. Each person then has their own builds and library. See [accounts.md](accounts.md) |
@@ -79,7 +79,7 @@ is a long-running Python server with background jobs and files; Supabase is a da
 | Option | What the sources say | Concern |
 |---|---|---|
 | Oracle Cloud *Always Free* VM | [Oracle's docs](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm): free for an unlimited time; its [FAQ](https://www.oracle.com/cloud/free/faq/) says sign-up uses a **card** for identity (no virtual, prepaid or PIN-debit cards) and that capacity is limited | **Idle VMs may be reclaimed** (CPU under 20% for 7 days), and [InfoQ reports](https://infoq.com/news/2026/07/oracle-cloud-free-tier-limits/) the free allowance was cut to 2 OCPU / 12 GB in mid-2026 (the sources disagree on the date) |
-| Google Cloud *Free Tier* e2-micro | [Google's docs](https://docs.cloud.google.com/free): one e2-micro VM a month in listed US regions; the limits "do not expire but are subject to change"; a billing account is verified | The VM is small (about 1 GB of memory as I recall: **measure this image's memory before choosing it**; a swap file may be needed) |
+| Google Cloud *Free Tier* e2-micro | [Google's docs](https://docs.cloud.google.com/free): one e2-micro VM a month in listed US regions; the limits "do not expire but are subject to change"; a billing account is verified | The VM is small (about 1 GB of memory as I recall). **This image was measured: about 185 MiB for the whole container when idle** (see "The https front door" below), so it fits with room to spare; a build's peak was **not** measured, and a swap file is cheap insurance |
 | A card-free route | a free container host plus a free database for the data | More code (the library lives in files today, not in a database) and a host that sleeps |
 
 ### The address must be one Google accepts (matters only for "Sign in with Google")
@@ -101,6 +101,20 @@ Without Google sign-in the host needs no such name: the access token works on an
 Then open the address on your phone, sign in once (the cookie lasts 14 days), and use it like the local version: describe a skill,
 answer, approve, save to the library. To get a skill into your agent, **Export** the zip and install it on your own computer.
 
+## The https front door (`docker-compose.https.yml`, `deploy/Caddyfile`)
+
+For a small server with a public name: Caddy listens on 80 and 443, gets and renews a free https certificate by itself, and forwards to the app, which publishes **no port**. Steps are at the top of `docker-compose.https.yml`:
+point a name at the machine, open ports 80 and 443, fill `.env.hosted` (add `SKILLFORGE_DOMAIN`, `SKILLFORGE_ALLOWED_HOSTS` with the same name, `SKILLFORGE_COOKIE_SECURE=1`), then
+`docker compose --env-file .env.hosted -f docker-compose.https.yml up -d --build`. The Caddy container receives **only** the domain name (the `--env-file` flag fills in `${...}`; it does not hand the file to the container), never the app's keys.
+
+**Checked (2026-11-26, Docker 29 inside WSL, the real image and the real Caddyfile on a private network, requests sent through Caddy with `curl`):**
+the Caddyfile passes `caddy validate` with the domain set and fails loudly without it; the health check answers over https in about 2 seconds; an API call with no sign-in is 401; the app is **not** reachable except through Caddy;
+Caddy adds `Strict-Transport-Security` and `X-Content-Type-Options` and sends no `Server` header; plain http is redirected (308) to https; `/api/auth/status` shows the Client ID; the nonce cookie is `HttpOnly; Secure; Path=/api/auth; Max-Age=600`; the owner's access-token sign-in works through Caddy and its cookie is `HttpOnly; Secure`;
+a made-up Google ticket is a 401; and the container's log holds neither the token nor the ticket. **The image is 628 MB on disk and the running container used about 185 MiB of memory when idle** (Docker's own figure; python about 152 MB of that), measured after a handful of requests and **not** under a real build.
+The compose file was parsed and its structure checked (the app publishes no port, Caddy has no `env_file`, the certificate has a volume), but **not run**: the Compose plugin is not installed in that WSL, so the two containers were started by hand with the same settings.
+
+**Not checked:** a real certificate from Let's Encrypt (it needs a public name and open ports 80 and 443; Caddy used its own local certificate authority for `localhost`), a real server, memory under a build or on a 1 GB machine, and Google sign-in through this front door (needs a name Google accepts, see above).
+
 ## Using Gemini and Groq (or any other keys) together
 
 Put every key in the host's secrets, choose the main model with `LLM_PROVIDER` and `LLM_MODEL`, and list the others in
@@ -113,8 +127,9 @@ unreachable. `python -m skillforge models --test` (or `POST /api/provider/check`
   change it if it leaks. With only the token there is one person and no audit log. **With Google sign-in** ([accounts.md](accounts.md)) other
   people have their own data and cannot see each other's, but **everyone who signs in still spends the host's model key** (per-person keys are
   not built yet), so the allow-list matters.
-- **The sign-in lock is global.** Someone who knows the address can keep sign-in locked for you by sending wrong tokens (you can
-  still use the Bearer header or wait a minute). Putting the site behind your host's own access controls closes that.
+- **The sign-in lock is global, and it is the access token's alone.** Someone who knows the address can keep sign-in **by token** locked for you by sending wrong tokens (you can
+  still use the Bearer header, or wait a minute). Google sign-in has no such lock (nothing about a Google ticket can be guessed), so wrong tickets never lock anyone out,
+  and a good Google sign-in does not reset a token guesser's count. Putting the site behind your host's own access controls closes the token one.
 - **Prompts go to the model providers**, and what you type is kept in the session database on the disk you mounted.
 - **No sandbox in the container.** Generated scripts are never run there, so a skill built with scripts is a DRAFT. Do not mount the
   Docker socket into this container.
@@ -139,8 +154,9 @@ unreachable. `python -m skillforge models --test` (or `POST /api/provider/check`
   last `wsl.exe` session ends**, taking its containers with it. Two idle containers (with and without a health check) died at the same
   moment, and with a `wsl.exe` session kept open they ran healthy for the whole test. If you test the image with Docker in WSL, keep a
   session open (for example `wsl.exe --exec sleep 600`). A normal Docker host does not do this.
-- **The sign-in screen in a browser** is covered by unit tests of its logic (4) and by the existing real-browser suite showing the local
-  version unchanged. The hosted sign-in screen itself was **not** driven in a real browser, and not on a phone.
+- **The sign-in screen in a browser** is covered by unit tests of its logic and by the existing real-browser suite showing the local
+  version unchanged. **Updated 2026-11-26:** the hosted sign-in screen is now driven in a real browser at phone size and with touch (`npm run e2e:phone`, 13 checks, see
+  [accounts.md](accounts.md)); that is an emulation of a phone in Edge, **not a real phone**, and Google's button was drawn but could not finish a sign-in (the Client ID was made up).
 
 **Not verified:** any real hosting service (Fly.io, Railway, Render and the others in the table are untried), https and the Secure
 cookie on a real https address, the pages opened on an actual phone, and several people or tabs signing in at once. Whether the web

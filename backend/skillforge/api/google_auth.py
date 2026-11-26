@@ -55,6 +55,7 @@ class GoogleIdentity:
     email: str  # lower-case
     name: str
     picture: str  # an https address, or ""
+    hd: str = ""  # the Google Workspace domain the account belongs to (lower-case), or "": a personal account has none, whatever its email looks like
 
 
 class GoogleKeys:
@@ -73,6 +74,17 @@ class GoogleKeys:
 
 def _plain(text: object, limit: int) -> str:
     return _CONTROL.sub(" ", text).strip()[:limit] if isinstance(text, str) else ""
+
+
+_DOMAIN = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\Z")
+
+
+def _workspace_domain(value: object) -> str:
+    """The `hd` claim as a plain lower-case domain, or "" when it is missing or not shaped like one (it is compared with the list, never shown)."""
+    if not isinstance(value, str):
+        return ""
+    domain = value.strip().lower()
+    return domain if _DOMAIN.match(domain) else ""
 
 
 def verify_credential(credential: str, *, client_id: str, nonce: str, key_for: Callable[[str], Any]) -> GoogleIdentity:
@@ -128,4 +140,5 @@ def verify_credential(credential: str, *, client_id: str, nonce: str, key_for: C
     return GoogleIdentity(
         sub=sub.strip(), email=email, name=_plain(claims.get("name"), MAX_NAME) or email.split("@")[0],
         picture=picture if isinstance(picture, str) and picture.startswith("https://") and len(picture) <= MAX_PICTURE else "",
+        hd=_workspace_domain(claims.get("hd")),
     )

@@ -23,7 +23,7 @@ person uses the same server: they would see your builds and your library. This s
 | Setting | Meaning |
 |---|---|
 | `SKILLFORGE_GOOGLE_CLIENT_ID` | The **Client ID** from Google Cloud Console (ends in `.apps.googleusercontent.com`). A client **secret** pasted here by mistake (`GOCSPX-…`) is refused with a message saying so. |
-| `SKILLFORGE_ALLOWED_EMAILS` | **Who may sign in**, comma separated: addresses (`ada@example.com`), whole domains (`@team.example.org`, not its subdomains), or `*` for any Google account. **Required** with the Client ID: an empty list refuses to start, because signing in proves who someone is, not that they are welcome. A typo such as `ada` (no `@`) is refused too. |
+| `SKILLFORGE_ALLOWED_EMAILS` | **Who may sign in**, comma separated: addresses (`ada@example.com`), whole domains (`@team.example.org`: **only for a Google Workspace account of that domain**, not its subdomains, see "Domain entries" below), or `*` for any Google account. **Required** with the Client ID: an empty list refuses to start, because signing in proves who someone is, not that they are welcome. A typo such as `ada` (no `@`) is refused too. |
 | `SKILLFORGE_ACCESS_TOKEN` | Unchanged and still **required**: it is the owner's way in, a script's Bearer token, and the key that signs every session, so changing it signs everyone out. |
 
 Taking someone off `SKILLFORGE_ALLOWED_EMAILS` ends their access **on their very next request** (the session carries the email, and the list is checked every time).
@@ -60,8 +60,15 @@ and the web app on port 3000 (`http://localhost:3000` is the origin you authoris
 
 A ticket for **another app** (wrong `aud`, also when it lists several apps and ours is one), from **another issuer**, **expired** or issued **in the future**, **signed by another key**, with its **signature cut off** or its claims
 **changed** after signing, using the **`none`** algorithm or **HS256 with the public key as the secret** (refused by looking at the algorithm *before* any key is used; PyJWT itself even refuses to create such a token), about an **unverified email**,
-with **no email** or **no subject**, with **no nonce** or **another browser's nonce**, garbage of any kind, or a request that arrives with no nonce cookie at all. A refusal's message never repeats the ticket. Google being unreachable is a **503** and is
-**not** counted as a wrong guess; every other refusal counts toward the five-wrong-tries lock (one minute), the same lock the access token uses.
+with **no email** or **no subject**, with **no nonce** or **another browser's nonce**, garbage of any kind, or a request that arrives with no nonce cookie at all. A refusal's message never repeats the ticket. Google being unreachable is a **503**.
+**Wrong tickets touch no lock** (a ticket is a signature from Google, so there is nothing to guess); the five-wrong-tries lock (one minute) belongs to the **access token alone**, and a good Google sign-in does not reset it.
+Instead, **every attempt uses up its nonce on the server**, good or bad, so a copy of a nonce cookie and a ticket cannot be sent again; the page asks for a fresh nonce after every refusal.
+
+## Domain entries (`@company.com`) mean that company's Google Workspace
+
+A whole-domain entry used to trust any verified email at that domain. Google's own guidance is to check the ticket's **`hd` claim** (the Workspace domain), because a *personal* Google account can be made with a company address and stays "verified" after its owner leaves.
+Now an `@company.com` entry admits a person only if their address is at that domain **and** Google says (`hd`) the account belongs to that Workspace. The session remembers that domain, so the list is re-checked with it on every request: taking someone's exact address off the list does not let a domain entry stand in for it unless they came in through that Workspace.
+An **exact address** or `*` needs no Workspace. A refused person at a listed domain is told why ("only with a Google Workspace account of that organisation"); someone at an unlisted domain is told nothing about which domains are listed.
 
 ## Limits (read these)
 
@@ -74,8 +81,8 @@ with **no email** or **no subject**, with **no nonce** or **another browser's no
 
 ## What was checked (2026-11-26)
 
-- **Tests, all offline** (a mock model, tickets signed by a key the test makes): the whole backend suite is 3,576 tests (3,572 passed, 4 skipped: they need a Linux Docker), **168 of them new** (`test_google_auth.py` 42, `test_accounts_auth.py` 68, `test_accounts_isolation.py` 48, `test_users_db.py` 10). Web: 366 unit tests and a clean typecheck (16 files; `lib/google.ts` and the sign-in logic in `lib/auth.ts` have their own).
-  The real-browser suite on free side ports: **100 of 100** (it runs the local version, so it shows nothing changed for local use; it does **not** drive the hosted sign-in screen).
+- **Tests, all offline** (a mock model, tickets signed by a key the test makes): the whole backend suite is 3,600 tests (3,596 passed, 4 skipped: they need a Linux Docker, 0 failed), **192 of them new** (`test_google_auth.py` 42, `test_accounts_auth.py` 67, `test_accounts_isolation.py` 48, `test_users_db.py` 10, `test_accounts_review.py` 25). Web: 366 unit tests and a clean typecheck (16 files; `lib/google.ts` and the sign-in logic in `lib/auth.ts` have their own).
+  The real-browser suite on free side ports: **100 of 100**, run again after the review's fixes (it runs the local version, so it shows nothing changed for local use; the hosted sign-in screen is driven by `npm run e2e:phone`, below).
   One Dashboard step failed once while the backend suite ran at the same moment (it counted elements before the card had filled in); it now waits for either answer first.
 - **55 deliberate breaks** (change one rule, run the tests, restore): 47 on the backend (the ticket judge, the cookie, the allow-list, the configuration refusals, the nonce, the routes, every place a person is looked up, the library root, usage rows) and 8 on the page's logic.
   **The first run caught 44 of 47 and 7 of 8. Every survivor was a weak test of mine, not a hole in the code**, and each was fixed and re-broken until it failed:
@@ -84,12 +91,47 @@ with **no email** or **no subject**, with **no nonce** or **another browser's no
   - *A request with no nonce cookie:* the guard also stops the server from **fetching Google's keys** for it. Nothing pinned that; now a test checks the key fetcher is never asked.
   - *The script loader asked twice while still loading* (React mounts a component twice in development): nothing tested it. Now it must add one script and share one answer.
   (My break script crashed once on a Windows decoding error in the test runner's output. That was the script, not the code; it was fixed and the missing breaks were run.)
+- **20 more deliberate breaks on the review's fixes, all caught the first time:** a used nonce usable again (forgotten at once, never "seen", never expired, no size bound); a Google sign-in clearing the token lock; a wrong ticket counting against it; a domain entry without the Workspace claim, or with any claim; the session forgetting the domain, or the re-check ignoring it; the old cookie parser; an unidentified request becoming the owner; the middleware ignoring a path prefix; the refusal hint missing or shown to everyone; the ticket's `hd` not read or not checked for shape; the migration downgrade rebuilding the table; and the CORS layer back inside the sign-in check. **75 breaks in all.**
 - **A failing test that was the right signal:** a test pinning the exact columns of the usage table ("no prompt or reply text is stored") failed when `user_id` was added. It was updated on purpose (an id is not text a person typed), and its other assertion still checks that none of the person's words are stored.
 
-**Not verified:** a real sign-in with Google (the tests sign their own tickets), a real phone, several people at the same moment, any real host, and an **independent review** of this code: it handles who is allowed in, so it should have one before anyone relies on it.
+**Not verified:** a real sign-in with Google (the tests sign their own tickets), several people at the same moment, any real host. (A real phone: see below for what was done at phone size.)
+
+## The hosted sign-in screen at phone size (2026-11-26)
+
+Until now the hosted sign-in screen had never been driven in a real browser. `npm run e2e:phone` (`frontend/e2e/hosted-phone.mjs` with `hosted_server.py`) starts a **throwaway hosted server** (a random token that is never printed, a made-up Client ID, an empty settings file and **no model**, so it can never read your real `.env` or spend a key)
+and the web app built the way the Docker image builds it (page and API on one address), opens it in Edge as a 390 x 844 **touch device with an iPhone user agent**, and checks 13 things:
+Google's button draws (its script comes from the internet) or the page says why not; no sideways scroll, on the sign-in screen and after signing in; the "Owner? Use the access token" line and the Sign in button are **44 px** tall; the token box text is 16 px (iPhone does not zoom in on focus);
+a wrong token is refused visibly; the right token signs the owner in; the server has no model (the proof that it is not reading your `.env`); Sign out is reachable and returns to the sign-in screen; no console errors of our own. **13 of 13 pass.** Screenshots are read by eye (Google's real button, the error card and the signed-in dashboard all fit a 390 px screen).
+
+What driving it found, all fixed or documented:
+- The "Owner? Use the access token" line was **20 px tall** and the Sign in button **32 px**: now 44 px (`py-3`, `min-h-11`). Nothing else about the card changed.
+- **A session cannot live across two origins.** With the page on one port and the API on another, a correct token left the browser with **no session cookie** (the page never asks for credentials, and a browser neither stores nor sends a cookie between origins). The supported hosted setup serves pages and API from one address, as the image does; `hosting.md` says so now (it used to offer `SKILLFORGE_UI_ORIGINS` for a different address without this warning).
+- **The sign-in middleware's own 401 was answered outside the CORS layer**, so a trusted page on another address saw "blocked by CORS policy" instead of "401, sign in". Fixed by reordering the layers (the local-only check stays outermost); test in `test_accounts_review.py`.
+- **The first version of the throwaway server read the real `.env`** (the status card showed the configured models). It made no model call, but a test must not read it: it now runs through its own launcher with no model, and the check above fails if that ever changes.
+- Google's script put its own `g_state` cookie in the browser's jar: the same kind of cookie that hid the session in review finding 3.
+
+**Not done:** a real phone (this is Edge's emulation of a viewport, touch and a user agent), iOS Safari or Android Chrome, a real Google sign-in (the Client ID is made up, so Google's button draws but cannot finish), and a slow mobile network.
+
+## The independent review (2026-11-26)
+
+A fresh reviewer was given the code, the rules and the claims to test, and none of my conclusions (158k tokens, 41 tool calls, scripts in a scratch folder, no model call, no `.env`). **No Critical finding: nobody gets in without a valid ticket or token, and no one person could see another's data.**
+It reported 5 Important and 2 Minor findings. Its report is model output, so **each was reproduced as a failing test before any change**, and each test failed for the reason given. All seven are fixed (`tests/test_accounts_review.py`, 25 tests):
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | One lock for the whole server, and a good Google sign-in **cleared it**: with any allowed Google account (or `*`) a guesser could try 4 tokens, replay a ticket, and never be locked | The lock belongs to the access token alone: Google sign-in neither counts toward it nor clears it |
+| 2 | Five anonymous garbage tickets locked **every** sign-in, the owner's token included, for a minute (repeatable) | Wrong tickets touch no lock. The access-token lock can still be triggered by anyone who knows the address, as `hosting.md` already said |
+| 3 | `SimpleCookie` stops at the first cookie it cannot parse, and Google's own `g_state={"i_l":0}` is one: a session cookie that came after it was invisible (every request 401, "not signed in") | The cookie header is read with Starlette's parser, which skips what it cannot read |
+| 4 | An `@company.com` entry trusted any *verified* address at that domain, including a personal Google account made with a company address (the `hd` claim was never read) | See "Domain entries" above |
+| 5 | The migration's **downgrade deleted every job and usage row** (a SQLite table rebuild cascades through foreign keys; the upgrade's own comment warned about exactly this) | A plain `DROP COLUMN`; a test proves the rows survive a downgrade and an upgrade again |
+| 6 | "A nonce is used once" was only a request to the browser to delete a cookie: a copy of the cookie and the ticket worked again for ten minutes (what made finding 1 cheap). **My own test for this passed only because the test client's cookie jar obeyed that request** | The server remembers used nonces (bounded: 10,000, expired ones forgotten); every attempt, good or bad, uses its nonce up |
+| 7 | If the app were ever served under a path prefix (a proxy mount, `--root-path`), the sign-in middleware did not see the request and the route made the caller **the owner** | A hosted request nobody identified is refused (`current_user` no longer defaults to the owner there); the middleware strips the prefix |
+
+Checked by the reviewer and found sound: the algorithm is read before any key (so `none` and HS256-with-the-public-key fail), `jku`/`x5u`/`jwk` headers are ignored, `aud` must be one exact string, expiry, the verified email, a nonce-less request never fetches Google's keys and five unknown key ids cause one fetch, the session signature covers every field in constant time with no ambiguous splitting, the allow-list is re-checked on every request, changing the token invalidates every session, every library route and every kind goes through the person's own library, and `_row(user=None)` is reachable only from background jobs.
+**Not checked by the reviewer:** a real Google round trip (and Google's real `g_state` behaviour in a browser), PostgreSQL, real races between two people, and the isolation tests beyond reading them.
 
 ## Where the code is
 
 `api/google_auth.py` (checking a ticket), `api/hosted.py` (the cookie, the nonce, the allow-list, the routes), `db/users.py` and migration `0006` (users and the owner column), `library/registry.py` (whose library),
 `api/scope.py` (whose request), and the owner/user arguments of `builder/service.py`, `builder/suggestions.py`, `builder/evals.py`. Web: `lib/google.ts`, `lib/auth.ts`, `lib/useAuth.tsx`, `components/LoginPanel.tsx`.
-Tests: `tests/test_google_auth.py`, `test_accounts_auth.py`, `test_users_db.py`, `test_accounts_isolation.py`, `frontend/src/lib/google.test.ts`, `auth.test.ts`.
+Tests: `tests/test_google_auth.py`, `test_accounts_auth.py`, `test_users_db.py`, `test_accounts_isolation.py`, `test_accounts_review.py` (the review's findings), `frontend/src/lib/google.test.ts`, `auth.test.ts`, and the phone-size browser check `frontend/e2e/hosted-phone.mjs` (+ `hosted_server.py`, `npm run e2e:phone`).

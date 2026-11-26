@@ -45,6 +45,12 @@ Limit to say out loud: it checks that cited facts still hold, not that the skill
 
 ### 2. A behavioural scan for skills, with canaries (the most original, and the riskiest)
 
+**Built on 2026-11-26** (slice AG): see [canary-scan.md](canary-scan.md). It was built as the sketch below says (a simulated agent with fake tools, a planted fake secret,
+code that records what the agent does, no model as judge), with one change that the work showed to matter: the agent runs as a **loop**, one structured step at a time, so a
+model only learns a secret after it reads one and a read-then-send attack can be seen. It was **measured** on a corpus of 23 known-bad and known-good skills (written by the
+author of the scan, so optimistic) and set beside the static checks: it flagged 12 of 15 bad skills with no false alarm on 8 good ones (one run each, and models vary), and the static wording checks caught 3 and
+none of the politely worded ones. The text below is the original idea.
+
 The security research says the same two things: scanners are strong on code and **collapse on natural-language attacks**
 (a skill that simply tells the agent to do something bad), and using a model as the judge is itself open to prompt
 injection. The benchmark behind that claim is in the search results (an arXiv paper, [2606.07131](https://arxiv.org/html/2606.07131v2)); I did not open it.
@@ -90,7 +96,6 @@ that was changed. The next step costs little:
 
 1. ~~**Risk diff + `library rescan`**~~ (small): **built.** Immediately visible in the Library page, and it answers a real, documented attack.
 2. ~~**Evidence-linked skills + `library recheck`**~~ (medium): **built** (slice V, [evidence.md](evidence.md)).
-3. **Canary behavioural scan** (large, experimental): a research spike with measured results before it becomes a feature.
+3. ~~**Canary behavioural scan**~~ (large, experimental): **built** (slice AG, [canary-scan.md](canary-scan.md)), as a command-line scan with measured results. Not built: a web page or API route for it.
 
-Decision still needed from you: which of the remaining two is the headline. (Evidence-linked skills with code-level drift
-is the recommendation: it is the one that uses the graph, which is the part of this project that is not a prompt.)
+All three are built. Evidence-linked skills with code-level drift is still the one that uses the graph, which is the part of this project that is not a prompt.

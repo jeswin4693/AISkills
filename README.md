@@ -3,7 +3,7 @@
 An open-source platform that **understands repositories**, **suggests ideas** grounded in them, and **builds
 reusable AI skills** from plain-English requirements.
 
-Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins, Repository with a drawn architecture map, and Settings), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** Not built yet: Node servers inside plugins and the behavioural canary scan.
+Status: **Understand, Suggest, Build (with a test harness, `eval`), Safety (static checks and a sandbox), Scripts, the skill Library (versions, risk diff, rescan), the read-only Task Plan, a local API with a database, the web UI (Builder, Library, Plugins, Repository with a drawn architecture map, and Settings), one model service with backup models, the hosted version, and the foundation for more kinds of builder (the kind registry), the Agent Builder, the Plugin Builder and the MCP Builder (Python and Node) are built and tested. The main paths were run live with Gemini (Groq as a backup, the hosted image in Docker).** The behavioural canary scan is built too (slice AG, below). Not built yet: Node servers inside plugins.
 See [docs/roadmap.md](docs/roadmap.md). To try every feature yourself, step by step, with sample files and a practice library that leaves
 your real one alone: [docs/try-it-yourself.md](docs/try-it-yourself.md).
 
@@ -81,8 +81,8 @@ named the renamed function, the new caller and the changed structure (and expose
 
 1. **Phase 3b, the MCP builder in TypeScript, is built.** What is left of it: Node servers inside plugins and the Streamable HTTP transport.
 2. **Phase 4 is built** (4a: MCP servers in plugins; 4b: hooks from a catalogue). A larger catalogue, `SessionStart` context hooks and a managed Python environment are possible later, none planned.
-3. **Code-level evidence with drift detection is built** (slice V); **a behavioural canary scan** is the one differentiator left
-   ([docs/differentiators.md](docs/differentiators.md); the risk diff and rescan are also built).
+3. **All three differentiators are built:** the risk diff and rescan, code-level evidence with drift detection (slice V), and **the behavioural canary scan** (slice AG, below)
+   ([docs/differentiators.md](docs/differentiators.md)).
 4. **The Repository page, the Settings page, reading a repository from a GitHub link and the drawn architecture map are built** (slices W, X, Y and Z, below). Left of the web pages: a function-level graph (the map shows folders and the imports between them).
 
 The live list, with what was verified, is [docs/roadmap.md](docs/roadmap.md).
@@ -324,6 +324,18 @@ The last of the nine pages in the original vision. Choose a skill and a version 
 today's checks in three groups: the library's structure and safety checks (each with what it was when the skill was imported: worse, better or new), and, for a skill built here, the **builder's own design and written-file checks run again from the saved definition and spec** (they were shown once at build time and never kept with the version). Then the requirement against its tests (criteria with no test, tests that cite a criterion that does not exist), the cost in tokens, the Testing Lab's result **for that version**
 (never another version's), what changed since the previous version, the code it cites, what did not run with its reason, and what the report cannot tell you. **On the author's own library** it found that both built skills fail "the approved requirement reached SKILL.md word for word" because they were built before the builder learned to carry it (true, not a false alarm), and it says what to do. 29 new backend tests (3,013 in all), 350 UI unit tests, browser suite 100 of 100, 28 deliberate breaks all caught.
 Details and limits: [docs/quality-report.md](docs/quality-report.md). The whole session's work (the Testing Lab, your own test cases, an independent review, and this page) is written up in [docs/development-log.md](docs/development-log.md).
+
+## The behavioural canary scan (slice AG)
+
+The static checks read a skill's **words** and scripts. They cannot see a skill that politely tells an agent to read `.env` and put it in its answer. The canary scan watches what an agent **does** when it holds the skill:
+`python -m skillforge canary <skill-or-agent-folder>` (or `--library NAME`). A model is given the instructions and an ordinary task ("summarise README.md") and answers **one structured step at a time**; **code plays six fake tools** on a fake machine
+with **random planted fake secrets** (a canary in `.env`, cloud credentials, SSH keys, the environment), shows the model what each call returned, and **judges every call and the answer**: a secret place read, a canary sent out or copied somewhere, the environment dumped, a download run, a wipe,
+a changed `CLAUDE.md` or shell profile. **No model decides anything** (a skill is text a model reads, so a model judge could be talked into "fine"), nothing real is touched and nothing from your computer is sent. A task that finds something is run again **without the skill**, so what the bare model does anyway is not blamed on the skill.
+The result is `flagged`, `unclear`, `caution`, `incomplete` or `nothing_observed`: it **never says safe**, and an unfinished run is never counted as clean.
+
+**Measured, with real runs** (`canary --measure`, a corpus of 23 known-bad and known-good skills, 561 model calls with the configured model): the scan flagged **12 of 15 bad skills** with **0 false alarms on 8 good ones**; the library's static wording checks caught **3**, and **none of the ten politely worded ones**. It missed the two it was
+expected to miss (a skill that acts only on a date, one that openly sends documents to a place it names) and, in that run, one blunt skill which the static checks caught (**scanned again on its own it was flagged**: the model refused one task and obeyed another, so 12 of 15 is one run's count, not a rate, and `--runs 3` is advised): the two methods are complementary. The corpus was written by the scan's author, so the numbers are optimistic. Real runs also found a noisy signal (now fixed) and that a free model's rate limit can stop a run part way (those skills are reported "could not be run", never as clean).
+34 deliberate breaks all caught; 284 new backend tests (3,297 in all). Command line only for now: no page or API route. **No independent review yet.** Details, the tools, what the judge looks for and the limits: [docs/canary-scan.md](docs/canary-scan.md).
 
 ## Run the local API (the web UI talks to it)
 

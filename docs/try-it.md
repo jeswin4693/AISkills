@@ -15,6 +15,7 @@ written down, and the outputs described are what those runs printed. Commands ar
 | F. The Repository page (ideas for a repository) | **yes** | no | about 2 calls, then a build |
 | G. Plugins page, install | no | no | no |
 | H. The Settings page (model and key) | no (the test button uses one tiny call) | no | only if you press Test my models |
+| I. The behaviour scan (canary) | **yes** | no | about 20 to 40 calls per skill |
 
 Start with A, B and C: they are free and show the safety and drift features, which are the unusual parts.
 
@@ -253,6 +254,20 @@ Open **Settings**. This writes the `.env` file in the project folder, so use a s
 
 Open `.env` in an editor to see what was written: your own lines and comments are kept, and new names are added at the end under one comment line.
 
+## I. The behaviour scan: what does an agent DO with this skill? (needs a model)
+
+The static checks read a skill's words. This one watches what a model does when it holds the skill, on **fake tools and planted fake secrets**. Nothing real is touched
+and nothing from your computer is sent. It needs the key in `.env` and makes about 20 to 40 model calls per skill. It never says a skill is safe ([canary-scan.md](canary-scan.md)).
+
+1. See it work on the built-in examples (a bad skill and its clean twin, about 32 calls, under a minute):
+   `python -m skillforge canary --measure --only invoice-summary-debug invoice-summary --scenarios 4`.
+   Expect `invoice-summary-debug` **flagged** ("read an .env file") and `invoice-summary` **nothing_observed**.
+2. Scan one of your own, from `backend`: `python -m skillforge canary generated-skills\<your-skill>` (or `--library <name>`). It first says how many tasks it will run and the most calls it can make,
+   then `[1/5] task run finished` and so on. Read each task: what the model did, and a line saying what the same task did **without** the skill.
+3. The last line is the verdict. The best it can say is "Nothing suspicious was observed ... evidence, not proof". `--json` gives the whole transcript; the exit code is 0 for nothing observed, 1 for flagged, unclear or caution, 2 for too little ran.
+4. The whole corpus (23 skills, about 450 calls, 10 to 15 minutes) with the static checks beside it: `python -m skillforge canary --measure`. A free model can hit its rate limit part way:
+   those skills are listed as "could not be run" and counted nowhere; re-run them with `--only NAME ...`.
+
 ## Run the automated checks (what has been verified)
 
 ```powershell
@@ -277,4 +292,4 @@ The real-browser run (58 behaviours, drives Edge against the real API with a scr
 
 ## What does not exist yet (so you do not look for it)
 
-a drawn graph (the Repository page shows numbers and lists); reading a GitHub link on the command line (the web page does it; clone first for the command line); the behavioural canary scan; Node MCP servers inside plugins; evidence for plugins and MCP servers; the hosted version on a real host (the image was built and run in Docker, not deployed); macOS and Linux (only Windows was used); an interactive Claude Code session using what you build (real Claude Code accepted the generated plugin and server commands in isolated runs).
+a drawn graph (the Repository page shows numbers and lists); reading a GitHub link on the command line (the web page does it; clone first for the command line); a web page for the behaviour scan (it is a command, section I); Node MCP servers inside plugins; evidence for plugins and MCP servers; the hosted version on a real host (the image was built and run in Docker, not deployed); macOS and Linux (only Windows was used); an interactive Claude Code session using what you build (real Claude Code accepted the generated plugin and server commands in isolated runs).

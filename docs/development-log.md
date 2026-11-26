@@ -47,4 +47,4 @@ All nine pages of the original vision exist: Dashboard, Builder (chat), Reposito
 
 ## What is next
 
-The behavioural canary scan (the one differentiator not built, [differentiators.md](differentiators.md)); Node servers inside plugins; the Streamable HTTP transport for MCP servers; the `/usage` clean-up; a function-level graph. Documented open risks: Lab runs share the builder's two-worker pool, keys the harness does not know are dropped when cases are saved, a snapshot being pruned while another request reads it, and a data folder inside a git work tree.
+(The behavioural canary scan was built afterwards, as slice AG: [canary-scan.md](canary-scan.md).) Node servers inside plugins; the Streamable HTTP transport for MCP servers; the `/usage` clean-up; a function-level graph. Documented open risks: Lab runs share the builder's two-worker pool, keys the harness does not know are dropped when cases are saved, a snapshot being pruned while another request reads it, and a data folder inside a git work tree.

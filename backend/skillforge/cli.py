@@ -559,6 +559,74 @@ def _run_eval(args: argparse.Namespace) -> int:
     return 0 if all(c.with_skill.passed == c.with_skill.runs for c in report.cases) else 1
 
 
+def _canary_files(args: argparse.Namespace) -> dict:
+    """The files of the skill or agent to scan: a folder, or a library entry."""
+    if bool(args.folder) == bool(args.library):
+        raise ValueError("Give either a skill folder or --library NAME.")
+    if args.library:
+        return Library(kind=args.kind).read(args.library, args.version)[1]
+    path = Path(args.folder)
+    if not path.is_dir():
+        raise NotADirectoryError(f"Not a directory: {path}")
+    files, problems = read_dir(path)
+    if problems:
+        raise ValueError(f"The folder cannot be read safely: {problems[0][1]}")
+    return files
+
+
+def _run_canary_measure(args: argparse.Namespace) -> int:
+    """Scan the built-in corpus of known-bad and known-good skills and set the result beside what the static checks say."""
+    from .canary.corpus import CORPUS, measure
+    from .canary.render import render_measurement
+
+    if args.folder or args.library:
+        raise ValueError("--measure scans the built-in corpus: give it no skill folder and no --library.")
+    corpus = tuple(CORPUS)
+    if args.only:
+        known = {s.name: s for s in CORPUS}
+        unknown = [name for name in args.only if name not in known]
+        if unknown:
+            raise ValueError(f"No such corpus skill: {', '.join(unknown)}. Choose from: {', '.join(known)}.")
+        corpus = tuple(known[name] for name in args.only)
+    runs, cap = min(max(1, args.runs), 5), min(max(1, args.scenarios or 4), 8)
+    print(
+        f"Measuring the behaviour scan on {len(corpus)} skill(s) of the built-in corpus, {cap} task(s) each. The skills were written by the author of the scan, "
+        "so the numbers are optimistic. The tools are fake and nothing real is touched.",
+        file=sys.stderr,
+    )
+    result = measure(
+        provider_from_env(), corpus, runs=runs, max_scenarios=cap, control=not args.no_control,
+        on_skill=lambda done, total, name: print(f"  [{done}/{total}] {name}", file=sys.stderr),
+    )
+    print(json.dumps(result.to_dict(), indent=2) if args.json else render_measurement(result))
+    return 2 if result.summary()["not_run"] == len(result.results) else 0
+
+
+def _run_canary(args: argparse.Namespace) -> int:
+    from .canary.instructions import load_instructions  # only this command needs the scan, so no other command pays for loading it
+    from .canary.render import render_report
+    from .canary.runner import preview, run_canary
+
+    load_dotenv(REPO_ROOT / ".env")
+    if args.measure:
+        return _run_canary_measure(args)
+    instructions = load_instructions(_canary_files(args))
+    runs, cap, control = min(max(1, args.runs), 5), min(max(1, args.scenarios or 5), 8), not args.no_control
+    plan = preview(instructions, runs=runs, max_scenarios=cap, control=control)
+    n = len(plan.scenarios)
+    print(
+        f"Behaviour scan of {instructions.kind} '{instructions.name}': {n} task(s) x {runs} run(s), at most {plan.max_calls} model calls "
+        f"(usually about {n * runs * 3}). The tools are fake and nothing real is touched.",
+        file=sys.stderr,
+    )
+    report = run_canary(
+        provider_from_env(), instructions, runs=runs, max_scenarios=cap, control=control, draft=not args.no_draft,
+        on_scenario=lambda done, total: print(f"  [{done}/{total}] task run finished", file=sys.stderr),
+    )
+    print(json.dumps(report.to_dict(), indent=2) if args.json else render_report(report))
+    return {"nothing_observed": 0, "flagged": 1, "unclear": 1, "caution": 1}.get(report.outcome(), 2)
+
+
 def _run_render(args: argparse.Namespace) -> int:
     result = rebuild(
         Path(args.sdm), Path(args.out) if args.out else REPO_ROOT / "generated-skills", force=args.force,
@@ -1063,6 +1131,22 @@ def _parser() -> argparse.ArgumentParser:
     ev.add_argument("--runs", type=int, default=1, metavar="N", help="repeat each test N times, because models vary")
     ev.add_argument("--json", action="store_true", help="print the result as JSON")
 
+    cn = area.add_parser(
+        "canary",
+        help="behaviour scan: watch what a model does with a skill's or agent's instructions, on fake tools and planted fake secrets (needs a provider key)",
+    )
+    cn.add_argument("folder", nargs="?", help="a skill or agent folder (the one with SKILL.md or AGENT.md)")
+    cn.add_argument("--library", metavar="NAME", help="a skill or agent in the library, instead of a folder")
+    cn.add_argument("--kind", choices=["skill", "agent"], default="skill", help="with --library: which library (default: skill)")
+    cn.add_argument("--version", type=int, metavar="N", help="with --library: which version (default: the latest)")
+    cn.add_argument("--runs", type=int, default=1, metavar="N", help="repeat each task N times (1 to 5), because models vary")
+    cn.add_argument("--scenarios", type=int, default=None, metavar="N", help="how many tasks to give the agent (1 to 8; default 5, or 4 with --measure)")
+    cn.add_argument("--measure", action="store_true", help="instead of one skill, scan the built-in corpus of known-bad and known-good skills and compare with the static checks")
+    cn.add_argument("--only", nargs="+", metavar="NAME", help="with --measure: only these corpus skills")
+    cn.add_argument("--no-control", action="store_true", help="do not re-run a task that found something without the skill (cheaper, but a finding is not compared)")
+    cn.add_argument("--no-draft", action="store_true", help="do not ask a model to draft tasks from the description (one model call less)")
+    cn.add_argument("--json", action="store_true", help="print the result as JSON")
+
     r = area.add_parser("render", help="re-render a skill folder from its skill.sdm.json (no AI)")
     r.add_argument("sdm", help="path of a skill.sdm.json")
     r.add_argument("--out", help="where skill folders go (default: generated-skills/ in this repository)")
@@ -1161,11 +1245,11 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     args = _parser().parse_args(argv)
-    if args.area in ("suggest", "guide", "build", "render", "validate", "sandbox-status", "sandbox-build-mcp", "sandbox-build-mcp-node", "languages", "library", "serve", "plan", "eval", "models"):
+    if args.area in ("suggest", "guide", "build", "render", "validate", "sandbox-status", "sandbox-build-mcp", "sandbox-build-mcp-node", "languages", "library", "serve", "plan", "eval", "canary", "models"):
         handler = {
             "suggest": _run_suggest, "guide": _run_guide, "build": _run_build, "render": _run_render,
             "validate": _run_validate, "sandbox-status": _run_sandbox_status, "sandbox-build-mcp": _run_sandbox_build_mcp, "sandbox-build-mcp-node": _run_sandbox_build_mcp_node, "languages": _run_languages,
-            "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval, "models": _run_models,
+            "library": _run_library, "serve": _run_serve, "plan": _run_plan, "eval": _run_eval, "canary": _run_canary, "models": _run_models,
         }[args.area]
         try:
             return handler(args)

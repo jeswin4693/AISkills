@@ -126,10 +126,23 @@ export interface Health {
   mode?: "local" | "hosted";
 }
 
+/** Someone who signed in with Google: what the server knows about them (never anything secret). */
+export interface Person {
+  email: string;
+  name: string;
+  picture: string;
+}
+
 /** Whether this server asks for a sign-in, and whether this browser is signed in. The local version never asks. */
 export interface AuthStatus {
   required: boolean;
   authenticated: boolean;
+  /** The PUBLIC Google client id when this server offers "Sign in with Google"; "" or absent when it does not (and from older servers). */
+  google_client_id?: string;
+  /** Who is signed in, when it is a person who used Google. Null for the owner (the access token) and for nobody. */
+  user?: Person | null;
+  /** True when the access token can still sign the owner in (always on a hosted server). */
+  owner_login?: boolean;
 }
 
 export interface SandboxStatus {

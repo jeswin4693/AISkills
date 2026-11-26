@@ -1249,6 +1249,8 @@ try {
   await step("it says either what needs the person or that nothing does, and every unfinished build is on the list", async () => {
     const list = await page.evaluate(async (api) => (await fetch(`${api}/api/builds`)).json(), API);
     const unfinished = list.filter((b) => ["awaiting_answers", "awaiting_approval", "failed"].includes(b.status) || (b.status === "done" && !b.saved));
+    // count() does not wait, and the card fills in only after several API calls: wait for EITHER answer to appear first (a slow machine failed this once).
+    await page.getByText("Nothing needs you right now.").or(attentionCard().locator("li").first()).first().waitFor();
     const nothing = await page.getByText("Nothing needs you right now.").count();
     const items = await attentionCard().locator("li").count();
     assert.ok(nothing + items > 0, "the dashboard must say what needs the person, or that nothing does");

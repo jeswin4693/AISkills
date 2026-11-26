@@ -1,0 +1,47 @@
+# SkillForge on a public https address (a small free VM, or any server). See docs/hosting.md.
+#
+#   1. Point a name at the machine (an "A" record for skillforge.example.com -> the machine's IP) and open ports 80 and 443.
+#   2. Copy .env.example to .env.hosted and fill in the token, the models and keys, and these four lines:
+#        SKILLFORGE_DOMAIN=skillforge.example.com
+#        SKILLFORGE_ALLOWED_HOSTS=skillforge.example.com
+#        SKILLFORGE_COOKIE_SECURE=1
+#        (optional, for "Sign in with Google": SKILLFORGE_GOOGLE_CLIENT_ID and SKILLFORGE_ALLOWED_EMAILS, see docs/accounts.md)
+#   3. docker compose --env-file .env.hosted -f docker-compose.https.yml up -d --build
+#   4. Open https://skillforge.example.com
+#
+# Only Caddy is reachable from outside (80 and 443). The app itself publishes no port: Caddy reaches it on the private
+# compose network. .env.hosted is private (git ignores .env.*) and is not copied into the image.
+# Least privilege: the app gets every line of .env.hosted (its keys and token); Caddy gets ONLY the domain name, through
+# --env-file (which fills in ${...} below without handing the file to the container).
+services:
+  skillforge:
+    build: .
+    env_file:
+      - .env.hosted
+    environment:
+      SKILLFORGE_MODE: hosted
+    expose:
+      - "8080"
+    volumes:
+      - skillforge-data:/data   # the library, the database and the build folders: keep this volume
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      SKILLFORGE_DOMAIN: ${SKILLFORGE_DOMAIN:?set SKILLFORGE_DOMAIN in .env.hosted and run compose with --env-file .env.hosted}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data        # the certificate: keep it, or a restart asks Let's Encrypt for a new one each time
+      - caddy-config:/config
+    depends_on:
+      - skillforge
+    restart: unless-stopped
+
+volumes:
+  skillforge-data:
+  caddy-data:
+  caddy-config:

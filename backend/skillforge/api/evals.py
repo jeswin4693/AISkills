@@ -13,6 +13,7 @@ from ..build.models import Assertion, AssertionKind, TestKind
 from ..builder import cases as case_editor
 from ..builder.evals import RUN_CAP
 from .builds import get_builder
+from .scope import user_id, user_library
 from .views import import_view
 
 
@@ -59,7 +60,7 @@ def evals_router() -> APIRouter:
         name: str, request: Request, version: int | None = Query(default=None, ge=1, le=1_000_000),
     ) -> dict:
         """Every test case of a skill version (the ones that cannot be run too), and what an editor needs to know about it."""
-        return case_editor.view_cases(request.app.state.library, name, version)
+        return case_editor.view_cases(user_library(request), name, version)
 
     # A POST and not a PUT: this API's CORS policy allows GET, POST and DELETE only, so a browser could not send a PUT.
     @r.post("/library/{name}/tests")
@@ -72,7 +73,7 @@ def evals_router() -> APIRouter:
             )
             for c in body.cases
         ]
-        report = case_editor.save_cases(request.app.state.library, name, body.base_version, drafts, body.note)
+        report = case_editor.save_cases(user_library(request), name, body.base_version, drafts, body.note)
         return JSONResponse(import_view(report), status_code=422 if report.refused else 200)
 
     # The static path is registered before /evals/{rid}, or "preview" would be read as a run id.
@@ -82,26 +83,26 @@ def evals_router() -> APIRouter:
         kind: str = Query(default="skill", max_length=64),
     ) -> dict:
         """What a run of this version would do (the cases, their checks, the number of model calls) or why it cannot be run. No model is asked."""
-        return get_builder(request.app).evals.preview(name, version, kind)
+        return get_builder(request.app).evals.preview(name, version, kind, user=user_id(request))
 
     @r.post("/evals", status_code=201)
     def start(body: RunBody, request: Request) -> dict:
         """Begin a run. The model is asked in the background: poll the run. A skill that cannot be run is refused with the reason."""
-        return get_builder(request.app).evals.start(body.name, body.version, body.runs, body.baseline, body.kind)
+        return get_builder(request.app).evals.start(body.name, body.version, body.runs, body.baseline, body.kind, user=user_id(request))
 
     @r.get("/evals")
     def list_runs(
         request: Request, name: str | None = Query(default=None, max_length=64), version: int | None = Query(default=None, ge=1, le=1_000_000),
     ) -> list[dict]:
         """Runs, newest first, each with a short summary and without its heavy result."""
-        return get_builder(request.app).evals.list(name, version)
+        return get_builder(request.app).evals.list(name, version, user=user_id(request))
 
     @r.get("/evals/{rid}")
     def get_run(rid: str, request: Request) -> dict:
-        return get_builder(request.app).evals.get(rid)
+        return get_builder(request.app).evals.get(rid, user=user_id(request))
 
     @r.post("/evals/{rid}/retry")
     def retry(rid: str, request: Request) -> dict:
-        return get_builder(request.app).evals.retry(rid)
+        return get_builder(request.app).evals.retry(rid, user=user_id(request))
 
     return r

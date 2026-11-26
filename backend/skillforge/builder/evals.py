@@ -16,7 +16,7 @@ from collections.abc import Callable
 from sqlalchemy import select, update
 
 from ..build.quality import estimate_tokens
-from ..db import Database, EvalRun, now_text
+from ..db import LOCAL_USER_ID, Database, EvalRun, now_text
 from ..evaluate import LIMITS, MAX_CASES, MIN_CASES, Attempt, EvalReport, LoadedSkill, blocker, load_files, plan_cases, run_eval
 from ..kinds import UnknownKind, get_kind
 from ..library import Library, LibraryError, NotFound, Version
@@ -96,22 +96,34 @@ def run_view(row: EvalRun, *, full: bool = True) -> dict:
 
 
 class EvalRuns:
-    def __init__(self, db: Database, runner: JobRunner, provider_factory: Callable[[], LLMProvider], library: Library) -> None:
+    def __init__(
+        self, db: Database, runner: JobRunner, provider_factory: Callable[[], LLMProvider], library: Library,
+        library_for: Callable[[str], Library] | None = None,
+    ) -> None:
         self.db = db
         self.runner = runner
         self.provider_factory = provider_factory
-        self.library = library
+        self.library = library  # the owner's
+        self.library_for = library_for  # a person's, by id
+
+    def _library(self, user: str) -> Library:
+        """A person's library. Fails closed: with no resolver only the owner has one."""
+        if self.library_for is not None:
+            return self.library_for(user)
+        if user == LOCAL_USER_ID:
+            return self.library
+        raise BuilderError("There is no library for that user.")
 
     # ---- what would run ---------------------------------------------------------------------------------
 
-    def _load(self, name: str, version: int | None, kind: str) -> tuple[Version, LoadedSkill]:
+    def _load(self, name: str, version: int | None, kind: str, user: str) -> tuple[Version, LoadedSkill]:
         try:
             spec = get_kind(kind)
         except UnknownKind as exc:
             raise BadRequest(str(exc)) from exc
         if kind != "skill":
             raise BadRequest(f"Only skills can be tested here yet: a test case is a message sent to a model that has the skill, and {spec.label.lower()}s have no such harness.")
-        v, files = self.library.for_kind(kind).read(name, version)  # checks every file against the manifest first
+        v, files = self._library(user).for_kind(kind).read(name, version)  # this person's library; checks every file against the manifest first
         try:
             return v, load_files(files)
         except ValueError as exc:
@@ -137,45 +149,49 @@ class EvalRuns:
             "limits": {"max_cases": MAX_CASES, "min_cases": MIN_CASES, "max_runs": RUN_CAP},
         }
 
-    def preview(self, name: str, version: int | None = None, kind: str = "skill") -> dict:
+    def preview(self, name: str, version: int | None = None, kind: str = "skill", user: str = LOCAL_USER_ID) -> dict:
         """What a run of this version would do, and why not if it cannot. No model is asked."""
-        v, skill = self._load(name, version, kind)
+        v, skill = self._load(name, version, kind, user)
         return self._preview(v, skill, kind)
 
     # ---- runs --------------------------------------------------------------------------------------------
 
-    def _row(self, s, rid: str) -> EvalRun:
+    def _row(self, s, rid: str, user: str | None) -> EvalRun:
+        """A run, if it is `user`'s. Someone else's is "no such run", the very answer for one that never existed. `user` has no default so a caller cannot forget it;
+        only the background job passes None (it acts for the run's own owner)."""
         row = s.get(EvalRun, rid) if _ID.match(rid or "") else None
-        if row is None:
+        if row is None or (user is not None and row.user_id != user):
             raise SessionNotFound("There is no such test run.")
         return row
 
-    def start(self, name: str, version: int | None = None, runs: int = 1, baseline: bool = True, kind: str = "skill") -> dict:
-        v, skill = self._load(name, version, kind)
+    def start(self, name: str, version: int | None = None, runs: int = 1, baseline: bool = True, kind: str = "skill", user: str = LOCAL_USER_ID) -> dict:
+        v, skill = self._load(name, version, kind, user)
         plan = self._preview(v, skill, kind)
         if not plan["runnable"]:
             raise BadRequest(f"Nothing was run: {plan['reason']}.")
         rid, stamp = uuid.uuid4().hex, now_text()
         with _START, self.db.session() as s:
-            running = s.execute(
-                select(EvalRun).where(EvalRun.status == "working", EvalRun.kind == kind, EvalRun.name == v.name, EvalRun.version == v.version)
+            running = s.execute(  # this person's own run: a second click never hands out somebody else's
+                select(EvalRun).where(
+                    EvalRun.status == "working", EvalRun.kind == kind, EvalRun.name == v.name, EvalRun.version == v.version, EvalRun.user_id == user,
+                )
             ).scalars().first()
             if running is not None:  # a second click while the model is still being asked gets that run, not another one
                 return run_view(running)
             s.add(EvalRun(
                 id=rid, created_at=stamp, updated_at=stamp, status="working", kind=kind, name=v.name, version=v.version,
                 content_hash=v.content_hash, runs=runs, baseline=baseline, cases_total=len(plan["cases"]), cases_done=0,
-                result=None, error="", retryable=False,
+                result=None, error="", retryable=False, user_id=user,
             ))
         self.runner.submit(self._execute, rid)
-        return self.get(rid)
+        return self.get(rid, user)
 
-    def get(self, rid: str) -> dict:
+    def get(self, rid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            return run_view(self._row(s, rid))
+            return run_view(self._row(s, rid, user))
 
-    def list(self, name: str | None = None, version: int | None = None, limit: int = 50) -> list[dict]:
-        query = select(EvalRun).order_by(EvalRun.created_at.desc(), EvalRun.id.desc()).limit(limit)
+    def list(self, name: str | None = None, version: int | None = None, limit: int = 50, user: str = LOCAL_USER_ID) -> list[dict]:
+        query = select(EvalRun).where(EvalRun.user_id == user).order_by(EvalRun.created_at.desc(), EvalRun.id.desc()).limit(limit)
         if name is not None:
             query = query.where(EvalRun.name == name)
         if version is not None:
@@ -183,12 +199,13 @@ class EvalRuns:
         with self.db.session() as s:
             return [run_view(r, full=False) for r in s.execute(query).scalars().all()]
 
-    def retry(self, rid: str) -> dict:
+    def retry(self, rid: str, user: str = LOCAL_USER_ID) -> dict:
         with _START, self.db.session() as s:  # the same lock as start(): a retry is a run of that version, so it counts for "one run at a time"
-            row = self._row(s, rid)
+            row = self._row(s, rid, user)
             going = s.execute(
                 select(EvalRun).where(
                     EvalRun.status == "working", EvalRun.kind == row.kind, EvalRun.name == row.name, EvalRun.version == row.version, EvalRun.id != rid,
+                    EvalRun.user_id == user,
                 )
             ).scalars().first()
             if going is not None and row.status == "failed":
@@ -200,7 +217,7 @@ class EvalRuns:
         if not claimed:
             raise WrongState("Only a run that failed can be run again.")
         self.runner.submit(self._execute, rid)
-        return self.get(rid)
+        return self.get(rid, user)
 
     def _progress(self, rid: str, done: int, total: int) -> None:
         try:  # progress is only for show: it must never stop a run
@@ -219,11 +236,11 @@ class EvalRuns:
     def _execute(self, rid: str) -> None:
         """Run the cases and record how it ended. Never raises: a thread pool would swallow it."""
         with self.db.session() as s:
-            row = self._row(s, rid)
-            name, version, kind, runs, baseline = row.name, row.version, row.kind, row.runs, row.baseline
+            row = self._row(s, rid, None)  # a background job acts for the run's own owner
+            name, version, kind, runs, baseline, owner = row.name, row.version, row.kind, row.runs, row.baseline, row.user_id
         try:
             provider = self.provider_factory()
-            _, skill = self._load(name, version, kind)
+            _, skill = self._load(name, version, kind, owner)
             report = run_eval(provider, skill, baseline=baseline, runs=runs, on_case=lambda done, total: self._progress(rid, done, total))
             self._finish(rid, "done", result=report_view(report))
         except ProviderError as exc:  # no model set up, a bad key, a busy or unreachable model: fixing that and running again can help; a refusal cannot

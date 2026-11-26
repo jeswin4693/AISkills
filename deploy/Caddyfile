@@ -1,0 +1,18 @@
+# Caddy in front of SkillForge: it gets and renews a free https certificate by itself (Let's Encrypt) and
+# forwards everything to the app. See docs/hosting.md and docker-compose.https.yml.
+#
+# SKILLFORGE_DOMAIN is the name people open, for example skillforge.example.com. It must already point at this
+# machine (a DNS "A" record), and ports 80 and 443 must be open to the internet, or Caddy cannot get the certificate.
+{$SKILLFORGE_DOMAIN} {
+	encode gzip
+
+	# The app (Python API + web pages) is one service on port 8080 inside the compose network.
+	reverse_proxy skillforge:8080
+
+	# Browsers: use https only, and do not guess content types.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}

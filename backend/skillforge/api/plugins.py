@@ -17,6 +17,7 @@ from ..hookcatalog.catalogue import CATALOGUE
 from ..library import SkillSource, import_source
 from ..library.plugin import ComponentRef, PluginPlan, compose_for_keeping
 from ..validate.plugin import MANIFEST
+from .scope import user_library
 from .views import checks_view, import_view
 
 
@@ -39,7 +40,7 @@ class PluginBody(BaseModel):
 
 def _plan(request: Request, body: PluginBody) -> PluginPlan:
     return compose_for_keeping(
-        request.app.state.library, [ComponentRef(c.kind, c.name, c.version, c.options or None) for c in body.components],
+        user_library(request), [ComponentRef(c.kind, c.name, c.version, c.options or None) for c in body.components],
         name=body.name, description=body.description, author=body.author,
     )
 
@@ -91,7 +92,7 @@ def plugins_router() -> APIRouter:
                 },
                 status_code=422,
             )
-        library = request.app.state.library.for_kind("plugin")
+        library = user_library(request).for_kind("plugin")
         source = SkillSource(plan.files, [], "composed", plan.name, plan.name)
         report = import_source(source, library, note=f"composed from {len(plan.components)} component(s)")
         return JSONResponse(

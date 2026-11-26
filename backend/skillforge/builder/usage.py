@@ -5,21 +5,22 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from ..ai import UsageRecord
-from ..db import Database, ModelCall, now_text
+from ..db import LOCAL_USER_ID, Database, ModelCall, now_text
 
 
 class DbUsageRecorder:
     """Writes one row per attempt for one job of one session. Plugged into the AI service by the builder."""
 
-    def __init__(self, db: Database, session_id: str, job_id: int | None = None) -> None:
+    def __init__(self, db: Database, session_id: str, job_id: int | None = None, user_id: str = LOCAL_USER_ID) -> None:
         self.db = db
         self.session_id = session_id
         self.job_id = job_id
+        self.user_id = user_id  # whose quota this attempt used
 
     def record(self, rec: UsageRecord) -> None:
         with self.db.session() as s:
             s.add(ModelCall(
-                session_id=self.session_id, job_id=self.job_id, created_at=now_text(), task=rec.task, tier=rec.tier,
+                session_id=self.session_id, job_id=self.job_id, user_id=self.user_id, created_at=now_text(), task=rec.task, tier=rec.tier,
                 provider=rec.provider, model=rec.model, attempt=rec.attempt, status=rec.status, error_kind=rec.error_kind,
                 input_tokens=rec.input_tokens, output_tokens=rec.output_tokens, latency_ms=rec.latency_ms,
             ))

@@ -35,6 +35,7 @@ Turning hosted mode on changes nothing for local use: with no `SKILLFORGE_MODE`,
 | `SKILLFORGE_UI_ORIGINS` | extra page addresses to trust, only if you serve the pages from a different address than the API |
 | `SKILLFORGE_COOKIE_SECURE=1` | set on any https site, so the cookie is never sent over plain http |
 | `SKILLFORGE_DATA_DIR` | where the library, the database and the builds live (`/data` in the image): **keep it on a persistent disk** |
+| `SKILLFORGE_GOOGLE_CLIENT_ID`, `SKILLFORGE_ALLOWED_EMAILS` | optional, **both or neither**: "Sign in with Google" for other people, and who may sign in. Each person then has their own builds and library. See [accounts.md](accounts.md) |
 | `PORT` | the public port (the image uses 8080; many hosts set it for you) |
 | `LLM_PROVIDER`, `LLM_MODEL`, the key variables, `LLM_FALLBACKS`, `LLM_<TIER>_…` | the models, exactly as in [ai-engine.md](ai-engine.md) |
 
@@ -70,6 +71,33 @@ secrets (`SKILLFORGE_ACCESS_TOKEN`, your model keys), `SKILLFORGE_ALLOWED_HOSTS`
 | Your own server | `docker compose up -d`, with Caddy or another proxy in front for https; point it at port 8080 |
 | Not suitable | hosts with no persistent disk (the library and your sessions would vanish on every restart), for example Cloud Run without a volume |
 
+### Free hosting: what a search found (2026-11-26; free offers change, check the page before you sign up)
+
+None of these has been tried with this image. Vercel and Supabase are **not hosts** for this app: Vercel runs short-lived functions with no persistent disk, and this app
+is a long-running Python server with background jobs and files; Supabase is a database, login and storage service (it could later give PostgreSQL and real accounts, but PostgreSQL has never been tried here).
+
+| Option | What the sources say | Concern |
+|---|---|---|
+| Oracle Cloud *Always Free* VM | [Oracle's docs](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm): free for an unlimited time; its [FAQ](https://www.oracle.com/cloud/free/faq/) says sign-up uses a **card** for identity (no virtual, prepaid or PIN-debit cards) and that capacity is limited | **Idle VMs may be reclaimed** (CPU under 20% for 7 days), and [InfoQ reports](https://infoq.com/news/2026/07/oracle-cloud-free-tier-limits/) the free allowance was cut to 2 OCPU / 12 GB in mid-2026 (the sources disagree on the date) |
+| Google Cloud *Free Tier* e2-micro | [Google's docs](https://docs.cloud.google.com/free): one e2-micro VM a month in listed US regions; the limits "do not expire but are subject to change"; a billing account is verified | The VM is small (about 1 GB of memory as I recall: **measure this image's memory before choosing it**; a swap file may be needed) |
+| A card-free route | a free container host plus a free database for the data | More code (the library lives in files today, not in a database) and a host that sleeps |
+
+### The address must be one Google accepts (matters only for "Sign in with Google")
+
+Google's page on [managing OAuth clients](https://support.google.com/cloud/answer/15549257) says a JavaScript origin must use **https** (only `localhost` is exempt), cannot be a **raw IP address**,
+and cannot carry a path or query; it also says a host's top-level domain must be on the Public Suffix List. So `http://35.1.2.3:8080` can never be used for Google sign-in, and **a free VM gives you only an IP address**:
+you need a **name** that points at it, with an https certificate (Caddy gets one by itself, see `deploy/`).
+
+| Kind of name | Status |
+|---|---|
+| A domain you own (a few dollars a year) | works; the safe choice |
+| A name the host gives you (`*.onrender.com`, `*.fly.dev`, `*.up.railway.app`, `*.run.app`) | https comes with it; those hosts are the ones in the table above with their own limits (sleeping, no free disk, a card) |
+| A free wildcard-DNS name (`<ip>.sslip.io`, `<ip>.nip.io`) or a free dynamic-DNS name | **not confirmed.** One developer's report says Google refused both with "origin not allowed" (the cause may have been something else, such as the 5-minute-to-hours delay Google states). Test it before relying on it |
+
+**A two-minute test that costs nothing and needs no host:** in Google Cloud Console, open the OAuth client and try to add the origin you plan to use (for example `https://skillforge-yourname.duckdns.org`).
+The console checks the rules when you press Save, so a refusal appears at once; whether the sign-in then really works also needs the page to be served from that name, which is the real test.
+Without Google sign-in the host needs no such name: the access token works on any https address.
+
 Then open the address on your phone, sign in once (the cookie lasts 14 days), and use it like the local version: describe a skill,
 answer, approve, save to the library. To get a skill into your agent, **Export** the zip and install it on your own computer.
 
@@ -81,8 +109,10 @@ unreachable. `python -m skillforge models --test` (or `POST /api/provider/check`
 
 ## What this does not protect against
 
-- **One shared token, no accounts.** Anyone with the token has full access, including your model quota. There is no per-person
-  access and no audit log. Treat the token like a password and change it if it leaks.
+- **The access token is the owner's key.** Anyone with it has the owner's full access, including your model quota. Treat it like a password and
+  change it if it leaks. With only the token there is one person and no audit log. **With Google sign-in** ([accounts.md](accounts.md)) other
+  people have their own data and cannot see each other's, but **everyone who signs in still spends the host's model key** (per-person keys are
+  not built yet), so the allow-list matters.
 - **The sign-in lock is global.** Someone who knows the address can keep sign-in locked for you by sending wrong tokens (you can
   still use the Bearer header or wait a minute). Putting the site behind your host's own access controls closes that.
 - **Prompts go to the model providers**, and what you type is kept in the session database on the disk you mounted.

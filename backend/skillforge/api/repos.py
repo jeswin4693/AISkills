@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from ..builder.guides import guide_repo
 from ..builder.repository import analyze_repo
 from .builds import get_builder
+from .scope import user_id
 
 HOSTED_OFF = (
     "Reading a repository is turned off in the hosted version: it would read a folder on the server, not on your computer. "
@@ -53,19 +54,19 @@ def repos_router() -> APIRouter:
     def start(body: SuggestBody, request: Request) -> dict:
         """Begin a run of the suggestions for a folder. The model is asked in the background: poll the run."""
         local_only(request)
-        return get_builder(request.app).suggestions.start(body.path, body.focus, body.with_ideas)
+        return get_builder(request.app).suggestions.start(body.path, body.focus, body.with_ideas, user=user_id(request))
 
     @r.get("/suggestions")
     def list_runs(request: Request) -> list[dict]:
-        return get_builder(request.app).suggestions.list()
+        return get_builder(request.app).suggestions.list(user=user_id(request))
 
     @r.get("/suggestions/{rid}")
     def get_run(rid: str, request: Request) -> dict:
-        return get_builder(request.app).suggestions.get(rid)
+        return get_builder(request.app).suggestions.get(rid, user=user_id(request))
 
     @r.post("/suggestions/{rid}/retry")
     def retry(rid: str, request: Request) -> dict:
         local_only(request)
-        return get_builder(request.app).suggestions.retry(rid)
+        return get_builder(request.app).suggestions.retry(rid, user=user_id(request))
 
     return r

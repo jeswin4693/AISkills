@@ -26,7 +26,7 @@ from ..build.pipeline import BuildError, apply_answers, check_description, sandb
 from ..build.requirements import Question
 from ..ai import AIService
 from ..build.scripts import ScriptRunner
-from ..db import BuildSession, Database, Job, ModelCall, now_text
+from ..db import LOCAL_USER_ID, BuildSession, Database, Job, ModelCall, now_text
 from ..graph.store import data_dir
 from ..kinds import UnknownKind, get_kind
 from ..library import ImportReport, Library, LibraryError, import_skill
@@ -51,9 +51,11 @@ class Builder:
         self, database: Database, library: Library, builds_root: Path, *,
         provider_factory: Callable[[], LLMProvider] = env_provider, runner: JobRunner | None = None,
         sandbox_note: Callable[[], str] = default_sandbox_note, script_runner: ScriptRunner | None = None,
+        library_for: Callable[[str], Library] | None = None,
     ) -> None:
         self.db = database
-        self.library = library
+        self.library = library  # the owner's library
+        self.library_for = library_for  # a person's library, by their id (the API sets it); without it only the owner has one
         self.builds_root = Path(builds_root)
         self.provider_factory = provider_factory
         self.runner = runner or JobRunner()
@@ -61,12 +63,20 @@ class Builder:
         self.script_runner = script_runner
 
     @classmethod
-    def default(cls, library: Library) -> "Builder":
+    def default(cls, library: Library, library_for: Callable[[str], Library] | None = None) -> "Builder":
         """The real thing: the SQLite file in the per-user data folder, migrated, with interrupted work marked."""
         db = Database()
         db.migrate()
         db.recover_interrupted()
-        return cls(db, library, data_dir() / "builds")
+        return cls(db, library, data_dir() / "builds", library_for=library_for)
+
+    def _library(self, user_id: str) -> Library:
+        """The library of whoever owns a session. Fails closed: with no resolver only the owner has a library, never a shared one for everybody."""
+        if self.library_for is not None:
+            return self.library_for(user_id)
+        if user_id == LOCAL_USER_ID:
+            return self.library
+        raise BuilderError("There is no library for that user.")
 
     @property
     def suggestions(self) -> SuggestRuns:
@@ -75,8 +85,8 @@ class Builder:
 
     @property
     def evals(self) -> EvalRuns:
-        """Testing Lab runs: a skill's test cases asked of a model in the background, sharing this builder's database, job runner, model and library."""
-        return EvalRuns(self.db, self.runner, self.provider_factory, self.library)
+        """Testing Lab runs: a skill's test cases asked of a model in the background, sharing this builder's database, job runner, model and each person's library."""
+        return EvalRuns(self.db, self.runner, self.provider_factory, self.library, self._library)
 
     def close(self) -> None:
         self.runner.shutdown()
@@ -84,18 +94,20 @@ class Builder:
 
     # ---- reading ---------------------------------------------------------------------------------
 
-    def _row(self, s, sid: str) -> BuildSession:
+    def _row(self, s, sid: str, user: str | None) -> BuildSession:
+        """A session, if it is `user`'s. Someone else's is "no such session", the very answer for one that never existed: it must not say it is there.
+        `user` has no default on purpose, so a caller cannot forget it; only the background jobs pass None (they act for the session's own owner)."""
         row = s.get(BuildSession, sid) if _ID.match(sid or "") else None
-        if row is None:
+        if row is None or (user is not None and row.user_id != user):
             raise SessionNotFound("There is no such builder session.")
         return row
 
     def _latest_job(self, s, sid: str) -> Job | None:
         return s.execute(select(Job).where(Job.session_id == sid).order_by(Job.id.desc()).limit(1)).scalars().first()
 
-    def get(self, sid: str) -> dict:
+    def get(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, user)
             job = self._latest_job(s, sid)
             return {
                 "id": row.id, "kind": row.kind, "status": row.status, "description": row.description, "round": row.round,
@@ -110,9 +122,11 @@ class Builder:
                 },
             }
 
-    def list(self, limit: int = 50) -> list[dict]:
+    def list(self, limit: int = 50, user: str = LOCAL_USER_ID) -> list[dict]:
         with self.db.session() as s:
-            rows = s.execute(select(BuildSession).order_by(BuildSession.created_at.desc()).limit(limit)).scalars().all()
+            rows = s.execute(
+                select(BuildSession).where(BuildSession.user_id == user).order_by(BuildSession.created_at.desc()).limit(limit)
+            ).scalars().all()
             return [
                 {
                     "id": r.id, "kind": r.kind, "status": r.status, "description": r.description[:140], "created_at": r.created_at,
@@ -123,10 +137,10 @@ class Builder:
                 for r in rows
             ]
 
-    def read_file(self, sid: str, path: str) -> dict:
+    def read_file(self, sid: str, path: str, user: str = LOCAL_USER_ID) -> dict:
         """One generated file, looked up by name among the files that were written. Never a path on the disk."""
         with self.db.session() as s:
-            result = self._row(s, sid).result
+            result = self._row(s, sid, user).result
         if not result:
             raise SessionNotFound("This session has not written any files yet.")
         files, _ = read_dir(self.builds_root / sid / result["folder"])
@@ -153,7 +167,7 @@ class Builder:
         s.flush()
         return job.id
 
-    def start(self, description: str, with_scripts: bool = False, kind: str = "skill", seed: dict | None = None) -> dict:
+    def start(self, description: str, with_scripts: bool = False, kind: str = "skill", seed: dict | None = None, user: str = LOCAL_USER_ID) -> dict:
         """Begin a session. `seed` is {"repo", "focus", "nodes"} (and, for a GitHub link, "snapshot": the copy the idea was made from): a repository
         and the places in it the idea cited, so the built thing carries evidence of them (docs/evidence.md). A half-given or unusable seed is
         refused before anything starts."""
@@ -170,15 +184,15 @@ class Builder:
             s.add(BuildSession(
                 id=sid, created_at=stamp, updated_at=stamp, status="working", description=words, words=words,
                 round=1, with_scripts=with_scripts, questions=[], error="", retryable=False, model_calls=0,
-                notes=[], saved_name="", saved_version="", kind=kind, seed=kept_seed,
+                notes=[], saved_name="", saved_version="", kind=kind, seed=kept_seed, user_id=user,
             ))
             job_id = self._new_job(s, sid, "understand")
         self.runner.submit(self._execute, job_id)
-        return self.get(sid)
+        return self.get(sid, user)
 
-    def answer(self, sid: str, answers: dict[str, str]) -> dict:
+    def answer(self, sid: str, answers: dict[str, str], user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, user)
             if row.status != "awaiting_answers":
                 raise WrongState("This session is not waiting for answers.")
             questions = [Question(**q) for q in row.questions]
@@ -194,20 +208,20 @@ class Builder:
                 raise WrongState("This session just moved on. Reload it.")
             job_id = self._new_job(s, sid, "understand")
         self.runner.submit(self._execute, job_id)
-        return self.get(sid)
+        return self.get(sid, user)
 
-    def approve(self, sid: str) -> dict:
+    def approve(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            self._row(s, sid)
+            self._row(s, sid, user)
             if not self._claim(s, sid, ("awaiting_approval",), status="working", error="", retryable=False):
                 raise WrongState("There is no requirement waiting for approval in this session.")
             job_id = self._new_job(s, sid, "build")
         self.runner.submit(self._execute, job_id)
-        return self.get(sid)
+        return self.get(sid, user)
 
-    def retry(self, sid: str) -> dict:
+    def retry(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, user)
             if row.status != "failed" or not row.retryable:
                 raise WrongState("Only a step that failed for a reason that can pass (such as a missing key) can be retried.")
             last = self._latest_job(s, sid)
@@ -216,14 +230,14 @@ class Builder:
                 raise WrongState("This session just moved on. Reload it.")
             job_id = self._new_job(s, sid, kind)
         self.runner.submit(self._execute, job_id)
-        return self.get(sid)
+        return self.get(sid, user)
 
     # ---- actions that finish ---------------------------------------------------------------------
 
-    def save(self, sid: str, *, accept_draft: bool = False, note: str = "") -> ImportReport:
-        """Put the built skill into the library through the same checked import as any other skill."""
+    def save(self, sid: str, *, accept_draft: bool = False, note: str = "", user: str = LOCAL_USER_ID) -> ImportReport:
+        """Put the built skill into the library through the same checked import as any other skill. It goes into the library of the person who owns the session."""
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, user)
             result, kind = row.result, row.kind
             if row.status != "done" or not result:
                 raise WrongState("There is no finished skill in this session yet.")
@@ -235,7 +249,7 @@ class Builder:
                 noun = "skill"
             raise WrongState(f"This {noun} is a DRAFT ({why}). Say accept_draft to keep it anyway.")
         try:
-            library = self.library.for_kind(kind)
+            library = self._library(user).for_kind(kind)
         except UnknownKind as exc:
             raise BuilderError(str(exc)) from exc
         folder = self.builds_root / sid / result["folder"]
@@ -244,13 +258,13 @@ class Builder:
         report = import_skill(folder, library, note=(note.strip() or f"built in the web builder ({sid[:8]})")[:200])
         if not report.refused:
             with self.db.session() as s:
-                row = self._row(s, sid)
+                row = self._row(s, sid, user)
                 row.saved_name, row.saved_version, row.updated_at = report.name, report.version.tag, now_text()
         return report
 
-    def discard(self, sid: str) -> None:
+    def discard(self, sid: str, user: str = LOCAL_USER_ID) -> None:
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, user)
             if row.status == "working":
                 raise WrongState("It is still running. Wait for it to finish, then discard it.")
             s.execute(delete(Job).where(Job.session_id == sid))
@@ -293,21 +307,21 @@ class Builder:
             log.exception("builder job %s failed", job_id)
             self._fail(sid, job_id, f"Unexpected error ({type(exc).__name__}): {str(exc)[:300]}", False)
 
-    def _provider(self, sid: str, job_id: int) -> LLMProvider:
-        """The model for one job. The AI service is given a recorder, so every attempt is counted for this session."""
+    def _provider(self, sid: str, job_id: int, user_id: str) -> LLMProvider:
+        """The model for one job. The AI service is given a recorder, so every attempt is counted for this session and for the person it belongs to."""
         provider = self.provider_factory()
-        return provider.with_recorder(DbUsageRecorder(self.db, sid, job_id)) if isinstance(provider, AIService) else provider
+        return provider.with_recorder(DbUsageRecorder(self.db, sid, job_id, user_id)) if isinstance(provider, AIService) else provider
 
     def _understand(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
-            row = self._row(s, sid)
-            words, round_no, kind_key = row.words, row.round, row.kind
+            row = self._row(s, sid, None)  # a background job acts for the session's own owner
+            words, round_no, kind_key, owner = row.words, row.round, row.kind, row.user_id
         kind = get_kind(kind_key)  # before the model is set up: a kind that is gone is not a missing key
-        provider = self._provider(sid, job_id)
+        provider = self._provider(sid, job_id, owner)
         progress(f"Round {round_no}: reading your words and filling in the checklist")
         r = kind.understand(provider, words, round_no, MAX_ROUNDS)
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, None)
             row.model_calls += r.calls
             row.notes = [*row.notes, *r.notes]
             row.updated_at = now_text()
@@ -320,11 +334,11 @@ class Builder:
 
     def _build(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:
-            row = self._row(s, sid)
-            spec, kind_key, seed = row.spec, row.kind, row.seed
+            row = self._row(s, sid, None)
+            spec, kind_key, seed, owner = row.spec, row.kind, row.seed, row.user_id
             with_scripts, calls, notes = row.with_scripts, row.model_calls, list(row.notes)
         kind = get_kind(kind_key)
-        provider = self._provider(sid, job_id)
+        provider = self._provider(sid, job_id, owner)
         out_root = self.builds_root / sid
         shutil.rmtree(out_root, ignore_errors=True)  # this folder is ours alone; a retry starts clean
         outcome = kind.build(
@@ -338,6 +352,6 @@ class Builder:
                 log.exception("recording evidence for session %s failed", sid)
                 outcome.notes.append(f"Evidence was not recorded: unexpected error ({type(exc).__name__}). The {kind_key} itself is built.")
         with self.db.session() as s:
-            row = self._row(s, sid)
+            row = self._row(s, sid, None)
             row.result, row.model_calls, row.notes = outcome.summary, outcome.model_calls, outcome.notes
             row.status, row.updated_at = "done", now_text()

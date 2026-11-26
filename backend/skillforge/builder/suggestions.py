@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 from sqlalchemy import select, update
 
-from ..db import Database, SuggestRun, now_text
+from ..db import LOCAL_USER_ID, Database, SuggestRun, now_text
 from ..graph.build import build_graph
 from ..providers import LLMProvider, ProviderError
 from ..suggest.pipeline import suggest as run_suggest
@@ -42,35 +42,39 @@ class SuggestRuns:
         self.runner = runner
         self.provider_factory = provider_factory
 
-    def _row(self, s, rid: str) -> SuggestRun:
+    def _row(self, s, rid: str, user: str | None) -> SuggestRun:
+        """A run, if it is `user`'s. Someone else's is "no such run", the very answer for one that never existed. `user` has no default so a caller cannot forget it;
+        only the background job passes None (it acts for the run's own owner)."""
         row = s.get(SuggestRun, rid) if _ID.match(rid or "") else None
-        if row is None:
+        if row is None or (user is not None and row.user_id != user):
             raise SessionNotFound("There is no such suggestion run.")
         return row
 
-    def start(self, path: object, focus: object = None, with_ideas: bool = True) -> dict:
+    def start(self, path: object, focus: object = None, with_ideas: bool = True, user: str = LOCAL_USER_ID) -> dict:
         found = resolve_repo(path)  # before any model is asked (a link is downloaded here)
         stored = source_of(found)
         focus_text = clean_focus(focus)
         rid, stamp = uuid.uuid4().hex, now_text()
         with _START, self.db.session() as s:
-            running = s.execute(
-                select(SuggestRun).where(SuggestRun.status == "working", SuggestRun.repo == stored, SuggestRun.focus == focus_text)
+            running = s.execute(  # this person's own: a second click gets their run, never somebody else's
+                select(SuggestRun).where(
+                    SuggestRun.status == "working", SuggestRun.repo == stored, SuggestRun.focus == focus_text, SuggestRun.user_id == user,
+                )
             ).scalars().first()
             if running is not None:  # a second click while the model is still being asked gets that run, not another one
                 return run_view(running)
             s.add(SuggestRun(
                 id=rid, created_at=stamp, updated_at=stamp, status="working", repo=stored, repo_name=display_name(stored),
-                focus=focus_text, with_ideas=with_ideas, result=None, error="", retryable=False,
+                focus=focus_text, with_ideas=with_ideas, result=None, error="", retryable=False, user_id=user,
             ))
         self.runner.submit(self._execute, rid)
-        return self.get(rid)
+        return self.get(rid, user)
 
-    def seed_for(self, rid: str, idea: object) -> dict:
+    def seed_for(self, rid: str, idea: object, user: str = LOCAL_USER_ID) -> dict:
         """The seed for a build from one idea of a finished run: the run's own folder and focus, and the places that idea cited.
         Nothing comes from the page, so a build can only ever be about the repository its idea was made for."""
         with self.db.session() as s:
-            row = self._row(s, rid)
+            row = self._row(s, rid, user)
             if row.status != "done" or not row.result:
                 raise BadRequest("That suggestion run is not finished (or it failed), so there is nothing to build from.")
             repo, focus, ideas, snapshot = row.repo, row.focus, list(row.result.get("suggestions", [])), row.result.get("snapshot")
@@ -81,21 +85,21 @@ class SuggestRuns:
             raise BadRequest("Only a skill or automation idea that cites a place can start a build.")
         return {"repo": repo, "focus": focus, "nodes": list(item["evidence_nodes"]), "snapshot": snapshot}
 
-    def get(self, rid: str) -> dict:
+    def get(self, rid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            return run_view(self._row(s, rid))
+            return run_view(self._row(s, rid, user))
 
-    def list(self, limit: int = 30) -> list[dict]:
+    def list(self, limit: int = 30, user: str = LOCAL_USER_ID) -> list[dict]:
         with self.db.session() as s:
-            rows = s.execute(select(SuggestRun).order_by(SuggestRun.created_at.desc()).limit(limit)).scalars().all()
+            rows = s.execute(select(SuggestRun).where(SuggestRun.user_id == user).order_by(SuggestRun.created_at.desc()).limit(limit)).scalars().all()
             return [
                 {**{k: v for k, v in run_view(r).items() if k != "result"}, "ideas": len((r.result or {}).get("suggestions", []))}
                 for r in rows
             ]
 
-    def retry(self, rid: str) -> dict:
+    def retry(self, rid: str, user: str = LOCAL_USER_ID) -> dict:
         with self.db.session() as s:
-            self._row(s, rid)
+            self._row(s, rid, user)
             claimed = s.execute(
                 update(SuggestRun).where(SuggestRun.id == rid, SuggestRun.status == "failed")
                 .values(status="working", error="", retryable=False, updated_at=now_text())
@@ -103,7 +107,7 @@ class SuggestRuns:
         if not claimed:
             raise WrongState("Only a run that failed can be run again.")
         self.runner.submit(self._execute, rid)
-        return self.get(rid)
+        return self.get(rid, user)
 
     def _finish(self, rid: str, status: str, *, result: dict | None = None, error: str = "", retryable: bool = False) -> None:
         with self.db.session() as s:
@@ -115,7 +119,7 @@ class SuggestRuns:
     def _execute(self, rid: str) -> None:
         """Run one suggestion pass and record how it ended. Never raises: a thread pool would swallow it."""
         with self.db.session() as s:
-            row = self._row(s, rid)
+            row = self._row(s, rid, None)  # a background job acts for the run's own owner
             repo, focus, with_ideas = row.repo, row.focus, row.with_ideas
         try:
             provider = self.provider_factory()

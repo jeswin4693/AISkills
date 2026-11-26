@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..ai.doctor import check_models
 from ..builder import Builder, env_provider, provider_status
 from ..providers import ProviderError
+from .scope import user_id
 from .views import import_view
 
 MAX_DESCRIPTION = 10_000
@@ -61,7 +62,7 @@ def get_builder(app: FastAPI) -> Builder:
     """The builder, made on first use: a server that is only used for the library never opens the database."""
     with app.state.builder_lock:
         if app.state.builder is None:
-            app.state.builder = Builder.default(app.state.library)
+            app.state.builder = Builder.default(app.state.library, app.state.libraries.for_user)
         return app.state.builder
 
 
@@ -91,7 +92,7 @@ def builds_router() -> APIRouter:
 
     @r.get("/builds")
     def list_builds(request: Request) -> list[dict]:
-        return builder(request).list()
+        return builder(request).list(user=user_id(request))
 
     @r.post("/builds", status_code=201)
     def start(body: StartBody, request: Request) -> dict:
@@ -106,42 +107,42 @@ def builds_router() -> APIRouter:
                     raise HTTPException(400, "Give from_run with idea: the suggestion run the idea belongs to.")
                 if body.repo or body.evidence_nodes or body.focus:
                     raise HTTPException(400, "Give either from_run and idea, or repo and evidence_nodes, not both.")
-                seed = builder(request).suggestions.seed_for(body.from_run, body.idea)
+                seed = builder(request).suggestions.seed_for(body.from_run, body.idea, user=user_id(request))
             else:
                 seed = {"repo": body.repo, "focus": body.focus, "nodes": body.evidence_nodes}
-        return builder(request).start(body.description, body.with_scripts, body.kind, seed)
+        return builder(request).start(body.description, body.with_scripts, body.kind, seed, user=user_id(request))
 
     @r.get("/builds/{sid}")
     def get(sid: str, request: Request) -> dict:
-        return builder(request).get(sid)
+        return builder(request).get(sid, user=user_id(request))
 
     @r.post("/builds/{sid}/answers")
     def answer(sid: str, body: AnswersBody, request: Request) -> dict:
-        return builder(request).answer(sid, body.answers)
+        return builder(request).answer(sid, body.answers, user=user_id(request))
 
     @r.post("/builds/{sid}/approve")
     def approve(sid: str, request: Request) -> dict:
         """The person approves the requirement shown in the session. Only then is anything built."""
-        return builder(request).approve(sid)
+        return builder(request).approve(sid, user=user_id(request))
 
     @r.post("/builds/{sid}/retry")
     def retry(sid: str, request: Request) -> dict:
-        return builder(request).retry(sid)
+        return builder(request).retry(sid, user=user_id(request))
 
     @r.get("/builds/{sid}/files/{path:path}")
     def read_file(sid: str, path: str, request: Request) -> dict:
-        return builder(request).read_file(sid, path)
+        return builder(request).read_file(sid, path, user=user_id(request))
 
     @r.post("/builds/{sid}/save")
     def save(sid: str, body: SaveBody, request: Request) -> JSONResponse:
         """Keep the built skill in the library, through the same checked import as any other skill (422 if refused)."""
-        b = builder(request)
-        report = b.save(sid, accept_draft=body.accept_draft, note=body.note)
-        return JSONResponse({**import_view(report), "session": b.get(sid)}, status_code=422 if report.refused else 200)
+        b, who = builder(request), user_id(request)
+        report = b.save(sid, accept_draft=body.accept_draft, note=body.note, user=who)
+        return JSONResponse({**import_view(report), "session": b.get(sid, user=who)}, status_code=422 if report.refused else 200)
 
     @r.delete("/builds/{sid}")
     def discard(sid: str, request: Request) -> dict:
-        builder(request).discard(sid)
+        builder(request).discard(sid, user=user_id(request))
         return {"discarded": True}
 
     return r

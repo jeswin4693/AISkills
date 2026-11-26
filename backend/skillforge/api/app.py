@@ -10,7 +10,8 @@ import threading
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -31,14 +32,18 @@ from ..library import (
     read_zip_bytes, rescan, rollback,
 )
 from ..library.evidence import evidence_focus, recheck_version
+from ..library.registry import Libraries
 from ..sandbox import probe_sandbox
 from ..settings import EnvSettings, default_settings
-from .builds import builds_router
+from ..db.users import UserStore
+from .builds import builds_router, get_builder
 from .evals import evals_router
+from .google_auth import GoogleKeys
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .plugins import plugins_router
 from .quality import quality_router
 from .repos import repos_router
+from .scope import user_library
 from .settings import settings_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
@@ -92,8 +97,8 @@ def kind_of(kind: str = "skill") -> str:
 
 
 def library_for(request: Request, kind: str = Depends(kind_of)) -> Library:
-    """The library of that kind, next to the skill library."""
-    return request.app.state.library.for_kind(kind)
+    """The library of that kind for the person asking, next to their skill library."""
+    return user_library(request).for_kind(kind)
 
 
 def _label(request: Request) -> str:
@@ -104,14 +109,16 @@ def _label(request: Request) -> str:
 
 def create_app(
     library: Library | None = None, origins: list[str] | None = None, builder: Builder | None = None,
-    hosted: Hosted | None = None, env_settings: EnvSettings | None = None,
+    hosted: Hosted | None = None, env_settings: EnvSettings | None = None, google_keys: Callable[[str], Any] | None = None,
 ) -> FastAPI:
     """`builder` is made on first use when not given, so the library endpoints never need the database.
 
     `hosted` turns on the hosted version (docs/hosting.md): a sign-in in front of the API, no install into server folders, no
     interactive docs. Without it everything is as it always was: local only, no sign-in.
 
-    `env_settings` is the `.env` the Settings page reads and writes; tests hand in their own so none touches the real file."""
+    `env_settings` is the `.env` the Settings page reads and writes; tests hand in their own so none touches the real file.
+
+    `google_keys(ticket)` returns the public key that signed a "Sign in with Google" ticket. Without it the real one asks Google (nothing is fetched until a ticket is checked)."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -124,7 +131,10 @@ def create_app(
         docs_url=None if hosted else "/api/docs", openapi_url=None if hosted else "/api/openapi.json",
     )
     app.state.hosted = hosted
-    app.state.library = library or (builder.library if builder else Library())
+    app.state.library = library or (builder.library if builder else Library())  # the owner's library
+    app.state.libraries = Libraries(app.state.library)  # and everybody else's: one folder each, named by the id this server made for them
+    if builder is not None and builder.library_for is None:
+        builder.library_for = app.state.libraries.for_user
     app.state.builder = builder
     app.state.builder_lock = threading.Lock()
     app.state.env_settings = env_settings or default_settings()
@@ -317,7 +327,9 @@ def create_app(
             "has_scripts": r.has_scripts,
         }
 
-    api.include_router(auth_router(hosted, LoginGuard()))
+    api.include_router(auth_router(
+        hosted, LoginGuard(), keys=google_keys or GoogleKeys(), users=lambda: UserStore(get_builder(app).db),
+    ))
     api.include_router(builds_router())
     api.include_router(evals_router())
     api.include_router(quality_router())

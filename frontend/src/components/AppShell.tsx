@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { personLabel } from "@/lib/auth";
 import { AuthProvider, useAuth } from "@/lib/useAuth";
 import { LoginPanel } from "./LoginPanel";
 import { StatusPanel } from "./StatusPanel";
@@ -21,7 +22,7 @@ const NAV = [
 
 function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
-  const { phase, required, signOut } = useAuth();
+  const { phase, required, signOut, user } = useAuth();
   const open = phase === "open"; // the pages, the menu and the status panel appear only once no sign-in is needed or it is done
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
@@ -57,6 +58,11 @@ function Shell({ children }: { children: ReactNode }) {
           {open && (
             <div className="space-y-2 md:mt-auto">
               <StatusPanel />
+              {required && user && (
+                <p className="truncate px-3 text-xs text-muted" title={user.email}>
+                  Signed in as {personLabel(user)}
+                </p>
+              )}
               {required && (
                 <button type="button" onClick={() => void signOut()} className="w-full rounded-md px-3 py-1.5 text-left text-sm text-muted hover:bg-surface-2">
                   Sign out

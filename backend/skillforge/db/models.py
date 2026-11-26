@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+LOCAL_USER_ID = "local"  # the one person who used the app before accounts existed: local mode, the access token and Bearer. Not a random id, and not a row of `users`.
 STATUSES = ("working", "awaiting_answers", "awaiting_approval", "done", "failed")
 JOB_KINDS = ("understand", "build")
 JOB_STATUSES = ("queued", "running", "succeeded", "failed")
@@ -45,6 +46,21 @@ class BuildSession(Base):
     # A repository the build was started from: {"repo": absolute folder, "focus": str | None, "nodes": [graph nodes the idea cited]}.
     # The folder is used when the build ends, to record evidence; the pages are only ever shown its name.
     seed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)  # whose it is; nobody else can see it
+
+
+class UserRow(Base):
+    """A person who signed in with Google. The id is a random hex id we made (never the email, never Google's id), so a folder named after it can hold nothing odd."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    google_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True)  # Google's stable id for the account: the identity (an email can change)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    picture: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[str] = mapped_column(String(32))
+    last_login_at: Mapped[str] = mapped_column(String(32))
 
 
 class Job(Base):
@@ -79,6 +95,7 @@ class SuggestRun(Base):
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str] = mapped_column(Text, default="")
     retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
 
 
 class EvalRun(Base):
@@ -103,6 +120,7 @@ class EvalRun(Base):
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str] = mapped_column(Text, default="")
     retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
 
 
 class ModelCall(Base):
@@ -124,3 +142,4 @@ class ModelCall(Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null: the provider did not say
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)  # who spent it (for per-person limits)

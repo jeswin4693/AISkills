@@ -103,7 +103,7 @@ def test_everything_but_health_and_sign_in_needs_a_sign_in(tmp_path):
         assert r.status_code == 401 and r.json()["detail"] == "Sign in first.", path
     health = c.get("/api/health")
     assert health.status_code == 200 and health.json()["mode"] == "hosted"
-    assert c.get("/api/auth/status").json() == {"required": True, "authenticated": False}
+    assert c.get("/api/auth/status").json() == {"required": True, "authenticated": False, "google_client_id": "", "user": None, "owner_login": True}  # accounts added the last three
 
 
 def test_signing_in_sets_a_safe_cookie_and_opens_the_api(tmp_path):
@@ -114,7 +114,7 @@ def test_signing_in_sets_a_safe_cookie_and_opens_the_api(tmp_path):
     assert ok.status_code == 200 and ok.json() == {"authenticated": True}
     cookie = ok.headers["set-cookie"].lower()
     assert COOKIE in cookie and "httponly" in cookie and "samesite=lax" in cookie and "path=/" in cookie and "secure" not in cookie
-    assert c.get("/api/library").status_code == 200 and c.get("/api/auth/status").json() == {"required": True, "authenticated": True}
+    assert c.get("/api/library").status_code == 200 and c.get("/api/auth/status").json() == {"required": True, "authenticated": True, "google_client_id": "", "user": None, "owner_login": True}
     assert TOKEN not in ok.text and TOKEN not in c.get("/api/auth/status").text
 
 
@@ -187,7 +187,7 @@ def test_local_mode_has_no_sign_in_and_says_so(tmp_path):
     c = client(tmp_path)
     assert c.get("/api/library").status_code == 200
     assert c.get("/api/health").json()["mode"] == "local"
-    assert c.get("/api/auth/status").json() == {"required": False, "authenticated": True}
+    assert c.get("/api/auth/status").json() == {"required": False, "authenticated": True, "google_client_id": "", "user": None, "owner_login": False}
     r = c.post("/api/auth/login", json={"token": "x"})
     assert r.status_code == 400 and "no sign-in" in r.json()["detail"]
     assert c.get("/api/docs").status_code == 200  # the interactive docs stay available on your own machine

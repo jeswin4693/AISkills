@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Request
 from ..builder.errors import BadRequest
 from ..builder.quality_report import build_report
 from .builds import get_builder
+from .scope import user_id, user_library
 
 
 def quality_router() -> APIRouter:
@@ -21,7 +22,7 @@ def quality_router() -> APIRouter:
         not a skill, 404 for an unknown skill or version."""
         if kind != "skill":
             raise BadRequest(f"Only skills have a quality report here yet: a {kind} has its own definition file and no test harness.")
-        runs = get_builder(request.app).evals.list(name, None, 200)
-        return build_report(request.app.state.library, name, version, runs)
+        runs = get_builder(request.app).evals.list(name, None, 200, user=user_id(request))
+        return build_report(user_library(request), name, version, runs)
 
     return r

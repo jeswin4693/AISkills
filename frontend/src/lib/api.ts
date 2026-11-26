@@ -1,6 +1,6 @@
 import type {
   AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  ModelCheckReport, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
+  ModelCheckReport, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
   SuggestRunSummary, VersionInfo,
 } from "./types";
 
@@ -101,6 +101,10 @@ export const api = {
   authStatus: () => get<AuthStatus>("/api/auth/status"),
   login: (token: string) => post<{ authenticated: boolean }>("/api/auth/login", { token }),
   logout: () => post<{ authenticated: boolean }>("/api/auth/logout", {}),
+  /** A fresh nonce for one Google sign-in attempt (the server also remembers it in a cookie the page cannot read). */
+  authNonce: () => get<{ nonce: string }>("/api/auth/nonce"),
+  /** The signed ticket Google's button returned. The server checks it; the answer is who signed in, or the server's own words for why not. */
+  googleLogin: (credential: string) => post<{ authenticated: boolean; user: Person }>("/api/auth/google", { credential }),
 
   listSkills: (kind?: string) => get<SkillSummary[]>(withKind("/api/library", kind)),
   versions: (name: string, kind?: string) =>

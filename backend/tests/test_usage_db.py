@@ -95,9 +95,10 @@ def test_no_prompt_or_reply_text_is_stored(tmp_path, db):
     with db.session() as s:
         stored = s.execute(select(ModelCall)).scalars().all()
     assert {c.name for c in ModelCall.__table__.columns} == {
-        "id", "session_id", "job_id", "created_at", "task", "tier", "provider", "model", "attempt", "status", "error_kind",
+        "id", "session_id", "job_id", "user_id", "created_at", "task", "tier", "provider", "model", "attempt", "status", "error_kind",
         "input_tokens", "output_tokens", "latency_ms",
-    }
+    }  # user_id (accounts slice) is the random id of whose quota a call used: an id, never text a person typed
+    assert {r.user_id for r in stored} == {"local"}  # a local build's calls belong to the owner
     words = FIRST.split()[:4]
     assert all(w not in " ".join(str(getattr(r, c.name)) for c in ModelCall.__table__.columns) for r in stored for w in words if len(w) > 4)
 

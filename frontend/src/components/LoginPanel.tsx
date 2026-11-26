@@ -11,7 +11,7 @@ import { Alert, Button, Card } from "./ui";
  * set when the server was deployed) is always there too, under "Owner". Fits a phone.
  */
 export function LoginPanel() {
-  const { signIn, signInWithGoogle, googleClientId } = useAuth();
+  const { signIn, signInWithGoogle, googleClientId, blocked } = useAuth();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -88,6 +88,13 @@ export function LoginPanel() {
     <div className="mx-auto max-w-md pt-8">
       <Card className="p-5">
         <h1 className="text-xl font-semibold">Sign in</h1>
+        {blocked && (
+          <div className="mt-3">
+            <Alert tone="bad" title="This account has been turned off">
+              <p>The person who runs this server has turned your account off. Ask them to turn it back on. Nothing you made was deleted.</p>
+            </Alert>
+          </div>
+        )}
         {googleClientId ? (
           <>
             <p className="mt-1 text-sm text-muted">Sign in with your Google account. Only the people the owner of this server has allowed can get in.</p>

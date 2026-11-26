@@ -27,10 +27,13 @@ class UserRecord:
     email: str
     name: str
     picture: str
+    joined: str = ""
+    last_seen: str = ""
+    blocked: bool = False  # turned off by the owner
 
 
 def _record(row: UserRow) -> UserRecord:
-    return UserRecord(row.id, row.email, row.name, row.picture)
+    return UserRecord(row.id, row.email, row.name, row.picture, row.created_at, row.last_login_at, bool(row.blocked))
 
 
 class UserStore:
@@ -55,6 +58,31 @@ class UserStore:
             except IntegrityError:
                 continue  # someone else made this account a moment ago: read it on the next turn
         raise RuntimeError("could not record the sign-in")
+
+    def all(self, limit: int = 1000) -> list[UserRecord]:
+        """Everyone who has signed in, the latest sign-in first (the owner's People page; capped, so a very open server cannot make one answer enormous)."""
+        with self.db.session() as s:
+            rows = s.execute(select(UserRow).order_by(UserRow.last_login_at.desc(), UserRow.id).limit(limit)).scalars().all()
+            return [_record(r) for r in rows]
+
+    def is_blocked(self, user_id: object) -> bool:
+        """Is this person turned off? Asked on every request of a signed-in person, so it is one primary-key lookup. Not a person we made: not blocked."""
+        if not isinstance(user_id, str) or not _HEX32.match(user_id):
+            return False
+        with self.db.session() as s:
+            row = s.get(UserRow, user_id)
+            return bool(row.blocked) if row else False
+
+    def set_blocked(self, user_id: object, blocked: bool) -> bool:
+        """Turn a person off or back on. False when there is no such person. Safe to repeat."""
+        if not isinstance(user_id, str) or not _HEX32.match(user_id):
+            return False
+        with self.db.session() as s:
+            row = s.get(UserRow, user_id)
+            if row is None:
+                return False
+            row.blocked = blocked
+            return True
 
     def get(self, user_id: object) -> UserRecord | None:
         """A person by id. Anything that is not an id we made (including the owner's `local`) finds nobody."""

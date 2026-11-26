@@ -20,7 +20,7 @@ from test_skill_build import draft, round_two
 
 from skillforge.ai import AIService
 from skillforge.api import create_app
-from skillforge.builder import Builder, JobRunner, ModelOptions, SessionNotFound
+from skillforge.builder import Builder, JobRunner, ModelOptions, PersonLimits, SessionNotFound
 from skillforge.builder.suggestions import SuggestRuns
 from skillforge.db import BuildSession, Database, EvalRun, ModelCall, SuggestRun, now_text
 from skillforge.library import Library, LibraryError
@@ -46,7 +46,7 @@ class Parked:
 
 
 class World:
-    def __init__(self, tmp_path, responses=(), *, service: bool = False, runner=None, options: ModelOptions | None = None):
+    def __init__(self, tmp_path, responses=(), *, service: bool = False, runner=None, options: ModelOptions | None = None, limits: PersonLimits | None = None):
         self.tmp = tmp_path
         self.db = Database(f"sqlite:///{(tmp_path / 't.db').as_posix()}")
         self.db.migrate()
@@ -57,6 +57,7 @@ class World:
             runner=runner or JobRunner(inline=True), sandbox_note=lambda: "unavailable. (test)",
             # These tests are about who can see what, not about key policy: unless a test says otherwise, people may use the shared mock model.
             model_options=options if options is not None else ModelOptions(shared_calls_per_day=1_000_000),
+            limits=limits or PersonLimits(),
         )
         self.app = create_app(self.library, builder=self.builder, hosted=hosted(allowed_emails=frozenset({"*"})), google_keys=keys)
         self.libraries: Libraries = self.app.state.libraries
@@ -65,6 +66,10 @@ class World:
         client = TestClient(self.app, base_url="http://localhost")
         assert sign_in(client, {"sub": f"sub-{n}", "email": f"p{n}@example.com", "name": f"Person {n}"}).status_code == 200
         return client
+
+    def person_client(self) -> TestClient:
+        """A browser nobody has signed in with yet."""
+        return TestClient(self.app, base_url="http://localhost")
 
     def owner(self) -> TestClient:
         client = TestClient(self.app, base_url="http://localhost")

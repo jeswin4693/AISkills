@@ -144,13 +144,14 @@ class ModelAccess:
 
     # ---- the allowance -----------------------------------------------------------------------------------------
 
-    def used_today(self, user_id: str) -> int:
-        """Attempts this person made on the server's model since 00:00 UTC. Their own-key attempts, other people's and yesterday's are not counted."""
+    def used_today(self, user_id: str, source: str = "server") -> int:
+        """Attempts this person made on the server's model since 00:00 UTC (`source` "own": on their own key, which never counts toward an allowance and is
+        only shown to the owner). Their own-key attempts, other people's and yesterday's are not counted."""
         midnight = self.options.clock().astimezone(timezone.utc).strftime("%Y-%m-%dT00:00:00")  # created_at is ISO text in UTC: it sorts as text
         with self.db.session() as s:
             return s.execute(
                 select(func.count()).select_from(ModelCall).where(
-                    ModelCall.user_id == user_id, ModelCall.key_source == "server", ModelCall.created_at >= midnight,
+                    ModelCall.user_id == user_id, ModelCall.key_source == source, ModelCall.created_at >= midnight,
                     ModelCall.status != "cache",  # an answer served from the cache never reached a model: it costs nothing
                 )
             ).scalar_one()

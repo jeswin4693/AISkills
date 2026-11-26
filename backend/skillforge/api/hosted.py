@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.requests import cookie_parser
 
+from ..builder.limits import PersonLimits
 from ..db.models import LOCAL_USER_ID
 from .google_auth import GoogleAuthError, verify_credential
 from .security import host_name
@@ -76,6 +77,7 @@ class Hosted:
     google_client_id: str = ""  # public; "" means there is no Sign in with Google
     allowed_emails: frozenset[str] = frozenset()  # lower-case: "a@b.c", "@domain", or "*"
     shared_calls_per_day: int = 0  # model calls a signed-in person without a key of their own may make on the server's model each day (UTC); 0 means none
+    person_limits: PersonLimits = PersonLimits(500 * 1024 * 1024, 50, 2)  # disk, kept builds, runs at once for each signed-in person (never the owner); 0 = none
 
     @property
     def google(self) -> bool:
@@ -142,6 +144,11 @@ class Hosted:
                     "SKILLFORGE_SHARED_KEY_CALLS_PER_DAY is set but Google sign-in is not: only the owner can sign in then, and the owner is never limited. "
                     "Set the Google settings, or remove it."
                 )
+        limits = PersonLimits(
+            disk_bytes=_limit(env, "SKILLFORGE_PERSON_DISK_MB", 500) * 1024 * 1024,
+            max_builds=_limit(env, "SKILLFORGE_PERSON_MAX_BUILDS", 50),
+            max_active=_limit(env, "SKILLFORGE_PERSON_MAX_ACTIVE", 2),
+        )
         return cls(
             token=token,
             allowed_hosts=frozenset(host_name(h) for h in env.get("SKILLFORGE_ALLOWED_HOSTS", "").split(",") if h.strip()),
@@ -149,10 +156,24 @@ class Hosted:
             google_client_id=client_id,
             allowed_emails=emails,
             shared_calls_per_day=shared,
+            person_limits=limits,
         )
 
 
 # ---- the session cookie and the bearer token ------------------------------------------------------------------
+
+
+def _limit(env: Mapping[str, str], name: str, default: int) -> int:
+    """A per-person limit from the environment: a whole number from 0 (no limit) to 10,000,000, else a refusal naming the setting. Unset: the default."""
+    text = env.get(name, "").strip()
+    if not text:
+        return default
+    if not re.fullmatch(r"[0-9]{1,8}", text) or int(text) > 10_000_000:
+        raise HostedConfigError(f"{name} must be a whole number from 0 to 10000000 (0 means no limit).")
+    return int(text)
+
+
+BLOCKED = "This account has been turned off on this server. Ask the person who runs it."
 
 
 def _sign(hosted: Hosted, message: str) -> str:
@@ -333,11 +354,13 @@ class LoginGuard:
 
 class AuthMiddleware:
     """A plain ASGI middleware: 401 before the request reaches any route under /api/ that is not public. A request that gets through carries who it is
-    (`request.state.user`), so no route has to work it out again."""
+    (`request.state.user`), so no route has to work it out again. `blocked(user_id)` says whether the owner has turned a person off: it is asked on every request
+    of a person (never the owner), so a block ends a session that is already signed in on its very next request."""
 
-    def __init__(self, app, hosted: Hosted) -> None:
+    def __init__(self, app, hosted: Hosted, blocked: Callable[[str], bool] | None = None) -> None:
         self.app = app
         self.hosted = hosted
+        self.blocked = blocked
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -352,6 +375,9 @@ class AuthMiddleware:
             return
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
         user = identify(self.hosted, headers)
+        if user is not None and user.id != LOCAL_USER.id and self.blocked is not None and self.blocked(user.id):
+            await JSONResponse({"detail": BLOCKED}, status_code=403)(scope, receive, send)
+            return
         if user is not None:
             scope.setdefault("state", {})["user"] = user
             await self.app(scope, receive, send)
@@ -390,6 +416,8 @@ def auth_router(hosted: Hosted | None, guard: LoginGuard, *, keys: Callable[[str
         person = None
         if who is not None and who.id != LOCAL_USER.id and users is not None:
             record = users().get(who.id)
+            if record is not None and record.blocked:  # turned off: not signed in, and the page can say why
+                return {"required": True, "authenticated": False, "google_client_id": hosted.google_client_id, "user": None, "owner_login": True, "blocked": True}
             person = {"email": who.email, "name": record.name if record else who.email.split("@")[0], "picture": record.picture if record else ""}
         return {"required": True, "authenticated": who is not None, "google_client_id": hosted.google_client_id, "user": person, "owner_login": True}
 
@@ -443,6 +471,10 @@ def auth_router(hosted: Hosted | None, guard: LoginGuard, *, keys: Callable[[str
                 detail += f" (Everyone at {domain} is allowed, but only with a Google Workspace account of that organisation, not a personal Google account.)"
             return JSONResponse({"detail": detail}, status_code=403)
         record = users().upsert_google(who.sub, who.email, who.name, who.picture)
+        if record.blocked:  # a turned-off person is told so and gets no session
+            response = JSONResponse({"detail": BLOCKED}, status_code=403)
+            response.delete_cookie(NONCE_COOKIE, path=NONCE_PATH)
+            return response
         response = JSONResponse({"authenticated": True, "user": {"email": record.email, "name": record.name, "picture": record.picture}})
         response.set_cookie(
             COOKIE, make_cookie(hosted, user=User(record.id, record.email, who.hd)), max_age=hosted.session_days * 86400, httponly=True, samesite="lax",

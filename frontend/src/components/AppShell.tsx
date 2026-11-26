@@ -19,11 +19,14 @@ const NAV = [
   { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
   { href: "/settings", label: "Settings", hint: "Choose your model and add its key" },
 ];
+const PEOPLE = { href: "/admin", label: "People", hint: "Who uses this server, and turn an account off" };
 
 function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { phase, required, signOut, user } = useAuth();
   const open = phase === "open"; // the pages, the menu and the status panel appear only once no sign-in is needed or it is done
+  // The owner of a hosted server (signed in with the access token, so no Google person) also gets the People page.
+  const items = required && !user ? [...NAV, PEOPLE] : NAV;
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="border-b border-border bg-surface md:sticky md:top-0 md:h-dvh md:overflow-y-auto md:border-r md:border-b-0">
@@ -37,7 +40,7 @@ function Shell({ children }: { children: ReactNode }) {
           {open && (
             <nav aria-label="Main">
               <ul className="flex flex-wrap gap-1 md:flex-col">
-                {NAV.map((item) => {
+                {items.map((item) => {
                   const here = path === item.href || path.startsWith(item.href + "/");
                   return (
                     <li key={item.href}>

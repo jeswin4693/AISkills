@@ -37,6 +37,7 @@ Turning hosted mode on changes nothing for local use: with no `SKILLFORGE_MODE`,
 | `SKILLFORGE_DATA_DIR` | where the library, the database and the builds live (`/data` in the image): **keep it on a persistent disk** |
 | `SKILLFORGE_GOOGLE_CLIENT_ID`, `SKILLFORGE_ALLOWED_EMAILS` | optional, **both or neither**: "Sign in with Google" for other people, and who may sign in. Each person then has their own builds and library. See [accounts.md](accounts.md) |
 | `SKILLFORGE_SHARED_KEY_CALLS_PER_DAY` | optional, needs the two settings above: model calls a day a signed-in person **without** a key of their own may make on the server's model (a whole number, 0 or unset means not shared). People can always add their own key under Settings. See [per-person-keys.md](per-person-keys.md) |
+| `SKILLFORGE_PERSON_DISK_MB`, `SKILLFORGE_PERSON_MAX_BUILDS`, `SKILLFORGE_PERSON_MAX_ACTIVE` | optional limits for each **signed-in person** (never the owner): disk (MB, default 500), kept builds (default 50) and background runs working at once (default 2). A whole number from 0 to 10000000; **0 means no limit**. A person at a limit is told which and what to do. See [person-limits.md](person-limits.md) |
 | `PORT` | the public port (the image uses 8080; many hosts set it for you) |
 | `LLM_PROVIDER`, `LLM_MODEL`, the key variables, `LLM_FALLBACKS`, `LLM_<TIER>_…` | the models, exactly as in [ai-engine.md](ai-engine.md) |
 

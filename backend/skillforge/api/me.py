@@ -30,6 +30,11 @@ def me_router() -> APIRouter:
     def access(request: Request) -> ModelAccess:
         return get_builder(request.app).access
 
+    @r.get("/me/space")
+    def space(request: Request) -> dict:
+        """What this person uses and may use: disk, kept builds, runs working. Only their own numbers. The owner is told there are no limits (0 means none)."""
+        return get_builder(request.app).space.view(user_id(request))
+
     @r.get("/me/model")
     def mine(request: Request) -> dict:
         """What applies to this person: the owner, their own model (provider, model, whether a key is saved and when), the shared model with today's allowance, or none."""

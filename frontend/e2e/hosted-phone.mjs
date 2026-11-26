@@ -231,6 +231,74 @@ try {
   const w4 = await me.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
   note(w4.scroll <= w4.inner, "My model does not scroll sideways afterwards either", `${w4.scroll} px wide in a ${w4.inner} px window`);
 
+  // ---- slice AJ: a person's own space on Settings, the owner's People page, and turning an account off ----
+  await me.goto(`http://127.0.0.1:${UI}/settings`);
+  await me.getByRole("heading", { name: "Your space on this server" }).waitFor({ timeout: 15_000 }).then(
+    () => note(true, "a person sees their own space (disk, builds kept, runs working) on the Settings page"),
+    () => note(false, "a person sees their own space (disk, builds kept, runs working) on the Settings page"),
+  );
+  const bars = await me.getByRole("progressbar").count();
+  note(bars === 3, "each of the three limits has a bar", `${bars} bars`);
+  note(await me.getByText(/of 50 builds kept/).isVisible().catch(() => false), "the builds limit is said in words (the default 50)");
+  const w5 = await me.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  note(w5.scroll <= w5.inner, "Your space does not scroll sideways", `${w5.scroll} px wide in a ${w5.inner} px window`);
+  note((await me.getByRole("link", { name: "People", exact: true }).count()) === 0, "a person's menu has no People page");
+  await shotOf(me, "06-my-space.png");
+
+  await me.goto(`http://127.0.0.1:${UI}/admin`);
+  await me.getByText("Only the person who runs this server can do this.").waitFor({ timeout: 15_000 }).then(
+    () => note(true, "a person who opens the People page anyway is told it is the owner's"),
+    () => note(false, "a person who opens the People page anyway is told it is the owner's"),
+  );
+
+  const ownerContext = await browser.newContext(PHONE);
+  const boss = await ownerContext.newPage();
+  boss.on("pageerror", (e) => problems.push("page error: " + e.message));
+  await boss.goto(`http://127.0.0.1:${UI}/`);
+  await boss.getByRole("heading", { name: "Sign in", level: 1 }).waitFor({ timeout: 20_000 });
+  if (!(await boss.locator("#access-token").isVisible())) await boss.getByText("Owner of this server? Use the access token").tap();
+  await boss.locator("#access-token").fill(TOKEN);
+  await boss.getByRole("button", { name: "Sign in", exact: true }).tap();
+  await boss.getByRole("link", { name: "People", exact: true }).waitFor({ timeout: 15_000 }).then(
+    () => note(true, "the owner's menu has a People page"),
+    () => note(false, "the owner's menu has a People page"),
+  );
+  await boss.getByRole("link", { name: "People", exact: true }).tap();
+  await boss.getByText("tester@example.com").waitFor({ timeout: 15_000 });
+  note(await boss.getByRole("heading", { name: "Phone Tester" }).isVisible(), "the People page lists the person, with their name and address");
+  const off = boss.getByRole("button", { name: "Turn off this account" });
+  const offBox = await off.boundingBox();
+  note(offBox !== null && offBox.height >= 44, "the Turn off button is a 44 px tap target", offBox ? `${Math.round(offBox.height)} px` : "not found");
+  const w6 = await boss.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  note(w6.scroll <= w6.inner, "the People page does not scroll sideways", `${w6.scroll} px wide in a ${w6.inner} px window`);
+  await shotOf(boss, "07-people.png");
+
+  await off.tap();
+  await boss.getByText(/Turn off Phone Tester\?/).waitFor({ timeout: 5_000 });
+  note(true, "turning an account off asks first, and says what happens");
+  await boss.getByRole("button", { name: "Yes, turn off" }).tap();
+  await boss.getByText("Turned off", { exact: true }).waitFor({ timeout: 10_000 }).then(
+    () => note(true, "the person is shown as turned off"),
+    () => note(false, "the person is shown as turned off"),
+  );
+
+  await me.goto(`http://127.0.0.1:${UI}/settings`);
+  await me.getByText("This account has been turned off").waitFor({ timeout: 15_000 }).then(
+    () => note(true, "a person who is turned off is told so on the sign-in screen, at once"),
+    () => note(false, "a person who is turned off is told so on the sign-in screen, at once"),
+  );
+  const refusedStatus = await me.evaluate(() => fetch("/api/builds").then((r) => r.status));
+  note(refusedStatus === 403, "every call of theirs is refused while it is off", `status ${refusedStatus}`);
+  await shotOf(me, "08-turned-off.png");
+
+  await boss.getByRole("button", { name: "Turn back on" }).tap();
+  await boss.getByRole("button", { name: "Turn off this account" }).waitFor({ timeout: 10_000 });
+  await me.goto(`http://127.0.0.1:${UI}/settings`);
+  await me.getByRole("heading", { name: "Your space on this server" }).waitFor({ timeout: 15_000 }).then(
+    () => note(true, "turning it back on gives the same session back, with everything kept"),
+    () => note(false, "turning it back on gives the same session back, with everything kept"),
+  );
+
   // Google's own script logs its own complaints (a made-up Client ID, third-party cookies): only errors from OUR pages and API count.
   const ours = problems.filter((p) => !/accounts\.google\.com|gsi|googleusercontent|GSI_LOGGER|Failed to load resource/i.test(p));
   note(ours.length === 0, "no page errors or console errors of our own", ours.slice(0, 3).join(" | "));

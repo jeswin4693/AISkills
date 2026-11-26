@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .. import __version__
-from ..builder import Builder, BuilderError, SessionNotFound, UpstreamError, WrongState
+from ..builder import Builder, BuilderError, LimitReached, SessionNotFound, UpstreamError, WrongState
 from ..builder.repository import check_repo
 from ..evidence import EvidenceError, read_evidence
 from ..graph import languages
@@ -36,7 +36,8 @@ from ..library.registry import Libraries
 from ..sandbox import probe_sandbox
 from ..settings import EnvSettings, default_settings
 from ..db.users import UserStore
-from .builds import builds_router, get_builder
+from .builds import builds_router, get_builder, room
+from .admin import admin_router
 from .evals import evals_router
 from .google_auth import GoogleKeys
 from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
@@ -143,7 +144,7 @@ def create_app(
     # The innermost layer is added first. The sign-in check goes INSIDE the CORS layer, so its 401 carries the CORS headers a trusted page on another address
     # needs to read it (outside it, the browser reported "blocked by CORS policy" and the page could not tell "sign in" from "the server is down").
     if hosted is not None:
-        app.add_middleware(AuthMiddleware, hosted=hosted)
+        app.add_middleware(AuthMiddleware, hosted=hosted, blocked=lambda uid: UserStore(get_builder(app).db).is_blocked(uid))
     app.add_middleware(
         CORSMiddleware, allow_origins=trusted, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Content-Type"],
         expose_headers=["Content-Disposition"],
@@ -164,6 +165,10 @@ def create_app(
     @app.exception_handler(WrongState)
     async def wrong_state(_: Request, exc: WrongState) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(LimitReached)  # a per-person limit (slice AJ): the message names the person's own numbers and what to do
+    async def limit_reached(_: Request, exc: LimitReached) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "limit": exc.limit}, status_code=429)
 
     @app.exception_handler(UpstreamError)  # GitHub could not be reached or refused: the request was fine
     async def upstream_error(_: Request, exc: UpstreamError) -> JSONResponse:
@@ -232,7 +237,7 @@ def create_app(
                 out.append({"name": name, "versions": 0, "latest": None, "error": str(exc)})
         return out
 
-    @api.post("/library/import")
+    @api.post("/library/import", dependencies=[Depends(room)])
     async def import_skill_upload(
         request: Request, note: str = "", test_scripts: bool = False, lib: Library = Depends(library_for),
     ) -> JSONResponse:
@@ -272,7 +277,7 @@ def create_app(
         except UnicodeDecodeError:
             return {"path": path, "binary": True, "text": ""}
 
-    @api.post("/library/{name}/rollback")
+    @api.post("/library/{name}/rollback", dependencies=[Depends(room)])
     def roll_back(name: str, body: RollbackBody, lib: Library = Depends(library_for)) -> dict:
         version, created = rollback(lib, name, body.to)
         return {"created": created, "version": _version(version)}
@@ -335,6 +340,7 @@ def create_app(
     ))
     api.include_router(builds_router())
     api.include_router(me_router())
+    api.include_router(admin_router())
     api.include_router(evals_router())
     api.include_router(quality_router())
     api.include_router(repos_router())

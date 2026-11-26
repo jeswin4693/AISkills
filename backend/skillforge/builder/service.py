@@ -34,6 +34,7 @@ from ..validate.static import read_dir
 from .errors import BadRequest, BuilderError, SessionNotFound, WrongState
 from .evals import EvalRuns
 from .jobs import JobRunner
+from .limits import PersonLimits, PersonSpace
 from .model_access import ModelAccess, ModelOptions
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
@@ -51,7 +52,7 @@ class Builder:
         self, database: Database, library: Library, builds_root: Path, *,
         provider_factory: Callable[[], LLMProvider] = env_provider, runner: JobRunner | None = None,
         sandbox_note: Callable[[], str] = default_sandbox_note, script_runner: ScriptRunner | None = None,
-        library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(),
+        library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(), limits: PersonLimits = PersonLimits(),
     ) -> None:
         self.db = database
         self.library = library  # the owner's library
@@ -64,16 +65,30 @@ class Builder:
         # Which model each person's calls use, and whether they may use it now (slice AI). It looks `provider_factory` up when asked, not once, because
         # the server's model can be changed while it runs (a fixed .env is seen at once).
         self.access = ModelAccess(self.db, lambda: self.provider_factory(), model_options)
+        # What each person uses and may use (slice AJ): disk, kept builds, runs working at once. The owner is never limited.
+        self.space = PersonSpace(self.db, limits, self._person_folders)
 
     @classmethod
     def default(
-        cls, library: Library, library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(),
+        cls, library: Library, library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(), limits: PersonLimits = PersonLimits(),
     ) -> "Builder":
         """The real thing: the SQLite file in the per-user data folder, migrated, with interrupted work marked."""
         db = Database()
         db.migrate()
         db.recover_interrupted()
-        return cls(db, library, data_dir() / "builds", library_for=library_for, model_options=model_options)
+        return cls(db, library, data_dir() / "builds", library_for=library_for, model_options=model_options, limits=limits)
+
+    def _person_folders(self, user_id: str) -> list[Path]:
+        """Where a person's files are: their own folder (their library of every kind sits in it) and the folder of each build they have."""
+        folders: list[Path] = []
+        if self.library_for is not None and user_id != LOCAL_USER_ID:
+            try:
+                folders.append(self.library_for(user_id).root.parent)
+            except LibraryError:
+                pass
+        with self.db.session() as s:
+            ids = s.execute(select(BuildSession.id).where(BuildSession.user_id == user_id)).scalars().all()
+        return folders + [self.builds_root / sid for sid in ids if _ID.match(sid)]
 
     def _library(self, user_id: str) -> Library:
         """The library of whoever owns a session. Fails closed: with no resolver only the owner has a library, never a shared one for everybody."""
@@ -91,7 +106,7 @@ class Builder:
     @property
     def evals(self) -> EvalRuns:
         """Testing Lab runs: a skill's test cases asked of a model in the background, sharing this builder's database, job runner, model and each person's library."""
-        return EvalRuns(self.db, self.runner, self.access.provider_for, self.library, self._library)
+        return EvalRuns(self.db, self.runner, self.access.provider_for, self.library, self._library, self.space)
 
     def close(self) -> None:
         self.runner.shutdown()
@@ -185,7 +200,8 @@ class Builder:
             raise BadRequest(str(exc)) from exc
         kept_seed = check_seed(kind, (seed or {}).get("repo"), (seed or {}).get("focus"), (seed or {}).get("nodes"), (seed or {}).get("snapshot"))
         sid, stamp = uuid.uuid4().hex, now_text()
-        with self.db.session() as s:
+        with self.space.lock, self.db.session() as s:  # the lock is held until this is written, so two starts at once cannot both take the last place
+            self.space.admit(user, new_build=True)
             s.add(BuildSession(
                 id=sid, created_at=stamp, updated_at=stamp, status="working", description=words, words=words,
                 round=1, with_scripts=with_scripts, questions=[], error="", retryable=False, model_calls=0,
@@ -196,7 +212,7 @@ class Builder:
         return self.get(sid, user)
 
     def answer(self, sid: str, answers: dict[str, str], user: str = LOCAL_USER_ID) -> dict:
-        with self.db.session() as s:
+        with self.space.lock, self.db.session() as s:
             row = self._row(s, sid, user)
             if row.status != "awaiting_answers":
                 raise WrongState("This session is not waiting for answers.")
@@ -208,6 +224,7 @@ class Builder:
                 words = apply_answers(row.words, questions, answers)
             except BuildError as exc:
                 raise BadRequest(str(exc)) from exc
+            self.space.admit(user)
             if not self._claim(s, sid, ("awaiting_answers",), status="working", words=words, round=row.round + 1,
                                questions=[], error="", retryable=False):
                 raise WrongState("This session just moved on. Reload it.")
@@ -216,8 +233,9 @@ class Builder:
         return self.get(sid, user)
 
     def approve(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
-        with self.db.session() as s:
+        with self.space.lock, self.db.session() as s:
             self._row(s, sid, user)
+            self.space.admit(user)
             if not self._claim(s, sid, ("awaiting_approval",), status="working", error="", retryable=False):
                 raise WrongState("There is no requirement waiting for approval in this session.")
             job_id = self._new_job(s, sid, "build")
@@ -225,12 +243,13 @@ class Builder:
         return self.get(sid, user)
 
     def retry(self, sid: str, user: str = LOCAL_USER_ID) -> dict:
-        with self.db.session() as s:
+        with self.space.lock, self.db.session() as s:
             row = self._row(s, sid, user)
             if row.status != "failed" or not row.retryable:
                 raise WrongState("Only a step that failed for a reason that can pass (such as a missing key) can be retried.")
             last = self._latest_job(s, sid)
             kind = last.kind if last else "understand"
+            self.space.admit(user)
             if not self._claim(s, sid, ("failed",), status="working", error="", retryable=False):
                 raise WrongState("This session just moved on. Reload it.")
             job_id = self._new_job(s, sid, kind)
@@ -241,6 +260,7 @@ class Builder:
 
     def save(self, sid: str, *, accept_draft: bool = False, note: str = "", user: str = LOCAL_USER_ID) -> ImportReport:
         """Put the built skill into the library through the same checked import as any other skill. It goes into the library of the person who owns the session."""
+        self.space.check_disk(user)
         with self.db.session() as s:
             row = self._row(s, sid, user)
             result, kind = row.result, row.kind

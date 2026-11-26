@@ -61,6 +61,8 @@ class UserRow(Base):
     picture: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[str] = mapped_column(String(32))
     last_login_at: Mapped[str] = mapped_column(String(32))
+    # Turned off by the owner (slice AJ): signed out on the very next request and refused at sign-in; nothing they made is deleted. Reversible.
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class UserModelRow(Base):

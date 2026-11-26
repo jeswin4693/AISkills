@@ -12,6 +12,7 @@ import re
 import threading
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 
 from sqlalchemy import select, update
 
@@ -23,6 +24,7 @@ from ..library import Library, LibraryError, NotFound, Version
 from ..providers import LLMProvider, ProviderError
 from .errors import BadRequest, BuilderError, SessionNotFound, WrongState
 from .jobs import JobRunner
+from .limits import PersonSpace
 
 RUN_CAP = 5  # a case is repeated at most this many times
 MESSAGE_CAP = 2000  # characters of a test message kept in a view
@@ -98,13 +100,22 @@ def run_view(row: EvalRun, *, full: bool = True) -> dict:
 class EvalRuns:
     def __init__(
         self, db: Database, runner: JobRunner, provider_for: Callable[[str], LLMProvider], library: Library,
-        library_for: Callable[[str], Library] | None = None,
+        library_for: Callable[[str], Library] | None = None, space: PersonSpace | None = None,
     ) -> None:
         self.db = db
+        self.space = space  # per-person limits (slice AJ); None: no limits
         self.runner = runner
         self.provider_for = provider_for  # the model for a person's run, by their id (ModelAccess.provider_for)
         self.library = library  # the owner's
         self.library_for = library_for  # a person's, by id
+
+    def _room(self):
+        """The admission lock of per-person limits, held with the start lock so a run and a build cannot both take the last place."""
+        return self.space.lock if self.space is not None else nullcontext()
+
+    def _admit(self, user: str) -> None:
+        if self.space is not None:
+            self.space.admit(user, disk=False)  # a Lab run writes next to nothing: a person at their disk limit can still test what they have
 
     def _library(self, user: str) -> Library:
         """A person's library. Fails closed: with no resolver only the owner has one."""
@@ -170,7 +181,7 @@ class EvalRuns:
         if not plan["runnable"]:
             raise BadRequest(f"Nothing was run: {plan['reason']}.")
         rid, stamp = uuid.uuid4().hex, now_text()
-        with _START, self.db.session() as s:
+        with _START, self._room(), self.db.session() as s:
             running = s.execute(  # this person's own run: a second click never hands out somebody else's
                 select(EvalRun).where(
                     EvalRun.status == "working", EvalRun.kind == kind, EvalRun.name == v.name, EvalRun.version == v.version, EvalRun.user_id == user,
@@ -178,6 +189,7 @@ class EvalRuns:
             ).scalars().first()
             if running is not None:  # a second click while the model is still being asked gets that run, not another one
                 return run_view(running)
+            self._admit(user)
             s.add(EvalRun(
                 id=rid, created_at=stamp, updated_at=stamp, status="working", kind=kind, name=v.name, version=v.version,
                 content_hash=v.content_hash, runs=runs, baseline=baseline, cases_total=len(plan["cases"]), cases_done=0,
@@ -200,7 +212,7 @@ class EvalRuns:
             return [run_view(r, full=False) for r in s.execute(query).scalars().all()]
 
     def retry(self, rid: str, user: str = LOCAL_USER_ID) -> dict:
-        with _START, self.db.session() as s:  # the same lock as start(): a retry is a run of that version, so it counts for "one run at a time"
+        with _START, self._room(), self.db.session() as s:  # the same lock as start(): a retry is a run of that version, so it counts for "one run at a time"
             row = self._row(s, rid, user)
             going = s.execute(
                 select(EvalRun).where(
@@ -210,6 +222,8 @@ class EvalRuns:
             ).scalars().first()
             if going is not None and row.status == "failed":
                 raise WrongState("A run of this version is already going. Wait for it to finish, or open it from the list of earlier runs.")
+            if row.status == "failed":
+                self._admit(user)
             claimed = s.execute(
                 update(EvalRun).where(EvalRun.id == rid, EvalRun.status == "failed")
                 .values(status="working", error="", retryable=False, cases_done=0, result=None, updated_at=now_text())

@@ -710,7 +710,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     import uvicorn  # only needed here, so the other commands never import the web server
 
     from .api import create_app
-    from .api.builds import model_options
+    from .api.builds import builder_options
     from .api.hosted import Hosted, HostedConfigError
     from .builder import Builder
 
@@ -726,7 +726,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     library = Library()
     # Opens and migrates the database now, and marks work a crash left half-done. The model options are what a hosted server lets its people do about models
     # (keep a key of their own, share the server's model up to a daily cap): without them Settings -> My model answers "cannot keep personal model keys".
-    builder = Builder.default(library, model_options=model_options(hosted))
+    builder = Builder.default(library, **builder_options(hosted))
     if hosted is None:
         print(f"SkillForge API on http://{args.host}:{args.port}/api/docs  (this machine only; Ctrl+C stops it)")
     else:

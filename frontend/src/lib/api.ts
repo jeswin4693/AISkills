@@ -1,6 +1,6 @@
 import type {
-  AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  ModelCheckReport, MyModelView, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
+  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  ModelCheckReport, MyModelView, MySpace, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
   SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
 
@@ -99,6 +99,10 @@ export const api = {
 
   // ---- a person's own model in the hosted version: a key goes in once and never comes back ----
   myModel: () => get<MyModelView>("/api/me/model"),
+  mySpace: () => get<MySpace>("/api/me/space"),
+  adminPeople: () => get<AdminPeople>("/api/admin/people"),
+  blockPerson: (id: string) => post<{ blocked: boolean }>(`/api/admin/people/${encodeURIComponent(id)}/block`, {}),
+  unblockPerson: (id: string) => post<{ blocked: boolean }>(`/api/admin/people/${encodeURIComponent(id)}/unblock`, {}),
   /** 200 is the new state; 400 says which fields were refused and why (never repeating the key). */
   async saveMyModel(choice: { provider: string; model: string; key: string }): Promise<SaveMyModelResult> {
     const res = await send("/api/me/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(choice) });

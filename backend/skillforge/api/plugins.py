@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ from ..hookcatalog.catalogue import CATALOGUE
 from ..library import SkillSource, import_source
 from ..library.plugin import ComponentRef, PluginPlan, compose_for_keeping
 from ..validate.plugin import MANIFEST
+from .builds import room
 from .scope import user_library
 from .views import checks_view, import_view
 
@@ -79,7 +80,7 @@ def plugins_router() -> APIRouter:
         """The files, what the plugin can do on the machine, and every check. Keeps nothing."""
         return _view(_plan(request, body))
 
-    @r.post("/plugins")
+    @r.post("/plugins", dependencies=[Depends(room)])
     def keep(body: PluginBody, request: Request) -> JSONResponse:
         """Keep it as the next version in the plugin library (422 when a check fails; nothing is kept then)."""
         plan = _plan(request, body)

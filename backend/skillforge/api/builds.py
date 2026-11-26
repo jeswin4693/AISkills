@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from ..ai.doctor import check_models
-from ..builder import Builder, ModelOptions, env_provider, provider_status
+from ..builder import Builder, ModelOptions, PersonLimits, env_provider, provider_status
 from ..builder.keybox import KeyBox
 from ..db import LOCAL_USER_ID
 from ..providers import ProviderError
@@ -68,12 +68,28 @@ def model_options(hosted) -> ModelOptions:
     return ModelOptions(keybox=KeyBox(hosted.token), shared_calls_per_day=hosted.shared_calls_per_day)
 
 
+def builder_options(hosted) -> dict:
+    """Everything a hosted server changes about how its builder is made: what people may do about models, and their limits. The lazy path (`get_builder`) and
+    the real `serve` command both use this, so neither can forget one (the first real sign-in found `serve` had)."""
+    return {"model_options": model_options(hosted), "limits": hosted.person_limits if hosted is not None else PersonLimits()}
+
+
 def get_builder(app: FastAPI) -> Builder:
     """The builder, made on first use: a server that is only used for the library never opens the database."""
     with app.state.builder_lock:
         if app.state.builder is None:
-            app.state.builder = Builder.default(app.state.library, app.state.libraries.for_user, model_options(app.state.hosted))
+            app.state.builder = Builder.default(app.state.library, app.state.libraries.for_user, **builder_options(app.state.hosted))
         return app.state.builder
+
+
+def room(request: Request) -> None:
+    """A route dependency for a write that makes a person's folder bigger: refuse it when they are at their disk limit. The owner and local use are never
+    limited, and a server with no sign-in never opens its database just to say so."""
+    if getattr(request.app.state, "hosted", None) is None:
+        return
+    who = user_id(request)
+    if who != LOCAL_USER_ID:
+        get_builder(request.app).space.check_disk(who)
 
 
 def builds_router() -> APIRouter:

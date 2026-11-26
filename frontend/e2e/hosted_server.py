@@ -49,7 +49,8 @@ def main() -> None:
     database.migrate()
     options = ModelOptions(keybox=KeyBox(hosted.token), shared_calls_per_day=hosted.shared_calls_per_day, build=fake_build)
     builder = Builder(database, library, DATA / "builds", provider_factory=no_model, runner=JobRunner(),
-                      sandbox_note=lambda: "unavailable. (the browser check does not use the sandbox)", model_options=options)
+                      sandbox_note=lambda: "unavailable. (the browser check does not use the sandbox)", model_options=options,
+                      limits=hosted.person_limits)  # the same limits the real `serve` gives a hosted server: a launcher that forgot them would hide a missing wiring
     # One made-up person, with a real session cookie made by the product's own make_cookie, so the browser check can be a signed-in PERSON without a Google ticket.
     # tester@example.com is on the allow-list the check sets, which is what a real sign-in would have needed.
     person = UserStore(database).upsert_google("phone-check-sub", "tester@example.com", "Phone Tester")

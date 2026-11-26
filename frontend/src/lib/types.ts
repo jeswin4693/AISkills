@@ -143,6 +143,8 @@ export interface AuthStatus {
   user?: Person | null;
   /** True when the access token can still sign the owner in (always on a hosted server). */
   owner_login?: boolean;
+  /** True when this person's account has been turned off by the owner: they are not signed in, and are told why. Absent otherwise. */
+  blocked?: boolean;
 }
 
 export interface SandboxStatus {
@@ -185,6 +187,38 @@ export interface MyModelView {
   /** The providers a person may choose from (never "custom"). */
   providers: string[];
   message: string;
+}
+
+/** What one person uses and may use (GET /api/me/space). A limit of 0 means none. */
+export interface PersonSpace {
+  mode: "person";
+  disk: { used: number; limit: number };
+  builds: { kept: number; limit: number };
+  active: { now: number; limit: number };
+}
+export interface OwnerSpace {
+  mode: "owner";
+  message: string;
+}
+export type MySpace = PersonSpace | OwnerSpace;
+
+/** One person on the owner's People page (GET /api/admin/people). Never a key, not even which model. */
+export interface AdminPerson {
+  id: string;
+  name: string;
+  email: string;
+  joined: string;
+  last_seen: string;
+  blocked: boolean;
+  builds: number;
+  disk_used: number;
+  active: number;
+  calls_today: { server: number; own: number };
+  has_key: boolean;
+}
+export interface AdminPeople {
+  hosted: boolean;
+  people: AdminPerson[];
 }
 
 export type SaveMyModelResult = { ok: true; view: MyModelView } | { ok: false; detail: string; problems: { name: string; message: string }[] };

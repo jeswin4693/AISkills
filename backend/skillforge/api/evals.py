@@ -5,14 +5,14 @@ A run asks the server's model (like a build does), so it works in the hosted ver
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from ..build.models import Assertion, AssertionKind, TestKind
 from ..builder import cases as case_editor
 from ..builder.evals import RUN_CAP
-from .builds import get_builder
+from .builds import get_builder, room
 from .scope import user_id, user_library
 from .views import import_view
 
@@ -63,7 +63,7 @@ def evals_router() -> APIRouter:
         return case_editor.view_cases(user_library(request), name, version)
 
     # A POST and not a PUT: this API's CORS policy allows GET, POST and DELETE only, so a browser could not send a PUT.
-    @r.post("/library/{name}/tests")
+    @r.post("/library/{name}/tests", dependencies=[Depends(room)])
     def save_cases(name: str, body: CasesBody, request: Request) -> JSONResponse:
         """Keep these test cases as a NEW version, through the library's checked import (422 if a check refuses it). Only the latest version
         can be edited (409 otherwise), and a case that could not be run is a 400 that names it."""

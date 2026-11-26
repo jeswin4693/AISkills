@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { MyModel } from "@/components/settings/MyModel";
+import { MySpace } from "@/components/settings/MySpace";
 import { SettingField } from "@/components/settings/SettingField";
 import { Alert, Badge, Button, Card, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -31,7 +32,10 @@ export default function SettingsPage() {
     return (
       <>
         <PageHeader title="Settings" subtitle="Choose the model you use and add its key. Your key is kept sealed on this server and used only for what you start." />
-        <MyModel />
+        <div className="space-y-6">
+          <MyModel />
+          <MySpace />
+        </div>
       </>
     );
   }

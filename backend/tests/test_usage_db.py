@@ -109,9 +109,13 @@ def test_a_plain_provider_records_nothing_and_the_session_says_so(tmp_path, db):
     assert builder.get(session["id"])["usage"]["calls"] == 0
 
 
-def test_discarding_a_session_removes_its_usage(tmp_path, db):
+def test_discarding_a_session_keeps_its_usage_but_lets_go_of_the_session(tmp_path, db):
+    # It used to delete the rows. They are the ledger a person's daily allowance is counted from (slice AI), so a discard must not give the calls back:
+    # tests/test_model_review.py. The session's own summary is empty once it is gone.
     builder = builder_with(tmp_path, db, AIService.single(MockProvider([round_one()])))
     sid = builder.start(FIRST)["id"]
     builder.discard(sid)
     with db.session() as s:
-        assert s.execute(select(ModelCall)).scalars().all() == []
+        kept = s.execute(select(ModelCall)).scalars().all()
+    assert len(kept) == 1 and kept[0].session_id is None
+    assert usage_summary(db, sid)["calls"] == 0

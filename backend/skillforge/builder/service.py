@@ -273,7 +273,10 @@ class Builder:
             if row.status == "working":
                 raise WrongState("It is still running. Wait for it to finish, then discard it.")
             s.execute(delete(Job).where(Job.session_id == sid))
-            s.execute(delete(ModelCall).where(ModelCall.session_id == sid))
+            # The usage rows are a record of calls that were made, and a person's daily allowance on the server's model is counted from them (builder/model_access.py):
+            # deleting them here gave the allowance back, so "start a build, discard it, start another" made the shared model free. They hold counts and timings only,
+            # never a prompt or a reply, so they are kept, no longer tied to a session that is gone (the same as a suggestion run's or a Testing Lab run's rows).
+            s.execute(update(ModelCall).where(ModelCall.session_id == sid).values(session_id=None))
             s.delete(row)
         shutil.rmtree(self.builds_root / sid, ignore_errors=True)  # sid is a checked 32-hex id, so this is our own folder
 

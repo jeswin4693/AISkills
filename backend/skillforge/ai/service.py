@@ -95,6 +95,7 @@ class AIService:
         cache: ResponseCache | None = None,
         _counters: _Counters | None = None,
         gate: Callable[[], None] | None = None,
+        reword: Callable[[str], str] | None = None,
     ) -> None:
         self.profiles = profiles
         self.policy = policy
@@ -104,6 +105,8 @@ class AIService:
         # Runs before EVERY attempt at a model (a retry is an attempt) and may raise a ProviderError to stop it: a person's daily allowance on the
         # server's model is checked here (builder/model_access.py). Its error kind ("allowance") never hands over to a backup model.
         self.gate = gate
+        # Says an error's message again for whoever is reading it (a person's own key: "Settings" instead of "the .env file"); the error's kind is untouched.
+        self.reword = reword
         self._sleep = sleep
         self._rng = rng
         self._counters = _counters or _Counters()
@@ -133,7 +136,7 @@ class AIService:
         """The same models and rules, a recorder for this run, and fresh counters. A `gate` given here replaces this service's own; none keeps it."""
         return AIService(
             self.profiles, policy=self.policy, recorder=recorder, sleep=self._sleep, rng=self._rng, max_calls=self.max_calls,
-            cache=self.cache, gate=gate if gate is not None else self.gate,
+            cache=self.cache, gate=gate if gate is not None else self.gate, reword=self.reword,
         )
 
     def escalated(self) -> AIService | None:
@@ -144,7 +147,7 @@ class AIService:
             return None
         return AIService(
             ProfileSet(profile), policy=self.policy, recorder=self.recorder, sleep=self._sleep, rng=self._rng,
-            max_calls=self.max_calls, cache=self.cache, _counters=self._counters, gate=self.gate,
+            max_calls=self.max_calls, cache=self.cache, _counters=self._counters, gate=self.gate, reword=self.reword,
         )
 
     @property
@@ -216,7 +219,7 @@ class AIService:
             try:
                 generation = self._attempt(profile, schema, current, system)
             except ProviderError as exc:
-                error = _clone(exc, str(exc), secrets)
+                error = _clone(exc, self.reword(str(exc)) if self.reword else str(exc), secrets)
                 self._record(task, tier_name, profile, tries, "error", error.kind, Usage(), time.monotonic() - started)
                 cap = attempts if not more else 2 if attempts is None else min(attempts, 2)
                 decision = decide(error, tries, self.policy, cap=cap, rng=self._rng)
@@ -232,6 +235,11 @@ class AIService:
                     self._sleep(decision.wait_s)
                 current = f"{prompt}\n\n{decision.feedback}" if decision.feedback else prompt
                 continue
+            except Exception:
+                # Not a provider's own error (a library under it broke): the attempt still went out, so it is still a row (a person's allowance counts rows),
+                # and the error goes on as it was.
+                self._record(task, tier_name, profile, tries, "error", "other", Usage(), time.monotonic() - started)
+                raise
             self._add_tokens(generation.usage)
             self._record(task, tier_name, profile, tries, "ok", "", generation.usage, generation.latency_s)
             return generation

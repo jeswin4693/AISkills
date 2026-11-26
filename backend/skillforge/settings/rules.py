@@ -34,11 +34,11 @@ def _providers() -> str:
     return ", ".join(supported_names())
 
 
-def _safe(value: str, limit: int, pattern: re.Pattern[str] = SAFE) -> None:
+def _safe(value: str, limit: int, pattern: re.Pattern[str] = SAFE, unsafe: str = UNSAFE) -> None:
     if len(value) > limit:
         raise ValueError(f"That is too long (the limit is {limit} characters).")
     if not pattern.fullmatch(value):
-        raise ValueError(UNSAFE)
+        raise ValueError(unsafe)
 
 
 def _provider(value: str) -> str:
@@ -91,6 +91,8 @@ def _backups(value: str) -> str:
 PERSON_PROVIDERS: tuple[str, ...] = tuple(name for name in supported_names() if name != "custom")
 PERSON_MODEL_LIMIT = 128  # as wide as model_calls.model, so a usage row can always hold it
 _QUOTES = "\"'`"
+# What a person is told about unsafe characters: the owner's text sends them to the .env file, which a person on a hosted server does not have.
+UNSAFE_PERSON = "Only letters, digits and . _ ~ : / , @ + = % - can be used here."
 
 
 def _person_provider(raw: str) -> str:
@@ -106,7 +108,7 @@ def _person_model(raw: str) -> str:
     model = raw.strip()
     if not model:
         raise ValueError("Give the model name your key can use, for example the one in your provider's documentation.")
-    _safe(model, PERSON_MODEL_LIMIT)
+    _safe(model, PERSON_MODEL_LIMIT, unsafe=UNSAFE_PERSON)
     return model
 
 
@@ -116,17 +118,21 @@ def _person_key(raw: str) -> str:
         raise ValueError("Paste your key.")
     if key[0] in _QUOTES or key[-1] in _QUOTES:
         raise ValueError("Remove the quotes around the key: paste only the key itself.")
-    if re.match(r"bearer(\s|$)", key, re.IGNORECASE):
+    if re.match(r"bearer([\s:]|$)", key, re.IGNORECASE):
         raise ValueError("Paste only the key, without the word Bearer in front of it.")
-    _safe(key, LIMITS["secret"])
+    _safe(key, LIMITS["secret"], unsafe=UNSAFE_PERSON)
     return key
 
 
-def check_person_model(provider: str, model: str, key: str) -> tuple[str, str, str]:
-    """(provider, model, key), cleaned, or SettingsError naming every field that is wrong. A refusal never repeats the key."""
+def check_person_model(provider: str, model: str, key: str, *, keep_key: bool = False) -> tuple[str, str, str]:
+    """(provider, model, key), cleaned, or SettingsError naming every field that is wrong. A refusal never repeats the key.
+    `keep_key`: the person left the key box empty and a saved key stays as it is; the key then comes back as "" (nothing to seal)."""
     cleaned: dict[str, str] = {}
     problems: list[dict[str, str]] = []
     for name, check, raw in (("provider", _person_provider, provider), ("model", _person_model, model), ("key", _person_key, key)):
+        if name == "key" and keep_key and not raw.strip():
+            cleaned[name] = ""
+            continue
         try:
             cleaned[name] = check(raw)
         except ValueError as exc:

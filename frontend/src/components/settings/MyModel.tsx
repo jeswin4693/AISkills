@@ -48,7 +48,8 @@ export function MyModel() {
 
   const chosenProvider = provider ?? (view.provider || view.providers[0] || "");
   const chosenModel = model ?? view.model;
-  const problems = problemsWith(chosenProvider, chosenModel, key, view.providers);
+  const saved = view.key_saved ? { provider: view.provider, readable: view.key_readable } : null; // an empty key box keeps this one
+  const problems = problemsWith(chosenProvider, chosenModel, key, view.providers, saved);
   const serverProblems = refused?.problems ?? [];
   const failed = (e: unknown) => setError(e instanceof Error ? e : new Error(String(e)));
 
@@ -182,6 +183,9 @@ export function MyModel() {
               aria-invalid={problems.model && typed ? true : undefined}
               className={`${INPUT} font-mono`}
             />
+            <p className="mt-1 max-w-md text-xs text-muted">
+              Copy the exact name from your provider&apos;s model list. Some names contain a slash, for example <span className="font-mono">openai/gpt-oss-120b</span> on Groq.
+            </p>
             {(problemFor(serverProblems, "model") ?? (chosenModel.length > 0 ? problems.model : undefined)) && (
               <p role="alert" className="mt-1 text-sm text-bad">
                 {problemFor(serverProblems, "model") ?? problems.model}
@@ -197,7 +201,7 @@ export function MyModel() {
               type="password"
               value={key}
               onChange={(e) => setKey(e.target.value)}
-              placeholder={view.key_saved ? "Saved. Paste to replace." : "Paste the key"}
+              placeholder={view.key_saved ? "Saved. Leave empty to keep it, or paste to replace." : "Paste the key"}
               autoComplete="off"
               autoCapitalize="none"
               spellCheck={false}

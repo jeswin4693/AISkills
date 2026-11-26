@@ -79,3 +79,31 @@ describe("what the page says about the shared allowance", () => {
     expect(allowanceText({ limit: 25, used: 31 })).toMatch(/all 25/); // a few attempts in flight can go past the limit: still "used up"
   });
 });
+
+describe("slice AJ: the small fixes the review and the real tests found", () => {
+  it.each([`Bearer:${KEY}`, `bearer: ${KEY}`, "BEARER:abc", `Bearer ${KEY}`])("refuses a key that starts with Bearer whatever separates it (%j)", (key) => {
+    expect(ok("gemini", "m", key).key).toMatch(/bearer/i);
+  });
+
+  it("still accepts a key that merely begins with those letters", () => {
+    expect(ok("gemini", "m", "bearerOfGoodKey123")).toEqual({});
+  });
+
+  it("lets the key box stay empty when a key is saved, can be opened, and the provider is the same", () => {
+    expect(problemsWith("groq", "model-two", "", PROVIDERS, { provider: "groq", readable: true })).toEqual({});
+  });
+
+  it("asks for the key when the provider changes, saying why", () => {
+    expect(problemsWith("openai", "model-two", "", PROVIDERS, { provider: "groq", readable: true }).key).toMatch(/new provider/i);
+  });
+
+  it("asks for the key when the saved one cannot be opened, or when nothing is saved", () => {
+    expect(problemsWith("groq", "m", "", PROVIDERS, { provider: "groq", readable: false }).key).toBeTruthy();
+    expect(problemsWith("groq", "m", "", PROVIDERS, null).key).toBeTruthy();
+    expect(problemsWith("groq", "m", "", PROVIDERS).key).toBeTruthy();
+  });
+
+  it("still checks a key that IS typed, even when one is saved", () => {
+    expect(problemsWith("groq", "m", `"${KEY}"`, PROVIDERS, { provider: "groq", readable: true }).key).toMatch(/quotes/i);
+  });
+});

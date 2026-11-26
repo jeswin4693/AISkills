@@ -105,6 +105,6 @@ def check_models(provider: LLMProvider) -> list[dict]:
             rows.append({**row, "ok": True, "kind": "", "detail": "", "latency_ms": round((time.monotonic() - started) * 1000),
                          "input_tokens": generation.usage.input_tokens, "output_tokens": generation.usage.output_tokens})
         except ProviderError as exc:
-            rows.append({**row, "ok": False, "kind": exc.kind, "detail": redact(str(exc), secrets)[:300],
+            rows.append({**row, "ok": False, "kind": exc.kind, "detail": redact(service.reword(str(exc)) if service.reword else str(exc), secrets)[:300],
                          "latency_ms": round((time.monotonic() - started) * 1000), "input_tokens": None, "output_tokens": None})
     return rows

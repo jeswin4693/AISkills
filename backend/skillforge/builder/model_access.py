@@ -15,6 +15,7 @@ A key is never returned by anything here, not even its end.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -29,7 +30,7 @@ from ..db import LOCAL_USER_ID, Database, ModelCall
 from ..db.user_models import ModelStore, StoredModel
 from ..providers import LLMProvider, ProviderError
 from ..providers.factory import key_variables
-from ..settings import PERSON_PROVIDERS, check_person_model
+from ..settings import PERSON_PROVIDERS, SettingsError, check_person_model
 from .keybox import KeyBox, KeyBoxError
 from .provider import provider_status
 from .usage import DbUsageRecorder
@@ -39,6 +40,16 @@ NO_KEY = (
 )
 OWNER_NOTE = "You are the owner of this server: its own model settings are used, and nothing here applies to you."
 INFLIGHT_SECONDS = 600.0  # an attempt that never wrote its usage row (it died) stops holding a slot after this long: longer than any model call is allowed to take
+
+
+_MODEL_HINT = re.compile(r"Check LLM_MODEL in \.env\.?")
+_KEY_HINT = re.compile(r"Check [A-Z][A-Z0-9_]* in \.env\.?")
+
+
+def _for_a_person(message: str) -> str:
+    """A provider's error says "Check GROQ_API_KEY in .env": advice for the owner. A person's own key is fixed under Settings, My model."""
+    message = _MODEL_HINT.sub("Check the model name under Settings, My model.", message)
+    return _KEY_HINT.sub("Check your key under Settings, My model.", message)
 
 
 class ModelAccessError(Exception):
@@ -111,7 +122,10 @@ class ModelAccess:
             raise ProviderError("The provider you saved is no longer supported. Choose your model again in Settings.", kind="auth", retryable=True)
         key = self._open(user_id, stored)
         # ONLY these three entries: nothing of the server's environment (its keys, its tiers, its backups) comes along into a person's provider.
-        return self.options.build({"LLM_PROVIDER": stored.provider, "LLM_MODEL": stored.model, key_variable: key})
+        service = self.options.build({"LLM_PROVIDER": stored.provider, "LLM_MODEL": stored.model, key_variable: key})
+        if isinstance(service, AIService):
+            service.reword = _for_a_person  # its errors say "Settings, My model", not "the .env file" (a person on a hosted server has none)
+        return service
 
     def _open(self, user_id: str, stored: StoredModel) -> str:
         if self.options.keybox is None:
@@ -215,7 +229,17 @@ class ModelAccess:
         self._person_only(user_id)
         if self.options.keybox is None:
             raise ModelAccessError("This server cannot keep personal model keys.")
-        provider, model, key = check_person_model(provider, model, key)
+        kept = None  # an empty key box keeps a saved key that can still be opened: changing only the model name must not mean pasting the key again
+        if not key.strip():
+            stored = self.store.get(user_id)
+            if stored is not None and self._readable(user_id, stored):
+                kept = stored
+        provider, model, key = check_person_model(provider, model, key, keep_key=kept is not None)
+        if kept is not None:
+            if provider != kept.provider:  # the saved key belongs to another provider
+                raise SettingsError([{"name": "key", "message": f"Paste your key for the new provider: the saved key is for {kept.provider}."}])
+            self.store.put(user_id, provider, model, kept.key_ciphertext, kept.key_nonce)
+            return self.my_model(user_id)
         ciphertext, nonce = self.options.keybox.seal(user_id, key)
         self.store.put(user_id, provider, model, ciphertext, nonce)
         return self.my_model(user_id)

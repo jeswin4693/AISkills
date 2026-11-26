@@ -17,8 +17,14 @@ export const cleanKey = (raw: string): string => raw.trim();
 
 export const canSave = (problems: Problems): boolean => Object.keys(problems).length === 0;
 
-/** What is wrong with these three values, field by field. `providers` is the list the server offers a person (it never includes "custom"). */
-export function problemsWith(provider: string, model: string, key: string, providers: readonly string[]): Problems {
+/** The key a person saved earlier, as far as the page may rely on it: which provider it is for, and whether the server can still open it. */
+export type SavedKey = { provider: string; readable: boolean } | null;
+
+/**
+ * What is wrong with these three values, field by field. `providers` is the list the server offers a person (it never includes "custom").
+ * `saved`: with a saved key that can still be opened and the same provider, an empty key box is fine (the server keeps the key); with another provider it is not.
+ */
+export function problemsWith(provider: string, model: string, key: string, providers: readonly string[], saved: SavedKey = null): Problems {
   const found: Problems = {};
 
   const name = provider.trim().toLowerCase();
@@ -33,9 +39,12 @@ export function problemsWith(provider: string, model: string, key: string, provi
   else if (!SAFE.test(named)) found.model = UNSAFE;
 
   const secret = cleanKey(key);
-  if (!secret) found.key = "Paste your key.";
-  else if (QUOTES.includes(secret[0]) || QUOTES.includes(secret[secret.length - 1])) found.key = "Remove the quotes around the key: paste only the key itself.";
-  else if (/^bearer(\s|$)/i.test(secret)) found.key = "Paste only the key, without the word Bearer in front of it.";
+  if (!secret) {
+    if (saved && saved.readable) {
+      if (saved.provider !== name) found.key = `Paste your key for the new provider: the saved key is for ${saved.provider}.`;
+    } else found.key = "Paste your key.";
+  } else if (QUOTES.includes(secret[0]) || QUOTES.includes(secret[secret.length - 1])) found.key = "Remove the quotes around the key: paste only the key itself.";
+  else if (/^bearer([\s:]|$)/i.test(secret)) found.key = "Paste only the key, without the word Bearer in front of it.";
   else if (secret.length > KEY_LIMIT) found.key = `That is too long (the limit is ${KEY_LIMIT} characters).`;
   else if (!SAFE.test(secret)) found.key = UNSAFE;
 

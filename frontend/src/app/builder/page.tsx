@@ -7,20 +7,33 @@ import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from
 import { api } from "@/lib/api";
 import { EXAMPLES, conversationalKinds, kindLabel, kindNoun, showKindPicker, statusInfo, withArticle } from "@/lib/builder";
 import { relativeTime } from "@/lib/format";
+import { useAuth } from "@/lib/useAuth";
 import { notifyStatusChanged, useAsync } from "@/lib/useAsync";
 import { useKinds } from "@/lib/useKinds";
 
 function ModelBanner({ onCheck }: { onCheck: () => void }) {
   const provider = useAsync(api.provider, "provider-banner");
+  const { hosted, user } = useAuth();
   if (!provider.data || provider.data.configured) return null;
   return (
     <Alert tone="warn" title="No AI model is set up yet">
       <p>{provider.data.detail}</p>
-      <p className="mt-2">
-        The builder needs a model. Put the settings in the <code className="font-mono">.env</code> file in the repository&apos;s root folder (the file{" "}
-        <code className="font-mono">.env.example</code> shows which): <code className="font-mono">LLM_PROVIDER</code>, <code className="font-mono">LLM_MODEL</code> and the
-        key for that provider. Keys are only ever read from that file or from the environment; this page never asks for one.
-      </p>
+      {hosted ? (
+        user ? (
+          <p className="mt-2">
+            The builder needs a model. Add your own model key in <Link href="/settings" className="underline">Settings</Link>: it is kept sealed on this server and used
+            only for what you start.
+          </p>
+        ) : (
+          <p className="mt-2">The builder needs a model. On a hosted server the owner sets it in the server&apos;s own environment (see docs/hosting.md), not on this page.</p>
+        )
+      ) : (
+        <p className="mt-2">
+          The builder needs a model. Put the settings in the <code className="font-mono">.env</code> file in the repository&apos;s root folder (the file{" "}
+          <code className="font-mono">.env.example</code> shows which): <code className="font-mono">LLM_PROVIDER</code>, <code className="font-mono">LLM_MODEL</code> and the
+          key for that provider. Keys are only ever read from that file or from the environment; this page never asks for one.
+        </p>
+      )}
       <div className="mt-2">
         <Button
           onClick={() => {

@@ -158,7 +158,36 @@ export interface ProviderStatus {
   /** The model behind each kind of work, and the other models asked when the first cannot answer. Absent from older servers. */
   tiers?: { tier: string; provider: string; model: string }[];
   fallbacks?: { provider: string; model: string }[];
+  /** Whose model it is, in the hosted version: the person's own, the server's (shared), or none for them. Absent from older servers and for the owner's local use. */
+  source?: "own" | "server" | "none";
+  /** The daily allowance on the server's shared model, when the host shares it with people who have no key of their own. */
+  allowance?: Allowance | null;
 }
+
+/** Model calls a person may make a day on the server's shared model, and how many they have made today (UTC). */
+export interface Allowance {
+  limit: number;
+  used: number;
+}
+
+/** What applies to one person about models (GET /api/me/model). Never a key, not even its end. */
+export interface MyModelView {
+  /** "owner": the server's own settings are used. "own": their saved key. "shared": the server's model, with an allowance. "none": nothing yet. */
+  mode: "owner" | "own" | "shared" | "none";
+  provider: string;
+  model: string;
+  key_saved: boolean;
+  /** When the key was saved (ISO text), or "". */
+  key_saved_at: string;
+  /** False when a saved key can no longer be opened (the server's access token changed): the person enters it again. */
+  key_readable: boolean;
+  allowance: Allowance | null;
+  /** The providers a person may choose from (never "custom"). */
+  providers: string[];
+  message: string;
+}
+
+export type SaveMyModelResult = { ok: true; view: MyModelView } | { ok: false; detail: string; problems: { name: string; message: string }[] };
 
 // ---- settings (docs/settings.md) -----------------------------------------------------------------------
 

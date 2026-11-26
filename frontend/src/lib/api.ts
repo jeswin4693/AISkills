@@ -1,7 +1,7 @@
 import type {
   AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  ModelCheckReport, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveResult, SaveSettingsResult, SettingsView, SkillSummary, SuggestRun,
-  SuggestRunSummary, VersionInfo,
+  ModelCheckReport, MyModelView, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
+  SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
 
 import { SIGNED_OUT_EVENT } from "./auth";
@@ -96,6 +96,19 @@ export const api = {
   },
   /** One tiny call to each model that is set up: it uses a little quota, so only when asked. */
   checkModels: () => post<ModelCheckReport>("/api/provider/check", {}),
+
+  // ---- a person's own model in the hosted version: a key goes in once and never comes back ----
+  myModel: () => get<MyModelView>("/api/me/model"),
+  /** 200 is the new state; 400 says which fields were refused and why (never repeating the key). */
+  async saveMyModel(choice: { provider: string; model: string; key: string }): Promise<SaveMyModelResult> {
+    const res = await send("/api/me/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(choice) });
+    const body = await json<MyModelView & { detail?: string; problems?: { name: string; message: string }[] }>(res, [400]);
+    if (res.status === 400) return { ok: false, detail: detailOf(body, "That was refused."), problems: body.problems ?? [] };
+    return { ok: true, view: body };
+  },
+  removeMyModel: async () => json<MyModelView>(await send("/api/me/model", { method: "DELETE" })),
+  /** One tiny call to the person's OWN model. */
+  testMyModel: () => post<ModelCheckReport>("/api/me/model/test", {}),
 
   // ---- the hosted version's sign-in (the local version never asks) ----
   authStatus: () => get<AuthStatus>("/api/auth/status"),

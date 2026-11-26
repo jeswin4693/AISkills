@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MyModel } from "@/components/settings/MyModel";
 import { SettingField } from "@/components/settings/SettingField";
 import { Alert, Badge, Button, Card, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -25,12 +26,12 @@ export default function SettingsPage() {
   const [checkError, setCheckError] = useState<Error | null>(null);
 
   if (loaded.error instanceof ApiError && loaded.error.status === 403) {
+    // The hosted version: the server's own settings are not edited here (a save would be written on the server), but a signed-in person keeps a model and
+    // key of their own, and the owner is told theirs is the server's own settings.
     return (
       <>
-        <PageHeader title="Settings" />
-        <Alert tone="info" title="Settings are managed by whoever runs this server">
-          <p>{loaded.error.message}</p>
-        </Alert>
+        <PageHeader title="Settings" subtitle="Choose the model you use and add its key. Your key is kept sealed on this server and used only for what you start." />
+        <MyModel />
       </>
     );
   }

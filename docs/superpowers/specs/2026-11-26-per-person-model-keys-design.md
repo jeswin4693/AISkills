@@ -1,6 +1,6 @@
 # Per-person model keys and limits (slice AI): design
 
-Status: **proposed, not built.** The owner's "card ok, go" covers the order of the four sub-projects (deploy kit, accounts, keys and limits, phone checks), **not** the choices below: they are mine, each marked *my call*, and can be changed.
+Status: **built (slice AI), see [../../per-person-keys.md](../../per-person-keys.md) for what was built and checked.** The owner's "card ok, go" covered the order of the four sub-projects (deploy kit, accounts, keys and limits, phone checks), **not** the choices below: they are mine, each marked *my call*, and can be changed.
 Depends on: accounts (slice AH, [accounts.md](../../accounts.md)).
 
 ## Intent

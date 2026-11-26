@@ -36,6 +36,7 @@ Turning hosted mode on changes nothing for local use: with no `SKILLFORGE_MODE`,
 | `SKILLFORGE_COOKIE_SECURE=1` | set on any https site, so the cookie is never sent over plain http |
 | `SKILLFORGE_DATA_DIR` | where the library, the database and the builds live (`/data` in the image): **keep it on a persistent disk** |
 | `SKILLFORGE_GOOGLE_CLIENT_ID`, `SKILLFORGE_ALLOWED_EMAILS` | optional, **both or neither**: "Sign in with Google" for other people, and who may sign in. Each person then has their own builds and library. See [accounts.md](accounts.md) |
+| `SKILLFORGE_SHARED_KEY_CALLS_PER_DAY` | optional, needs the two settings above: model calls a day a signed-in person **without** a key of their own may make on the server's model (a whole number, 0 or unset means not shared). People can always add their own key under Settings. See [per-person-keys.md](per-person-keys.md) |
 | `PORT` | the public port (the image uses 8080; many hosts set it for you) |
 | `LLM_PROVIDER`, `LLM_MODEL`, the key variables, `LLM_FALLBACKS`, `LLM_<TIER>_…` | the models, exactly as in [ai-engine.md](ai-engine.md) |
 
@@ -126,8 +127,9 @@ unreachable. `python -m skillforge models --test` (or `POST /api/provider/check`
 
 - **The access token is the owner's key.** Anyone with it has the owner's full access, including your model quota. Treat it like a password and
   change it if it leaks. With only the token there is one person and no audit log. **With Google sign-in** ([accounts.md](accounts.md)) other
-  people have their own data and cannot see each other's, but **everyone who signs in still spends the host's model key** (per-person keys are
-  not built yet), so the allow-list matters.
+  people have their own data and cannot see each other's. **By default a person with no key of their own cannot use your model at all** ([per-person-keys.md](per-person-keys.md)):
+  they add their own key under Settings, or you share your model with a daily cap per person (`SKILLFORGE_SHARED_KEY_CALLS_PER_DAY`). Whoever runs the server can still read
+  the keys people save (they are sealed under the access token you hold), so tell people to use a key with its own spending limit.
 - **The sign-in lock is global, and it is the access token's alone.** Someone who knows the address can keep sign-in **by token** locked for you by sending wrong tokens (you can
   still use the Bearer header, or wait a minute). Google sign-in has no such lock (nothing about a Google ticket can be guessed), so wrong tickets never lock anyone out,
   and a good Google sign-in does not reset a token guesser's count. Putting the site behind your host's own access controls closes the token one.

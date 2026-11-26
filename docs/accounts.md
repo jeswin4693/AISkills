@@ -33,7 +33,7 @@ Taking someone off `SKILLFORGE_ALLOWED_EMAILS` ends their access **on their very
 | Per person | Shared |
 |---|---|
 | Builder sessions and their jobs | Public GitHub repository copies (public code; **who** read which repository is per person) |
-| Suggestion runs, Testing Lab runs, quality reports | The server's model key (until per-person keys, the next slice) |
+| Suggestion runs, Testing Lab runs, quality reports | The server's own model, only when the host shares it with a daily cap; otherwise each person uses their own key ([per-person-keys.md](per-person-keys.md)) |
 | The library of every kind: skills, agents, plugins, MCP servers (`<data>/users/<id>/library…`) | The server's disk and CPU |
 | Model-call usage rows (each row says whose quota it used) | |
 
@@ -72,7 +72,7 @@ An **exact address** or `*` needs no Workspace. A refused person at a listed dom
 
 ## Limits (read these)
 
-- **Everyone who signs in spends the host's model key** (per-person keys and limits are the next slice). That is why an allow-list is mandatory, and `*` should only be used knowingly.
+- **Whose model a person's calls use is now their own choice** ([per-person-keys.md](per-person-keys.md)): by default a person with no key of their own cannot use the host's model at all; the host may share it with a daily cap. The allow-list is still mandatory (signing in proves who someone is, not that they are welcome), and `*` should only be used knowingly.
 - **A hosted copy still has no sandbox**: skills with scripts and MCP servers are built as drafts there, for everyone.
 - **One server process, one SQLite file**: fine for a few people, not for a crowd. PostgreSQL has never been tried with this app.
 - **No admin page**: the list of people is a setting. There is no account deletion, no teams and no sharing between people.

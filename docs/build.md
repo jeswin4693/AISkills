@@ -33,7 +33,11 @@ replaced unless you pass `--force`. Needs a provider key in `.env`, except `rend
 Not by the model. A fixed checklist decides: **goal, inputs, outputs, constraints, acceptance criteria,
 failure behavior**. The model only reads your words and fills in the checklist. To stop it filling gaps with
 plausible inventions, every item must carry a **quote copied from your own words**, and code verifies that the
-quote really appears in what you typed. An item with no verifiable quote counts as not answered, and you are
+quote really appears in what you typed. A quote is accepted when it is one unbroken piece of your words, **or a run of your own whole sentences joined together**
+(when one item is backed from two places, the description and a later answer, a model copies both sentences into its one quote); a quote with a sentence you never
+wrote, or with a changed word, is still refused. (A real build was stopped after 3 rounds because the model's quote for "constraints" joined two of the person's
+sentences from different paragraphs and the old rule wanted one unbroken piece: found by using the builder in a browser, fixed test-first, `tests/test_skill_requirements.py`.)
+An item with no verifiable quote counts as not answered, and you are
 asked about it. "None" counts as an answer for inputs and constraints, but only if you said so. A request that
 is a prompt, tool or agent rather than a skill is refused with an explanation.
 

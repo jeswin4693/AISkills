@@ -63,7 +63,7 @@ Only GET, POST and DELETE exist: the API's CORS policy allows nothing else.
 
 ## What was checked (2026-11-26)
 
-- **Backend: 3,704 tests passed, 4 skipped** (they need a Linux Docker), none failed; 104 of them are new for this slice (3 came from the review below and 3 from the first real sign-in). All offline, none reads the real `.env`.
+- **Backend: 3,708 tests passed, 4 skipped** (they need a Linux Docker), none failed; 104 of them are new for this slice (3 came from the review below and 3 from the first real sign-in). All offline, none reads the real `.env`.
 - **Web: 393 unit tests passed, the typecheck is clean.** The main real-browser suite (the real Edge browser against the real API, on side ports) **passed 100 of 100**.
 - **The hosted version at phone size** (`npm run e2e:phone`, a 390 px touch browser against a throwaway hosted server with a fake model, so no network and no real key): **29 of 29** checks, including a person saving a key, the key being nowhere on the page or in any of the 6 answers the server gave afterwards, a reload, testing it and removing it.
 - **40 deliberate breaks, all caught, and 1 browser break caught** (a break is a small wrong change made to the code on purpose, to see that a test fails; one that survives means a test is too weak). They include: a key stored in plain text, a key in an error message, the shared model borrowed by someone it is not shared with, an own-key call counted against the allowance, the gate removed, the in-flight slots removed, and `custom` offered to people.

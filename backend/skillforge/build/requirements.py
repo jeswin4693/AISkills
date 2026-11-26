@@ -6,6 +6,7 @@ answered only if the person's own words (verified as a quote) support it.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -73,6 +74,24 @@ def normalise(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def quote_is_theirs(quote: str, source: str) -> bool:
+    """Is this quote the person's own words? `quote` is as the model gave it; `source` is the person's words, already `normalise`d.
+
+    Either one unbroken piece of their words, or a run of THEIR WHOLE SENTENCES joined together. The second case is real: when one item is backed from two places
+    (the description, then a later answer) a model copies both sentences into its single quote, and the paragraphs between them are not part of it. A quote with
+    one sentence the person never wrote, or with a changed word, is still refused: every sentence has to be theirs, so nothing can be invented through it."""
+    text = normalise(quote)
+    if len(text) < 3:
+        return False
+    if text in source:
+        return True
+    parts = [p for p in _SENTENCE_END.split(text) if p]
+    return len(parts) > 1 and all(len(p) >= 3 and p in source for p in parts)
+
+
 def verify_extraction(ext: Extraction, user_words: str, rounds: int) -> tuple[RequirementSpec, list[str]]:
     """Keep a slot only when its quote really appears in the person's words."""
     spec = RequirementSpec(kind=ext.kind, user_words=user_words, rounds=rounds)
@@ -83,8 +102,7 @@ def verify_extraction(ext: Extraction, user_words: str, rounds: int) -> tuple[Re
         values = [v.strip() for v in part.values if v.strip()]
         if not values:
             continue
-        quote = normalise(part.quote)
-        if len(quote) < 3 or quote not in source:
+        if not quote_is_theirs(part.quote, source):
             notes.append(f"{slot}: the supporting quote is not in your words, so it counts as not answered.")
             continue
         spec.quotes[slot] = part.quote.strip()

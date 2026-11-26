@@ -138,3 +138,59 @@ def test_extract_spec_fences_the_words_and_cannot_be_closed_early():
     assert prompt.count("</user_words>") == 1 and prompt.startswith("<user_words>")
     assert "data written by a person" in mock.calls[0]["system"]
     assert calls == 1 and spec.rounds == 2
+
+
+# ---- found by a REAL build in the browser (2026-11-26): one item supported from two places ------------------------------------------------------
+# The model understood every rule the person gave, but its ONE quote for "constraints" joined sentences from the description and from a later answer
+# (the paragraphs between them are not part of the quote), so the whole quote was "not in your words" and the build stopped after 3 rounds.
+# A quote is the person's own words if each of its sentences is theirs; an invented sentence still sinks it.
+
+SPREAD = (
+    "A skill that finds duplicate functions in a TypeScript repository. It must never edit files. It works when every duplicate pair is listed.\n"
+    "Used by developers on a small team.\n"
+    "If the path is not readable it stops and says so.\n"
+    "It writes in English only and never invents ticket numbers."
+)
+
+
+def test_a_quote_made_of_the_persons_own_sentences_from_different_places_is_kept():
+    ext = extraction(constraints=slot(["never edit files", "English only"], "It must never edit files. It writes in English only and never invents ticket numbers."))
+    spec, notes = verify_extraction(ext, SPREAD, rounds=2)
+    assert [n for n in notes if n.startswith("constraints")] == [] and spec.constraints == ["never edit files", "English only"]  # (the helper's other slots quote another text)
+    assert spec.quotes["constraints"].startswith("It must never edit files.")
+
+
+def test_one_invented_sentence_among_real_ones_still_sinks_the_quote():
+    ext = extraction(constraints=slot(["never edit files", "fast"], "It must never edit files. It must also finish in under a second."))
+    spec, notes = verify_extraction(ext, SPREAD, rounds=2)
+    assert spec.constraints == [] and "constraints" not in spec.quotes
+    assert any("constraints" in n and "not in your words" in n for n in notes)
+
+
+def test_a_sentence_with_a_changed_word_sinks_the_quote_too():
+    ext = extraction(constraints=slot(["never edit files"], "It must never delete files. It writes in English only and never invents ticket numbers."))
+    spec, _ = verify_extraction(ext, SPREAD, rounds=2)
+    assert spec.constraints == []
+
+
+def test_the_quote_a_real_model_gave_for_a_real_build_is_kept():
+    words = (
+        "A skill that turns a rough description of a code change into a git commit message. The first line must be at most 50 characters, start with a type word "
+        "(feat, fix, docs or chore), use the imperative mood, and not end with a period. Optionally add a short body explaining why.\n"
+        'Given the description "fixed the login button being misaligned on mobile", it replies with only a commit message whose first line is "fix: align login button '
+        'on mobile". The first line is at most 50 characters. It starts with one of feat, fix, docs or chore followed by a colon. It uses the imperative mood, for example '
+        '"add" and not "added". The first line does not end with a period.\n'
+        'If the description is empty, it replies "Please describe the change" and writes no commit message. If the description is too vague to tell what changed, such as '
+        '"stuff", it asks one short question instead of guessing. If the description is long, it still writes a first line of at most 50 characters and puts the details '
+        "in the body. It never invents details that are not in the description.\n"
+        "It writes in English only. It must never repeat secrets such as passwords or API keys that appear in the description, never invent ticket numbers or file names, "
+        "and never use emoji. The first line is at most 50 characters and every body line is at most 72 characters. It replies with only the commit message and nothing else."
+    )
+    quote = (
+        "The first line must be at most 50 characters, start with a type word (feat, fix, docs or chore), use the imperative mood, and not end with a period. "
+        "Optionally add a short body explaining why. It writes in English only. It must never repeat secrets such as passwords or API keys that appear in the description, "
+        "never invent ticket numbers or file names, and never use emoji. The first line is at most 50 characters and every body line is at most 72 characters. "
+        "It replies with only the commit message and nothing else."
+    )
+    spec, notes = verify_extraction(extraction(constraints=slot(["The first line must be at most 50 characters", "never use emoji"], quote)), words, rounds=3)
+    assert [n for n in notes if n.startswith("constraints")] == [] and spec.constraints and "constraints" not in check_completeness(spec).missing

@@ -20,7 +20,7 @@ V = TypeVar("V")
 # (HTTP 413, a context-length error): the caller can send less, and trying again with the same request cannot help.
 ErrorKind = Literal[
     "auth", "model_missing", "bad_request", "rate_limit", "quota", "overloaded", "timeout", "connection",
-    "invalid_output", "too_long", "input_too_large", "refused", "budget", "other",
+    "invalid_output", "too_long", "input_too_large", "refused", "budget", "allowance", "other",
 ]
 
 

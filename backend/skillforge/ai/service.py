@@ -94,12 +94,16 @@ class AIService:
         max_calls: int | None = None,
         cache: ResponseCache | None = None,
         _counters: _Counters | None = None,
+        gate: Callable[[], None] | None = None,
     ) -> None:
         self.profiles = profiles
         self.policy = policy
         self.recorder = recorder
         self.max_calls = max_calls
         self.cache = cache
+        # Runs before EVERY attempt at a model (a retry is an attempt) and may raise a ProviderError to stop it: a person's daily allowance on the
+        # server's model is checked here (builder/model_access.py). Its error kind ("allowance") never hands over to a backup model.
+        self.gate = gate
         self._sleep = sleep
         self._rng = rng
         self._counters = _counters or _Counters()
@@ -125,11 +129,11 @@ class AIService:
         the old retry counts, and no pauses between attempts."""
         return cls(ProfileSet(Profile("default", provider, CallOptions())), policy=NO_WAIT, sleep=lambda seconds: None)
 
-    def with_recorder(self, recorder: UsageRecorder) -> AIService:
-        """The same models and rules, a recorder for this run, and fresh counters."""
+    def with_recorder(self, recorder: UsageRecorder, *, gate: Callable[[], None] | None = None) -> AIService:
+        """The same models and rules, a recorder for this run, and fresh counters. A `gate` given here replaces this service's own; none keeps it."""
         return AIService(
             self.profiles, policy=self.policy, recorder=recorder, sleep=self._sleep, rng=self._rng, max_calls=self.max_calls,
-            cache=self.cache,
+            cache=self.cache, gate=gate if gate is not None else self.gate,
         )
 
     def escalated(self) -> AIService | None:
@@ -140,7 +144,7 @@ class AIService:
             return None
         return AIService(
             ProfileSet(profile), policy=self.policy, recorder=self.recorder, sleep=self._sleep, rng=self._rng,
-            max_calls=self.max_calls, cache=self.cache, _counters=self._counters,
+            max_calls=self.max_calls, cache=self.cache, _counters=self._counters, gate=self.gate,
         )
 
     @property
@@ -258,6 +262,8 @@ class AIService:
         return Generation(provider.generate_structured(schema, prompt, system=system))  # a bare provider reports no usage
 
     def _guard(self, profile: Profile, system: str | None, prompt: str) -> None:
+        if self.gate is not None:
+            self.gate()  # before anything is counted or sent: a refused attempt is not an attempt
         if self.max_calls is not None and self.usage.calls >= self.max_calls:
             raise ProviderError(
                 f"Stopped: this run has used its limit of {self.max_calls} model calls (LLM_MAX_CALLS).", kind="budget"

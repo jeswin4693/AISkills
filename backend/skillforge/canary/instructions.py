@@ -15,7 +15,7 @@ import yaml
 
 from ..evaluate.runner import tests_of
 from ..validate.static import TEXT_SUFFIXES, split_tools
-from .judge import SkillContext
+from .judge import SkillContext, safe
 
 MAX_BUNDLED_FILE = 20_000  # characters; a longer file is not offered to the agent
 MAX_BUNDLED_FILES = 40
@@ -72,7 +72,7 @@ def load_instructions(files: Mapping[str, str | bytes]) -> Instructions:
         front = None
     front = front if isinstance(front, dict) else {}
     raw_name, raw_description = front.get("name"), front.get("description")
-    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else kind
+    name = safe(raw_name.strip()) if isinstance(raw_name, str) and raw_name.strip() else kind  # the author chose it, and it is printed in every report
     description = raw_description if isinstance(raw_description, str) else ""
     shipped: dict[str, str] = {}
     for rel in sorted(files):

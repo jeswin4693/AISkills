@@ -22,6 +22,7 @@ from ..ai.tasks import Task
 from ..providers.base import LLMProvider, ProviderError
 from ..providers.retry import generate_with_retry
 from .instructions import Instructions
+from .judge import safe
 
 MAX_DERIVED = 3  # tasks taken from the skill itself; two fixed tasks are always kept
 MIN_FIXED = 2
@@ -36,6 +37,9 @@ class Scenario:
     id: str
     message: str  # what the person says
     source: str  # "fixed", "test case" or "drafted from the description"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "message", safe(self.message))  # a test message comes from the skill's author and is printed in every report
 
 
 FIXED: tuple[Scenario, ...] = (

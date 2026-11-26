@@ -37,10 +37,10 @@ def run_view(row: SuggestRun) -> dict:
 
 
 class SuggestRuns:
-    def __init__(self, db: Database, runner: JobRunner, provider_factory: Callable[[], LLMProvider]) -> None:
+    def __init__(self, db: Database, runner: JobRunner, provider_for: Callable[[str], LLMProvider]) -> None:
         self.db = db
         self.runner = runner
-        self.provider_factory = provider_factory
+        self.provider_for = provider_for  # the model for a person's run, by their id (ModelAccess.provider_for): the owner's, their own, or the shared one
 
     def _row(self, s, rid: str, user: str | None) -> SuggestRun:
         """A run, if it is `user`'s. Someone else's is "no such run", the very answer for one that never existed. `user` has no default so a caller cannot forget it;
@@ -120,9 +120,9 @@ class SuggestRuns:
         """Run one suggestion pass and record how it ended. Never raises: a thread pool would swallow it."""
         with self.db.session() as s:
             row = self._row(s, rid, None)  # a background job acts for the run's own owner
-            repo, focus, with_ideas = row.repo, row.focus, row.with_ideas
+            repo, focus, with_ideas, owner = row.repo, row.focus, row.with_ideas, row.user_id
         try:
-            provider = self.provider_factory()
+            provider = self.provider_for(owner)  # whose spending this is: the person the run belongs to
             try:
                 found = resolve_repo(repo)  # a link not used for a while is downloaded again
             except BuilderError as exc:  # the folder is gone, or GitHub could not be reached: said without any path

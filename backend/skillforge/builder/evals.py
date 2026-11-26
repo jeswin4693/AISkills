@@ -97,12 +97,12 @@ def run_view(row: EvalRun, *, full: bool = True) -> dict:
 
 class EvalRuns:
     def __init__(
-        self, db: Database, runner: JobRunner, provider_factory: Callable[[], LLMProvider], library: Library,
+        self, db: Database, runner: JobRunner, provider_for: Callable[[str], LLMProvider], library: Library,
         library_for: Callable[[str], Library] | None = None,
     ) -> None:
         self.db = db
         self.runner = runner
-        self.provider_factory = provider_factory
+        self.provider_for = provider_for  # the model for a person's run, by their id (ModelAccess.provider_for)
         self.library = library  # the owner's
         self.library_for = library_for  # a person's, by id
 
@@ -239,7 +239,7 @@ class EvalRuns:
             row = self._row(s, rid, None)  # a background job acts for the run's own owner
             name, version, kind, runs, baseline, owner = row.name, row.version, row.kind, row.runs, row.baseline, row.user_id
         try:
-            provider = self.provider_factory()
+            provider = self.provider_for(owner)  # whose spending this is: the person the run belongs to
             _, skill = self._load(name, version, kind, owner)
             report = run_eval(provider, skill, baseline=baseline, runs=runs, on_case=lambda done, total: self._progress(rid, done, total))
             self._finish(rid, "done", result=report_view(report))

@@ -20,7 +20,7 @@ from test_skill_build import draft, round_two
 
 from skillforge.ai import AIService
 from skillforge.api import create_app
-from skillforge.builder import Builder, JobRunner, SessionNotFound
+from skillforge.builder import Builder, JobRunner, ModelOptions, SessionNotFound
 from skillforge.builder.suggestions import SuggestRuns
 from skillforge.db import BuildSession, Database, EvalRun, ModelCall, SuggestRun, now_text
 from skillforge.library import Library, LibraryError
@@ -46,7 +46,7 @@ class Parked:
 
 
 class World:
-    def __init__(self, tmp_path, responses=(), *, service: bool = False, runner=None):
+    def __init__(self, tmp_path, responses=(), *, service: bool = False, runner=None, options: ModelOptions | None = None):
         self.tmp = tmp_path
         self.db = Database(f"sqlite:///{(tmp_path / 't.db').as_posix()}")
         self.db.migrate()
@@ -55,6 +55,8 @@ class World:
         self.builder = Builder(
             self.db, self.library, tmp_path / "builds", provider_factory=(lambda: AIService.single(self.mock)) if service else (lambda: self.mock),
             runner=runner or JobRunner(inline=True), sandbox_note=lambda: "unavailable. (test)",
+            # These tests are about who can see what, not about key policy: unless a test says otherwise, people may use the shared mock model.
+            model_options=options if options is not None else ModelOptions(shared_calls_per_day=1_000_000),
         )
         self.app = create_app(self.library, builder=self.builder, hosted=hosted(allowed_emails=frozenset({"*"})), google_keys=keys)
         self.libraries: Libraries = self.app.state.libraries
@@ -293,7 +295,7 @@ def test_a_second_click_on_the_same_folder_never_hands_out_somebody_elses_sugges
     folder = tmp_path / "repo"
     folder.mkdir()
     (folder / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
-    runs = SuggestRuns(w.db, Parked(), lambda: w.mock)
+    runs = SuggestRuns(w.db, Parked(), lambda user: w.mock)
     mine, theirs = runs.start(str(folder), user="u" * 32), runs.start(str(folder), user="v" * 32)
     assert mine["id"] != theirs["id"] and runs.start(str(folder), user="u" * 32)["id"] == mine["id"]
 
@@ -309,7 +311,7 @@ def seed_runs(w: World):
 def test_suggestion_runs_are_private_too(world):
     w = world()
     seed_runs(w)
-    runs = SuggestRuns(w.db, JobRunner(inline=True), lambda: w.mock)
+    runs = SuggestRuns(w.db, JobRunner(inline=True), lambda user: w.mock)
     assert [r["id"] for r in runs.list(user="u" * 32)] == ["b" * 32] and [r["id"] for r in runs.list()] == ["a" * 32]  # no user: the owner's
     assert runs.get("b" * 32, user="u" * 32)["id"] == "b" * 32
     for call in (lambda: runs.get("b" * 32, user="v" * 32), lambda: runs.get("b" * 32), lambda: runs.seed_for("b" * 32, 0, user="v" * 32),
@@ -331,7 +333,7 @@ def test_a_builder_with_no_way_to_find_a_persons_library_refuses_rather_than_use
     with pytest.raises(BuilderError):
         bare._library("u" * 32)
     with pytest.raises(BuilderError):
-        EvalRuns(db, JobRunner(inline=True), lambda: MockProvider([]), owner_library)._library("u" * 32)
+        EvalRuns(db, JobRunner(inline=True), lambda user: MockProvider([]), owner_library)._library("u" * 32)
     bare.runner.shutdown()
     db.close()
 

@@ -7,7 +7,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from ..ai.doctor import check_models
-from ..builder import Builder, env_provider, provider_status
+from ..builder import Builder, ModelOptions, env_provider, provider_status
+from ..builder.keybox import KeyBox
+from ..db import LOCAL_USER_ID
 from ..providers import ProviderError
 from .scope import user_id
 from .views import import_view
@@ -58,11 +60,19 @@ class SaveBody(BaseModel):
     note: str = Field(default="", max_length=200)
 
 
+def model_options(hosted) -> ModelOptions:
+    """What a hosted server lets its people do about models: keep a key of their own (sealed under the access token) and, if the host chooses, share the
+    server's model with a daily cap. Local use has neither: there is only the owner."""
+    if hosted is None:
+        return ModelOptions()
+    return ModelOptions(keybox=KeyBox(hosted.token), shared_calls_per_day=hosted.shared_calls_per_day)
+
+
 def get_builder(app: FastAPI) -> Builder:
     """The builder, made on first use: a server that is only used for the library never opens the database."""
     with app.state.builder_lock:
         if app.state.builder is None:
-            app.state.builder = Builder.default(app.state.library, app.state.libraries.for_user)
+            app.state.builder = Builder.default(app.state.library, app.state.libraries.for_user, model_options(app.state.hosted))
         return app.state.builder
 
 
@@ -74,14 +84,21 @@ def builds_router() -> APIRouter:
 
     @r.get("/provider")
     def provider(request: Request) -> dict:
-        """Is a model set up, and which. Never a key, and no call to the model."""
+        """Is a model set up FOR THIS PERSON, and which. Never a key, and no call to the model. The owner (and everyone, in local use) sees the server's own
+        model, as always; a signed-in person sees their own model, the shared one, or that none is set up for them."""
+        who = user_id(request)
+        if who != LOCAL_USER_ID:
+            return builder(request).access.status_for(who)
         existing = request.app.state.builder
-        return provider_status(existing.provider_factory if existing else env_provider)
+        return {**provider_status(existing.provider_factory if existing else env_provider), "source": "server", "allowance": None}
 
     @r.post("/provider/check")
     def provider_check(request: Request) -> dict:
         """One tiny call to each distinct model that is set up, so a person can see that each key and model really works.
-        It uses a little quota, so it runs only when asked. Never returns a key."""
+        It uses a little quota, so it runs only when asked. Never returns a key. For a signed-in person it tries THEIR OWN model only."""
+        who = user_id(request)
+        if who != LOCAL_USER_ID:
+            return builder(request).access.test(who)
         existing = request.app.state.builder
         factory = existing.provider_factory if existing else env_provider
         try:

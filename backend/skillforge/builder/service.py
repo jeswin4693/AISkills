@@ -24,7 +24,6 @@ from sqlalchemy import delete, select, update
 
 from ..build.pipeline import BuildError, apply_answers, check_description, sandbox_note as default_sandbox_note
 from ..build.requirements import Question
-from ..ai import AIService
 from ..build.scripts import ScriptRunner
 from ..db import LOCAL_USER_ID, BuildSession, Database, Job, ModelCall, now_text
 from ..graph.store import data_dir
@@ -35,10 +34,11 @@ from ..validate.static import read_dir
 from .errors import BadRequest, BuilderError, SessionNotFound, WrongState
 from .evals import EvalRuns
 from .jobs import JobRunner
+from .model_access import ModelAccess, ModelOptions
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
 from .suggestions import SuggestRuns
-from .usage import DbUsageRecorder, usage_summary
+from .usage import usage_summary
 
 MAX_ROUNDS = 3
 MAX_EVENTS = 50
@@ -51,24 +51,29 @@ class Builder:
         self, database: Database, library: Library, builds_root: Path, *,
         provider_factory: Callable[[], LLMProvider] = env_provider, runner: JobRunner | None = None,
         sandbox_note: Callable[[], str] = default_sandbox_note, script_runner: ScriptRunner | None = None,
-        library_for: Callable[[str], Library] | None = None,
+        library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(),
     ) -> None:
         self.db = database
         self.library = library  # the owner's library
         self.library_for = library_for  # a person's library, by their id (the API sets it); without it only the owner has one
         self.builds_root = Path(builds_root)
-        self.provider_factory = provider_factory
+        self.provider_factory = provider_factory  # the SERVER's model, the owner's; a person's is decided by `access`
         self.runner = runner or JobRunner()
         self.sandbox_note = sandbox_note
         self.script_runner = script_runner
+        # Which model each person's calls use, and whether they may use it now (slice AI). It looks `provider_factory` up when asked, not once, because
+        # the server's model can be changed while it runs (a fixed .env is seen at once).
+        self.access = ModelAccess(self.db, lambda: self.provider_factory(), model_options)
 
     @classmethod
-    def default(cls, library: Library, library_for: Callable[[str], Library] | None = None) -> "Builder":
+    def default(
+        cls, library: Library, library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(),
+    ) -> "Builder":
         """The real thing: the SQLite file in the per-user data folder, migrated, with interrupted work marked."""
         db = Database()
         db.migrate()
         db.recover_interrupted()
-        return cls(db, library, data_dir() / "builds", library_for=library_for)
+        return cls(db, library, data_dir() / "builds", library_for=library_for, model_options=model_options)
 
     def _library(self, user_id: str) -> Library:
         """The library of whoever owns a session. Fails closed: with no resolver only the owner has a library, never a shared one for everybody."""
@@ -81,12 +86,12 @@ class Builder:
     @property
     def suggestions(self) -> SuggestRuns:
         """Suggestion runs for a repository, sharing this builder's database, job runner and model."""
-        return SuggestRuns(self.db, self.runner, self.provider_factory)
+        return SuggestRuns(self.db, self.runner, self.access.provider_for)
 
     @property
     def evals(self) -> EvalRuns:
         """Testing Lab runs: a skill's test cases asked of a model in the background, sharing this builder's database, job runner, model and each person's library."""
-        return EvalRuns(self.db, self.runner, self.provider_factory, self.library, self._library)
+        return EvalRuns(self.db, self.runner, self.access.provider_for, self.library, self._library)
 
     def close(self) -> None:
         self.runner.shutdown()
@@ -308,9 +313,8 @@ class Builder:
             self._fail(sid, job_id, f"Unexpected error ({type(exc).__name__}): {str(exc)[:300]}", False)
 
     def _provider(self, sid: str, job_id: int, user_id: str) -> LLMProvider:
-        """The model for one job. The AI service is given a recorder, so every attempt is counted for this session and for the person it belongs to."""
-        provider = self.provider_factory()
-        return provider.with_recorder(DbUsageRecorder(self.db, sid, job_id, user_id)) if isinstance(provider, AIService) else provider
+        """The model for one job: whichever model this session's owner is to use, with every attempt counted for this session and for them."""
+        return self.access.provider_for(user_id, session_id=sid, job_id=job_id)
 
     def _understand(self, sid: str, progress: Callable[[str], None], job_id: int) -> None:
         with self.db.session() as s:

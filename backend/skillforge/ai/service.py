@@ -262,8 +262,6 @@ class AIService:
         return Generation(provider.generate_structured(schema, prompt, system=system))  # a bare provider reports no usage
 
     def _guard(self, profile: Profile, system: str | None, prompt: str) -> None:
-        if self.gate is not None:
-            self.gate()  # before anything is counted or sent: a refused attempt is not an attempt
         if self.max_calls is not None and self.usage.calls >= self.max_calls:
             raise ProviderError(
                 f"Stopped: this run has used its limit of {self.max_calls} model calls (LLM_MAX_CALLS).", kind="budget"
@@ -275,6 +273,10 @@ class AIService:
                     f"Not sent: the request is about {estimate} tokens, over the limit of {profile.max_input_tokens} "
                     "(LLM_MAX_INPUT_TOKENS).", kind="too_long",
                 )
+        if self.gate is not None:
+            # LAST, so a slot a gate reserves is taken only for an attempt that really goes out: before anything is counted or sent, a refused attempt is
+            # not an attempt (builder/model_access.py reserves in-flight slots here and gives them back when the attempt's usage row is written).
+            self.gate()
 
     def _count_call(self) -> None:
         with self._counters.lock:

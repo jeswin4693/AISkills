@@ -6,6 +6,8 @@ Offline: a fake `build` stands in for the real provider (and records exactly wha
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -28,12 +30,24 @@ KEY = "AIzaSyDistinctiveFakeKeyForTests_0123456789"
 NOON = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc)
 
 
+class Slow(Fake):
+    """A model that takes a moment to answer, so several runs are really in flight together."""
+
+    def __init__(self, *args, delay: float = 0.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.delay = delay
+
+    def generate(self, *args, **kwargs):
+        time.sleep(self.delay)
+        return super().generate(*args, **kwargs)
+
+
 class World:
-    def __init__(self, tmp_path, *, shared: int = 0, keybox: bool = True, token: str = TOKEN, clock=None):
+    def __init__(self, tmp_path, *, shared: int = 0, keybox: bool = True, token: str = TOKEN, clock=None, delay: float = 0.0):
         self.db = Database(f"sqlite:///{(tmp_path / 'a.db').as_posix()}")
         self.db.migrate()
         self.built: list[dict] = []
-        self.server = Fake([gen()] * 60, name="server", model="server-1")
+        self.server = Slow([gen()] * 60, name="server", model="server-1", delay=delay)
         self.own = Fake([gen()] * 60, name="own", model="own-1")
 
         def build(env_mapping):
@@ -54,9 +68,9 @@ class World:
             found = s.execute(select(ModelCall).where(ModelCall.user_id == user).order_by(ModelCall.id)).scalars().all()
             return [(r.key_source, r.task, r.status, r.session_id) for r in found]
 
-    def add_row(self, user: str, created_at: datetime, source: str = "server") -> None:
+    def add_row(self, user: str, created_at: datetime, source: str = "server", status: str = "ok") -> None:
         with self.db.session() as s:
-            s.add(ModelCall(created_at=created_at.isoformat(timespec="milliseconds"), task="act", tier="actor", provider="p", model="m", attempt=1, status="ok",
+            s.add(ModelCall(created_at=created_at.isoformat(timespec="milliseconds"), task="act", tier="actor", provider="p", model="m", attempt=1, status=status,
                             error_kind="", latency_ms=1, user_id=user, key_source=source))
 
 
@@ -183,6 +197,46 @@ def test_the_allowance_is_enforced_on_every_attempt_so_providers_made_separately
     with pytest.raises(ProviderError):
         ask(second)
     assert len(w.server.calls) == 2
+    w.db.close()
+
+
+def test_runs_started_at_the_same_moment_cannot_each_take_the_whole_allowance(tmp_path):
+    w = World(tmp_path, shared=3, delay=0.05)  # each answer takes 50 ms: all six really are in flight together
+    ada = w.person()
+    done: list[int] = []
+    refused: list[str] = []
+
+    def run() -> None:
+        try:
+            ask(w.access.provider_for(ada))
+            done.append(1)
+        except ProviderError as exc:
+            refused.append(exc.kind)
+
+    threads = [threading.Thread(target=run) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(done) == 3 and refused == ["allowance"] * 3  # exactly the allowance, not six
+    assert len(w.server.calls) == 3 and w.access.used_today(ada) == 3
+    w.db.close()
+
+
+def test_a_slot_that_was_never_released_is_forgotten_after_a_while(tmp_path):
+    w = World(tmp_path, shared=1)
+    ada = w.person()
+    w.access._inflight[ada] = [time.monotonic() - 10_000]  # an attempt that died without writing its row, long ago
+    ask(w.access.provider_for(ada))  # must not be locked out for ever by it
+    w.db.close()
+
+
+def test_a_cache_hit_costs_nothing_so_it_neither_counts_nor_gives_back_a_slot(tmp_path):
+    w = World(tmp_path, shared=2, clock=lambda: NOON)
+    ada = w.person()
+    for _ in range(5):
+        w.add_row(ada, NOON - timedelta(hours=1), status="cache")  # never reached a model
+    assert w.access.used_today(ada) == 0
     w.db.close()
 
 

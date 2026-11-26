@@ -15,13 +15,15 @@ A key is never returned by anything here, not even its end.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 
-from ..ai import AIService, service_from_env
+from ..ai import AIService, UsageRecord, service_from_env
 from ..ai.doctor import check_models
 from ..db import LOCAL_USER_ID, Database, ModelCall
 from ..db.user_models import ModelStore, StoredModel
@@ -36,6 +38,7 @@ NO_KEY = (
     "This server's model is not shared with you. Add your own model key in Settings (My model), then try again."
 )
 OWNER_NOTE = "You are the owner of this server: its own model settings are used, and nothing here applies to you."
+INFLIGHT_SECONDS = 600.0  # an attempt that never wrote its usage row (it died) stops holding a slot after this long: longer than any model call is allowed to take
 
 
 class ModelAccessError(Exception):
@@ -54,12 +57,29 @@ class ModelOptions:
     clock: Callable[[], datetime] = utc_now  # tests replace it to cross midnight
 
 
+class _GivesBackASlot(DbUsageRecorder):
+    """A usage recorder that, once an attempt's row is written, gives back the in-flight slot the allowance gate took for it."""
+
+    def __init__(self, *args, release: Callable[[], None], **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._release = release
+
+    def record(self, rec: UsageRecord) -> None:
+        try:
+            super().record(rec)
+        finally:
+            if rec.status != "cache":  # a cache hit never took a slot: it never reached a model
+                self._release()
+
+
 class ModelAccess:
     def __init__(self, db: Database, server_provider: Callable[[], LLMProvider], options: ModelOptions = ModelOptions()) -> None:
         self.db = db
         self.server_provider = server_provider  # the owner's model: the server's own settings (builder.provider.env_provider)
         self.options = options
         self.store = ModelStore(db)
+        self._lock = threading.Lock()
+        self._inflight: dict[str, list[float]] = {}  # per person: when each attempt that has passed the gate but not yet written its row began
 
     # ---- the model for one person ------------------------------------------------------------------------------
 
@@ -78,7 +98,11 @@ class ModelAccess:
         if gate is not None and not isinstance(provider, AIService):
             provider = AIService.single(provider)  # a bare provider has no place to put a gate
         if isinstance(provider, AIService):
-            return provider.with_recorder(DbUsageRecorder(self.db, session_id, job_id, user_id, source), gate=gate)
+            if gate is None:
+                recorder: DbUsageRecorder = DbUsageRecorder(self.db, session_id, job_id, user_id, source)
+            else:
+                recorder = _GivesBackASlot(self.db, session_id, job_id, user_id, source, release=lambda: self._release(user_id))
+            return provider.with_recorder(recorder, gate=gate)
         return provider
 
     def _own_provider(self, user_id: str, stored: StoredModel) -> LLMProvider:
@@ -113,20 +137,35 @@ class ModelAccess:
             return s.execute(
                 select(func.count()).select_from(ModelCall).where(
                     ModelCall.user_id == user_id, ModelCall.key_source == "server", ModelCall.created_at >= midnight,
+                    ModelCall.status != "cache",  # an answer served from the cache never reached a model: it costs nothing
                 )
             ).scalar_one()
 
     def _gate(self, user_id: str) -> Callable[[], None]:
         limit = self.options.shared_calls_per_day
 
-        def gate() -> None:  # runs before every attempt: the count is of ROWS, so providers made separately share one allowance
-            if self.used_today(user_id) >= limit:
-                raise ProviderError(
-                    f"You have used today's allowance of {limit} model calls on this server's model (it resets at midnight UTC). "
-                    "Add your own model key in Settings to go on.", kind="allowance", retryable=True,
-                )
+        def gate() -> None:
+            # Runs before every attempt. Rows written + attempts still in flight: the count of rows alone would let six runs that start at the same instant
+            # all see "none used" and all go. A slot is taken here and given back when the attempt's row is written (see _GivesBackASlot).
+            with self._lock:
+                now = time.monotonic()
+                held = [t for t in self._inflight.get(user_id, []) if now - t < INFLIGHT_SECONDS]
+                if self.used_today(user_id) + len(held) >= limit:
+                    self._inflight[user_id] = held
+                    raise ProviderError(
+                        f"You have used today's allowance of {limit} model calls on this server's model (it resets at midnight UTC). "
+                        "Add your own model key in Settings to go on.", kind="allowance", retryable=True,
+                    )
+                held.append(now)
+                self._inflight[user_id] = held
 
         return gate
+
+    def _release(self, user_id: str) -> None:
+        with self._lock:
+            held = self._inflight.get(user_id)
+            if held:
+                held.pop(0)
 
     def _allowance(self, user_id: str) -> dict | None:
         limit = self.options.shared_calls_per_day

@@ -53,8 +53,11 @@ Local use, the access token and a Bearer header are all **the owner** (`local`),
 3. Copy the **Client ID** into `SKILLFORGE_GOOGLE_CLIENT_ID` on the host, and list the people in `SKILLFORGE_ALLOWED_EMAILS`.
 4. Open the site: the sign-in page shows **Sign in with Google**, with "Owner of this server? Use the access token" underneath.
 
-To try it on your own computer: run the API in hosted mode with those settings (`SKILLFORGE_MODE=hosted`, a 20+ character `SKILLFORGE_ACCESS_TOKEN`, the Client ID, the allow-list, `SKILLFORGE_ALLOWED_HOSTS=localhost`)
-and the web app on port 3000 (`http://localhost:3000` is the origin you authorised). Do not stop servers you already have running on those ports.
+To try it on your own computer, the page and the API must share **one address** (the session is a cookie, and a browser does not keep one between two addresses), so do **not** use `npm run dev`.
+Run the API in hosted mode (`SKILLFORGE_MODE=hosted`, a 20+ character random `SKILLFORGE_ACCESS_TOKEN`, `SKILLFORGE_GOOGLE_CLIENT_ID`, `SKILLFORGE_ALLOWED_EMAILS`, `SKILLFORGE_ALLOWED_HOSTS=localhost,127.0.0.1`) with `python -m skillforge serve --port 8000`,
+then build and start the web app so it forwards `/api` to it: `NEXT_PUBLIC_API_URL=same-origin SKILLFORGE_PROXY_API=http://127.0.0.1:8000 npm run build`, then `npm run start`, and open exactly `http://localhost:3000` (the origin you authorised; `127.0.0.1` would not match).
+Settings in angle brackets in any example are placeholders to replace, never to paste: a placeholder as `SKILLFORGE_ALLOWED_EMAILS` is refused, and one as the access token would be accepted as a (guessable) token.
+A single address in `SKILLFORGE_ALLOWED_EMAILS` lets only that address in; **`*` lets any Google account in, and each person's first sign-in creates their own account**. A Google project left in *Testing* status also admits only the test users listed in its console. Do not stop servers you already have running on those ports.
 
 ## What the judge of a ticket refuses (each has its own code, for tests and logs)
 

@@ -79,3 +79,63 @@ def test_a_discarded_sessions_usage_rows_are_kept_for_the_owner_too(tmp_path):
         assert len(rows) == 1 and rows[0].session_id is None and rows[0].user_id == "local"
     finally:
         db.close()
+
+
+# ---- found by a REAL sign-in, not by the review or the 3,700 tests (2026-11-26) ---------------------------------------------------------------
+# `skillforge serve` (which the Docker image runs) built its own Builder with no ModelOptions, so on a real hosted server Settings -> My model answered
+# "This server cannot keep personal model keys." and SKILLFORGE_SHARED_KEY_CALLS_PER_DAY did nothing. Every test built its Builder by hand and none ran `serve`.
+
+SERVE_TOKEN = "a-long-enough-access-token-1234567890"
+
+
+def run_serve(monkeypatch, tmp_path, **env):
+    """Runs the real `serve` command up to the point where it would start listening, and hands back the app it made."""
+    import uvicorn
+
+    from skillforge import cli
+
+    seen: dict = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(app=app, **kw))
+    monkeypatch.setenv("SKILLFORGE_DATA_DIR", str(tmp_path / "data"))
+    for name in ("SKILLFORGE_MODE", "SKILLFORGE_ACCESS_TOKEN", "SKILLFORGE_GOOGLE_CLIENT_ID", "SKILLFORGE_ALLOWED_EMAILS", "SKILLFORGE_SHARED_KEY_CALLS_PER_DAY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert cli._run_serve(cli._parser().parse_args(["serve"])) == 0
+    return seen["app"]
+
+
+HOSTED = {
+    "SKILLFORGE_MODE": "hosted", "SKILLFORGE_ACCESS_TOKEN": SERVE_TOKEN, "SKILLFORGE_GOOGLE_CLIENT_ID": "111111111111-test.apps.googleusercontent.com",
+    "SKILLFORGE_ALLOWED_EMAILS": "ada@example.com",
+}
+
+
+def test_a_server_started_by_the_serve_command_can_keep_a_persons_key(monkeypatch, tmp_path):
+    app = run_serve(monkeypatch, tmp_path, **HOSTED)
+    builder = app.state.builder
+    try:
+        from skillforge.db.users import UserStore
+
+        person = UserStore(builder.db).upsert_google("sub-1", "ada@example.com", "Ada").id
+        saved = builder.access.save(person, "gemini", "some-model-1", "AIzaSyDistinctiveFakeKeyForTests_0123456789")  # "This server cannot keep personal model keys."
+        assert saved["mode"] == "own" and saved["key_saved"] is True
+    finally:
+        builder.close()
+
+
+def test_a_server_started_by_the_serve_command_shares_its_model_as_far_as_its_setting_says(monkeypatch, tmp_path):
+    app = run_serve(monkeypatch, tmp_path, SKILLFORGE_SHARED_KEY_CALLS_PER_DAY="7", **HOSTED)
+    try:
+        assert app.state.builder.access.options.shared_calls_per_day == 7
+    finally:
+        app.state.builder.close()
+
+
+def test_a_local_serve_still_has_no_personal_keys_and_no_sharing(monkeypatch, tmp_path):
+    app = run_serve(monkeypatch, tmp_path)
+    try:
+        options = app.state.builder.access.options
+        assert options.keybox is None and options.shared_calls_per_day == 0
+    finally:
+        app.state.builder.close()

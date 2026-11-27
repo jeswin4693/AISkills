@@ -111,6 +111,10 @@ class PersonSpace:
                 break
         return total
 
+    def forget(self, user: str) -> None:
+        """Drop the remembered measurement of a person's disk (their data was just erased, so the next display must measure again)."""
+        self._seen.pop(user, None)
+
     def used_for_display(self, user: str) -> int:
         """The same, for showing (the space card, the People page): a measurement up to a few seconds old is reused, so repeating the request costs nothing. A person at
         their limit is shown as at least the limit. Admission never uses this: it measures fresh."""

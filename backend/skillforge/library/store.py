@@ -16,6 +16,7 @@ import re
 import shutil
 import tempfile
 import threading
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -26,10 +27,25 @@ from ..kinds import get_kind
 from ..results import CheckResult
 from ..validate.static import MAX_NAME, SLUG, read_dir
 from .package import Conflict, LibraryError, NotFound, replace_dir, write_tree
+from .remove import has_link, is_link, remove_tree
 
 SCHEMA = 1
 MAX_DIFF_LINES = 200
 _VERSION_DIR = re.compile(r"^v(\d+)\Z")
+_HIDDEN = re.compile(r"^\.deleting-[0-9a-f]{32}\Z")  # an entry being deleted: renamed to this first, so it is out of the library at once
+# What `library/service.py` names a backup of a folder an install replaced: `<name>-<date>-<time>`, then `-2`, `-3`... when taken, then an extension for one file.
+# The whole shape is matched (never just "starts with the name"), so deleting `foo` cannot reach the backups of `foo-bar`.
+_BACKUP_TAIL = r"-\d{8}-\d{6}(?:-\d{1,3})?(?:\.[A-Za-z0-9]{1,10})?\Z"
+
+
+@dataclass(frozen=True)
+class DeleteReport:
+    """What a delete did: the versions it removed, the backups it removed, and whether anything could not be removed (it is out of the library either way)."""
+
+    name: str
+    versions: int
+    backups: int
+    leftover: bool
 
 
 def sha256(data: bytes) -> str:
@@ -227,3 +243,59 @@ class Library:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         return version, True
+
+    # ---- deleting ----------------------------------------------------------------------------------
+
+    def delete(self, name: str) -> DeleteReport:
+        """Delete one entry: every version of it, and the backups made when an install replaced a folder of that name. It cannot be undone.
+
+        The name is checked first (`_skill_dir`), so nothing odd is ever joined into a path. A link, as the entry or inside it, is refused and nothing is touched:
+        nothing here is written with a link in it, so one means somebody changed the folder. The entry is first renamed to a hidden name (`.deleting-<id>`), which takes it
+        out of the library in one step; if the rename is refused (a program holds a file) nothing was deleted. Then it is removed; whatever cannot be is reported as
+        `leftover` and swept by the next delete. Held under the same lock as `add`, so a save and a delete of one name never interleave."""
+        skill = self._skill_dir(name)
+        with _ADD_LOCK:
+            self._sweep_hidden()
+            if not skill.exists() and not skill.is_symlink():
+                raise NotFound(f"There is no skill named '{name}' in the library.")
+            if is_link(skill):
+                raise LibraryError(f"'{name}' is a link. It was left alone: nothing was deleted.")
+            if has_link(skill):
+                raise LibraryError(f"'{name}' holds a link. It was left alone: nothing was deleted.")
+            versions = sum(1 for p in skill.iterdir() if _VERSION_DIR.match(p.name) and p.is_dir())  # by folder name: a damaged manifest must not stop a delete
+            hidden = self.root / f".deleting-{uuid.uuid4().hex}"
+            try:
+                skill.rename(hidden)
+            except OSError as exc:
+                raise LibraryError(
+                    f"'{name}' is in use by another program (a virus scanner or the search indexer, perhaps). Nothing was deleted: try again in a moment."
+                ) from exc
+            try:
+                leftover = not remove_tree(hidden, self.root)
+            except LibraryError:  # a link appeared after the look above: left alone, out of the library, reported
+                leftover = True
+            backups = 0
+            if self.backups.is_dir() and not is_link(self.backups):
+                shape = re.compile(re.escape(name) + _BACKUP_TAIL)
+                for entry in sorted(self.backups.iterdir()):
+                    if not shape.match(entry.name):
+                        continue
+                    try:
+                        gone = remove_tree(entry, self.backups, allow_inner_links=True)  # a backup of a folder with links in it is a copy with those links
+                    except LibraryError:  # the backup is itself a link: left alone
+                        leftover = True
+                        continue
+                    backups += gone
+                    leftover = leftover or not gone
+            return DeleteReport(name, versions, backups, leftover)
+
+    def _sweep_hidden(self) -> None:
+        """Remove what an earlier delete could not (a hidden `.deleting-<id>` folder). Best effort: whatever still cannot go stays for the next time."""
+        if not self.root.is_dir():
+            return
+        for p in self.root.iterdir():
+            if _HIDDEN.match(p.name) and p.is_dir():
+                try:
+                    remove_tree(p, self.root)
+                except LibraryError:
+                    pass

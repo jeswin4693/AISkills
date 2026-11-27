@@ -20,8 +20,8 @@ from contextlib import nullcontext
 from sqlalchemy import select, update
 
 from ..canary.instructions import Instructions, load_instructions
-from ..canary.judge import SEVERITIES
-from ..canary.runner import LIMITS, CanaryReport, run_canary
+from ..canary.judge import SEVERITIES, safe
+from ..canary.runner import LIMITS, MAX_TURNS, CanaryReport, run_canary
 from ..canary.runner import preview as engine_preview
 from ..db import LOCAL_USER_ID, Database, ScanRun, now_text
 from ..kinds import UnknownKind, get_kind
@@ -57,8 +57,9 @@ def report_view(report: CanaryReport) -> dict:
             run["scenario"]["message"] = _cut(run["scenario"]["message"], TEXT_CAP)
             run["reply"] = _cut(run["reply"], TEXT_CAP)
             for turn in run["turns"]:
-                turn["call"] = {k: _cut(v, CALL_CAP) if isinstance(v, str) else v for k, v in turn["call"].items()}
-                turn["result"] = _cut(turn["result"], RESULT_CAP)
+                # Written out visibly first (a NUL, a terminal escape or a right-to-left override can hide or reorder text, and some databases refuse a NUL), then cut.
+                turn["call"] = {k: _cut(safe(v), CALL_CAP) if isinstance(v, str) else v for k, v in turn["call"].items()}
+                turn["result"] = _cut(safe(turn["result"]), RESULT_CAP)
     view["limits"] = LIMITS
     return view
 
@@ -149,10 +150,14 @@ class ScanRuns:
         v, instructions = self._load(name, version, kind, user)
         runs, scenarios = _clamp(runs, scenarios)
         plan = engine_preview(instructions, runs=runs, max_scenarios=scenarios, control=control)
+        # With a drafted task the engine plans up to three from a model's answer, and they take the place of fixed tasks so that `scenarios` run in all: the list below cannot say
+        # which, but the most there can be is known. (Without the draft the list is exactly what runs.)
+        most_tasks = scenarios if draft else len(plan.scenarios)
+        max_calls = most_tasks * runs * MAX_TURNS * (2 if control else 1) + (1 if draft else 0)
         return {
             "name": v.name, "kind": kind, "version": v.version, "tag": v.tag, "content_hash": v.content_hash,
             "tasks": [{"id": s.id, "message": _cut(s.message, TEXT_CAP), "source": s.source} for s in plan.scenarios],
-            "runs": runs, "scenarios": scenarios, "control": control, "draft": draft, "max_calls": plan.max_calls + (1 if draft else 0),
+            "runs": runs, "scenarios": scenarios, "control": control, "draft": draft, "max_tasks": most_tasks, "max_calls": max_calls,
             "declared": sorted(instructions.declared) if instructions.declared is not None else None, "scripts": list(instructions.scripts),
             "limits": {"max_runs": RUN_CAP, "max_scenarios": SCENARIO_CAP, "default_scenarios": DEFAULT_SCENARIOS}, "limits_text": LIMITS,
         }
@@ -195,8 +200,11 @@ class ScanRuns:
         with self.db.session() as s:
             return run_view(self._row(s, rid, user))
 
-    def list(self, name: str | None = None, version: int | None = None, limit: int = 50, user: str = LOCAL_USER_ID) -> list[dict]:
+    def list(self, name: str | None = None, version: int | None = None, limit: int = 50, user: str = LOCAL_USER_ID, kind: str | None = None) -> list[dict]:
+        """This person's scans, newest first. Libraries are per kind, so a skill and an agent can have one name and one version number: ask for the kind."""
         query = select(ScanRun).where(ScanRun.user_id == user).order_by(ScanRun.created_at.desc(), ScanRun.id.desc()).limit(limit)
+        if kind is not None:
+            query = query.where(ScanRun.kind == kind)
         if name is not None:
             query = query.where(ScanRun.name == name)
         if version is not None:

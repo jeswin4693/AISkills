@@ -47,9 +47,10 @@ def scans_router() -> APIRouter:
     @r.get("/scans")
     def list_runs(
         request: Request, name: str | None = Query(default=None, max_length=64), version: int | None = Query(default=None, ge=1, le=1_000_000),
+        kind: str | None = Query(default=None, max_length=64),
     ) -> list[dict]:
-        """This person's scans, newest first, each with a short summary and without its heavy result."""
-        return get_builder(request.app).scans.list(name, version, user=user_id(request))
+        """This person's scans, newest first, each with a short summary and without its heavy result. `kind` (skill or agent) keeps a skill's page from showing an agent's scans."""
+        return get_builder(request.app).scans.list(name, version, user=user_id(request), kind=kind)
 
     @r.get("/scans/{rid}")
     def get_run(rid: str, request: Request) -> dict:

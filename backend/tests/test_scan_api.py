@@ -125,3 +125,17 @@ def test_the_skill_text_in_the_preview_answer_is_only_what_the_engine_reports(wo
     w = scan_world(world)
     p = w.person(1).get("/api/scans/preview", params={"name": NAME}).json()
     assert SKILL.split("---")[2].strip() not in str(p)  # the skill's own body is not sent to the page: the tasks, what it declares and its scripts are
+
+
+def test_the_list_can_be_asked_for_one_kind(world):
+    from test_scan_runs import AGENT
+
+    w = scan_world(world)
+    ada = w.person(1)
+    lib = w.libraries.for_user(w.uid(1))
+    put(lib, "reviewer")
+    put(lib.for_kind("agent"), "reviewer", AGENT, "AGENT.md")
+    assert start(ada, name="reviewer", kind="agent").status_code == 201
+    assert ada.get("/api/scans", params={"name": "reviewer", "kind": "skill"}).json() == []
+    assert [r["kind"] for r in ada.get("/api/scans", params={"name": "reviewer", "kind": "agent"}).json()] == ["agent"]
+    assert len(ada.get("/api/scans", params={"name": "reviewer"}).json()) == 1

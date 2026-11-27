@@ -922,6 +922,7 @@ export interface ScanPreview {
   scenarios: number;
   control: boolean;
   draft: boolean;
+  max_tasks: number;
   max_calls: number;
   declared: string[] | null;
   scripts: string[];

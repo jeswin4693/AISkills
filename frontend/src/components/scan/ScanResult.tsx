@@ -1,7 +1,7 @@
 "use client";
 
 import { Alert, Badge, Button, Card } from "@/components/ui";
-import { callText, controlSummary, findingsOf, outcomeInfo, progressText, severityTone, taskState, taskStateText } from "@/lib/scan";
+import { callText, controlSummary, findingsOf, observationBadge, outcomeInfo, progressText, severityTone, taskState, taskStateText } from "@/lib/scan";
 import { staleNote } from "@/lib/testing";
 import type { ScanRun, ScanTaskRun } from "@/lib/types";
 
@@ -11,13 +11,14 @@ import type { ScanRun, ScanTaskRun } from "@/lib/types";
  */
 function TaskRow({ run, control }: { run: ScanTaskRun; control: string | null }) {
   const state = taskState(run);
+  const badge = observationBadge(run);
   return (
     <li className="rounded-xl border border-border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 break-words font-medium">{run.scenario.message}</p>
         <Badge>{run.scenario.source}</Badge>
         <Badge tone={state === "finished" ? "neutral" : "warn"}>{taskStateText(state)}</Badge>
-        {run.observations.length === 0 ? <Badge>nothing observed</Badge> : <Badge tone="warn">{run.observations.length} finding{run.observations.length === 1 ? "" : "s"}</Badge>}
+        {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
       </div>
       {run.error && <p className="mt-1 text-sm text-warn">Stopped early: {run.error}</p>}
       {run.observations.length > 0 && (
@@ -103,7 +104,7 @@ export function ScanResultView({
     );
   }
   const r = run.result;
-  const info = outcomeInfo(r.outcome);
+  const info = outcomeInfo(r.outcome, r.controlled);
   const stale = staleNote(run.version, latestVersion);
   const findings = findingsOf(r);
   return (

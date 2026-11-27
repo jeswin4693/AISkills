@@ -196,10 +196,11 @@ export const api = {
   },
   startScan: (body: ScanStart) => post<ScanRun>("/api/scans", body),
   scanRun: (id: string) => get<ScanRun>(`/api/scans/${encodeURIComponent(id)}`),
-  scanRuns: (o: { name?: string; version?: number } = {}) => {
+  scanRuns: (o: { name?: string; version?: number; kind?: string } = {}) => {
     const q = new URLSearchParams();
     if (o.name) q.set("name", o.name);
     if (o.version) q.set("version", String(o.version));
+    if (o.kind) q.set("kind", o.kind); // always when known: a skill's page must never get an agent's scans of the same name
     return get<ScanRunSummary[]>(`/api/scans${q.size ? `?${q}` : ""}`);
   },
   retryScan: (id: string) => post<ScanRun>(`/api/scans/${encodeURIComponent(id)}/retry`, {}),

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
-import { callText, controlSummary, findingsOf, maxCallsText, outcomeInfo, progressText, runChoices, scanLine, severityTone, taskChoices, taskState, taskStateText } from "./scan";
+import { callText, controlSummary, costNote, draftNote, findingsOf, matchesPage, maxCallsText, observationBadge, outcomeInfo, progressText, runChoices, scanLine, severityTone, taskChoices, taskState, taskStateText } from "./scan";
 import type { ScanObservation, ScanResult, ScanRunSummary, ScanTaskRun } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -174,5 +174,61 @@ describe("the five calls", () => {
   it("raises the server's own words when a scan is refused", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(429, { detail: "You already have 2 runs working at once." })));
     await expect(api.startScan({ name: "s", runs: 1, scenarios: 5, control: true, draft: true })).rejects.toMatchObject({ status: 429, message: "You already have 2 runs working at once." });
+  });
+});
+
+describe("the review's findings (2026-11-27)", () => {
+  it("does not blame the skill when no control run was made", () => {
+    const controlled = outcomeInfo("flagged", true);
+    expect(controlled.summary).toContain("likely cause");
+    const uncontrolled = outcomeInfo("flagged", false);
+    expect(uncontrolled.summary).toContain("No control run was made");
+    expect(uncontrolled.summary).not.toContain("likely cause");
+    expect(uncontrolled.tone).toBe("bad"); // still serious: only what is claimed about the cause changes
+    expect(`${uncontrolled.title} ${uncontrolled.summary}`).not.toMatch(/\bsafe\b/i);
+  });
+  it("says what the control runs did, all of them, and never reads an unfinished control as clean", () => {
+    const stopped = result({ controls: [task("a", { condition: "control (without it)", finished: false, error: "the model said no" })] });
+    const text = controlSummary(stopped, "a") ?? "";
+    expect(text).toContain("did not finish");
+    expect(text).not.toBe("The same task without the skill: nothing observed.");
+    const repeats = result({
+      controls: [task("a", { condition: "control (without it)" }), task("a", { condition: "control (without it)", observations: [obs("reads_secret", "high", "d")] })],
+    });
+    expect(controlSummary(repeats, "a")).toBe("The same task without the skill also did: reads_secret.");
+    const mixed = result({
+      controls: [task("a", { condition: "control (without it)" }), task("a", { condition: "control (without it)", finished: false, error: "x" })],
+    });
+    expect(controlSummary(mixed, "a")).toContain("1 of 2 control runs did not finish");
+  });
+  it("shows nothing-observed only for a task run that finished", () => {
+    expect(observationBadge(task("a"))).toEqual({ text: "nothing observed", tone: "neutral" });
+    expect(observationBadge(task("a", { finished: false }))).toBeNull();
+    expect(observationBadge(task("a", { finished: false, error: "stopped" }))).toBeNull();
+    expect(observationBadge(task("a", { observations: [obs("x", "medium", "d")] }))).toEqual({ text: "1 finding", tone: "warn" });
+    expect(observationBadge(task("a", { finished: false, observations: [obs("x", "medium", "d"), obs("y", "high", "d")] }))).toEqual({ text: "2 findings", tone: "warn" });
+  });
+  it("shows a scan only on the page of the kind, entry and version it is about", () => {
+    const run = { kind: "agent", name: "reviewer", version: 1 };
+    expect(matchesPage(run, { kind: "agent", name: "reviewer", version: 1 })).toBe(true);
+    expect(matchesPage(run, { kind: "skill", name: "reviewer", version: 1 })).toBe(false);
+    expect(matchesPage(run, { kind: "agent", name: "other", version: 1 })).toBe(false);
+    expect(matchesPage(run, { kind: "agent", name: "reviewer", version: 2 })).toBe(false);
+  });
+  it("asks the list for the kind", async () => {
+    const f = vi.fn().mockResolvedValue(reply(200, []));
+    vi.stubGlobal("fetch", f);
+    await api.scanRuns({ name: "reviewer", version: 1, kind: "agent" });
+    expect(String(f.mock.calls[0][0])).toContain("kind=agent");
+    await api.scanRuns({ name: "reviewer", version: 1, kind: "skill" });
+    expect(String(f.mock.calls[1][0])).toContain("kind=skill"); // always, so a skill's page never gets an agent's scans
+  });
+  it("says the truth about the tasks a model may draft and about the calls that are extra", () => {
+    const note = draftNote("skill", 6);
+    expect(note).toContain("up to three");
+    expect(note).toContain("take the place of some");
+    expect(note).toContain("no more than 6");
+    expect(note).not.toContain("one more task");
+    expect(costNote()).toContain("on top");
   });
 });

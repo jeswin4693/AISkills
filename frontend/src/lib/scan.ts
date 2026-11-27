@@ -13,11 +13,14 @@ export interface ScanOutcomeInfo {
   summary: string;
 }
 
-/** The headline of a finished scan. Nothing observed is "info", never green: it is not a pass. */
-export function outcomeInfo(code: string): ScanOutcomeInfo {
+/** The headline of a finished scan. Nothing observed is "info", never green: it is not a pass. `controlled` is whether the same tasks were also run without the skill:
+ * only then can the headline say the skill is the likely cause. */
+export function outcomeInfo(code: string, controlled = true): ScanOutcomeInfo {
   switch (code) {
     case "flagged":
-      return { tone: "bad", title: "Flagged", summary: "Holding this skill, the model did something serious that the same task without it did not do. The skill is the likely cause: read the findings and the steps below before deciding anything." };
+      return controlled
+        ? { tone: "bad", title: "Flagged", summary: "Holding this skill, the model did something serious that the same task without it did not do. The skill is the likely cause: read the findings and the steps below before deciding anything." }
+        : { tone: "bad", title: "Flagged", summary: "Holding this skill, the model did something serious. No control run was made, so it is not known whether the skill or the model did it: read the findings and the steps below before deciding anything." };
     case "unclear":
       return { tone: "warn", title: "Unclear", summary: "The model did something serious, but it also did it without the skill, so it may be the model or the task and not the skill. Read the steps below." };
     case "caution":
@@ -88,12 +91,38 @@ export function findingsOf(result: Pick<ScanResult, "runs">): Finding[] {
     .map(({ f }) => f);
 }
 
-/** What the same task did without the skill, or null when no control was run for it. */
+/** What the same task did without the skill (every control run of it), or null when no control was run for it. A control that did not finish is never read as clean. */
 export function controlSummary(result: Pick<ScanResult, "controls">, taskId: string): string | null {
-  const control = result.controls.find((c) => c.scenario.id === taskId);
-  if (!control) return null;
-  if (control.observations.length === 0) return "The same task without the skill: nothing observed.";
-  return `The same task without the skill also did: ${[...new Set(control.observations.map((o) => o.kind))].sort().join(", ")}.`;
+  const controls = result.controls.filter((c) => c.scenario.id === taskId);
+  if (controls.length === 0) return null;
+  const kinds = [...new Set(controls.flatMap((c) => c.observations.map((o) => o.kind)))].sort();
+  const unfinished = controls.filter((c) => taskState(c) !== "finished").length;
+  const left = unfinished === 0 ? "" : unfinished === controls.length ? " (it did not finish)" : ` (${unfinished} of ${controls.length} control runs did not finish)`;
+  if (kinds.length > 0) return `The same task without the skill also did: ${kinds.join(", ")}.${left}`;
+  if (unfinished > 0) return `The same task without the skill: nothing observed${left}, so this says little.`;
+  return "The same task without the skill: nothing observed.";
+}
+
+/** The badge that sums up a task run's findings. "Nothing observed" only for a run that finished: one that stopped or ran out of steps is not shown as clean. */
+export function observationBadge(run: Pick<ScanTaskRun, "finished" | "error" | "observations">): { text: string; tone: "neutral" | "warn" } | null {
+  const n = run.observations.length;
+  if (n > 0) return { text: `${n} ${n === 1 ? "finding" : "findings"}`, tone: "warn" };
+  return taskState(run) === "finished" ? { text: "nothing observed", tone: "neutral" } : null;
+}
+
+/** Whether a scan is about the kind, entry and version the page is showing. A skill and an agent can share a name and a version number, so a page shows only its own. */
+export function matchesPage(run: { kind: string; name: string; version: number }, page: { kind: string; name: string; version: number }): boolean {
+  return run.kind === page.kind && run.name === page.name && run.version === page.version;
+}
+
+/** What the page says about the tasks a model may draft: not "one more task", which was untrue: up to three, taking the place of fixed ones. */
+export function draftNote(kind: string, maxTasks: number): string {
+  return `A model will draft up to three tasks from the ${kind}'s description when the scan starts. They are not in this list yet, and they take the place of some of the fixed tasks, so that no more than ${maxTasks} run.`;
+}
+
+/** The sentence under the cost: the usual size and what is counted on top. */
+export function costNote(): string {
+  return "A run usually ends in about three steps, so it is usually about a third of that. A call that has to be tried again is counted on top of this.";
 }
 
 /** A tool call as plain text, leaving out what is empty. The model wrote it: it is only ever shown as text. */

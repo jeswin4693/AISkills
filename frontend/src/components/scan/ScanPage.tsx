@@ -7,7 +7,7 @@ import { Field, SELECT } from "@/components/SkillVersionPicker";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatWhen, relativeTime } from "@/lib/format";
-import { maxCallsText, runChoices, scanLine, taskChoices } from "@/lib/scan";
+import { costNote, draftNote, matchesPage, maxCallsText, runChoices, scanLine, taskChoices } from "@/lib/scan";
 import { parseVersion, pickVersion } from "@/lib/testing";
 import { useAsync } from "@/lib/useAsync";
 import { useScanRun } from "@/lib/useScanRun";
@@ -45,10 +45,12 @@ function ScanFor({ kind, name, version, latest }: { kind: string; name: string; 
     () => api.scanPreview({ name, version, kind, runs: repeats, scenarios: tasks, control, draft }),
     `scan-preview/${kind}/${name}/${version}/${repeats}/${tasks}/${control}/${draft}`,
   );
-  const history = useAsync(() => api.scanRuns({ name, version }), `scan-history/${kind}/${name}/${version}`);
+  const history = useAsync(() => api.scanRuns({ name, version, kind }), `scan-history/${kind}/${name}/${version}`);
   const provider = useAsync(api.provider, "scan-provider");
   const [runId, setRunId] = useState<string | null>(null);
-  const { run, error: runError, adopt, stalled, check } = useScanRun(runId);
+  const { run: opened, error: runError, adopt, stalled, check } = useScanRun(runId);
+  // A page shows only a scan that is about its own kind, entry and version (a skill and an agent can share a name and a version number).
+  const run = opened && matchesPage(opened, { kind, name, version }) ? opened : undefined;
   const [busy, setBusy] = useState<"start" | "retry" | null>(null);
   const [problem, setProblem] = useState<Error | null>(null);
 
@@ -122,7 +124,7 @@ function ScanFor({ kind, name, version, latest }: { kind: string; name: string; 
             </li>
           ))}
         </ol>
-        {p.draft && <p className="mt-2 text-sm text-muted">A model will also draft one more task from the {kind}&apos;s description (it is not in this list yet).</p>}
+        {p.draft && <p className="mt-2 text-sm text-muted">{draftNote(kind, p.max_tasks)}</p>}
         <p className="mt-2 text-sm">
           {p.declared ? <>It declares these kinds of tool: {p.declared.join(", ")}. </> : <>It declares no kinds of tool the scan can compare with. </>}
           {p.scripts.length > 0 && <>It ships scripts ({p.scripts.join(", ")}): they are listed, never run. </>}
@@ -169,8 +171,7 @@ function ScanFor({ kind, name, version, latest }: { kind: string; name: string; 
           </label>
         </div>
         <p className="mt-3 text-sm">
-          This will make <strong>{maxCallsText(p.max_calls, p.draft)}</strong> to your model; a run usually ends in about three steps, so it is usually about a third of that. A call that has to be
-          tried again is counted too.
+          This will make <strong>{maxCallsText(p.max_calls, p.draft)}</strong> to your model. {costNote()}
         </p>
         <div className="mt-3">
           <Button variant="primary" className="min-h-11" busy={busy === "start"} disabled={noModel || working} onClick={() => void start()}>

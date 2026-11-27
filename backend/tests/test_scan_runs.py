@@ -248,3 +248,49 @@ def test_a_stored_result_cuts_long_text_and_marks_the_cut_without_changing_the_r
     assert len(stored["reply"]) <= 2001 and len(stored["scenario"]["message"]) <= 2001
     assert view["limits"] == LIMITS and view["outcome"] == report.outcome() and view["verdict"] == report.verdict()
     assert len(run.reply) == 5000 and len(run.turns[0].result) == 5000  # the report the engine made is untouched
+
+
+# ---- the review's findings (2026-11-27), each a test that failed first ----------------------------------------------------------------------------------
+
+
+def test_a_skill_and_an_agent_with_the_same_name_do_not_share_scans(world):
+    """Libraries are per kind, so a skill and an agent can both be called `reviewer` and both be at v1: the list must be asked for one kind."""
+    w, _ = owner_world(world)
+    put(w.library, "reviewer")
+    put(w.library.for_kind("agent"), "reviewer", AGENT, "AGENT.md")
+    w.builder.scans.start("reviewer", kind="agent", draft=False)
+    assert w.builder.scans.list("reviewer", kind="skill") == []
+    assert [r["kind"] for r in w.builder.scans.list("reviewer", kind="agent")] == ["agent"]
+    assert [r["kind"] for r in w.builder.scans.list("reviewer")] == ["agent"]  # no kind asked: every kind
+
+
+def test_the_most_a_scan_could_cost_counts_the_tasks_a_model_may_draft(world):
+    w, _ = owner_world(world)
+    drafting = w.builder.scans.preview(NAME, scenarios=SCENARIO_CAP, draft=True)
+    assert drafting["max_tasks"] == SCENARIO_CAP and drafting["max_calls"] == SCENARIO_CAP * MAX_TURNS * 2 + 1  # six can run when a model drafts, though only five fixed ones exist
+    plain = w.builder.scans.preview(NAME, scenarios=SCENARIO_CAP, draft=False)
+    assert plain["max_tasks"] == 5 and len(plain["tasks"]) == 5 and plain["max_calls"] == 5 * MAX_TURNS * 2
+
+
+def test_a_real_run_never_makes_more_calls_than_the_preview_said_and_the_worst_case_reaches_it(world):
+    def reads_env_and_never_ends(side, message, n, prompt):
+        return step(c("read_file", ".env"))
+
+    agent = Agent(reads_env_and_never_ends, drafted=["Please summarise the quarterly numbers.", "Rewrite my notes into a short list.", "Check the table in notes.md."])
+    w = world(agent, service=True)
+    put(w.library)
+    ceiling = w.builder.scans.preview(NAME, scenarios=SCENARIO_CAP, draft=True)["max_calls"]
+    result = w.builder.scans.start(NAME, scenarios=SCENARIO_CAP, draft=True)["result"]
+    assert result["calls"] == ceiling  # six tasks that never end, each also run without the skill, and the call that drafts: the most there can be
+
+
+def test_a_stored_result_writes_control_and_direction_characters_out_visibly():
+    """A model or a skill can write a NUL (which some databases refuse), a terminal escape, or a right-to-left override that makes a web address read differently."""
+    turn = Turn(1, {"tool": "http_request", "target": "https://good.example\u202e/evil", "content": "x\x00y\x1b[2J", "method": ""}, "r\x00s\u202eq")
+    run = ScenarioRun({"id": "t", "message": "m", "source": "fixed"}, "with the skill", turns=[turn], reply="ok", finished=True)
+    view = report_view(CanaryReport("x", "skill", runs=[run], controls=[run]))
+    for group in ("runs", "controls"):
+        stored = view[group][0]["turns"][0]
+        for text in (*stored["call"].values(), stored["result"]):
+            assert not any(ch in text for ch in ("\x00", "\x1b", "\u202e"))
+        assert "\\x00" in stored["call"]["content"] and "\\u202e" in stored["call"]["target"] and "\\u202e" in stored["result"]

@@ -71,6 +71,9 @@ def test_delete_removes_every_version_and_only_that_entry(lib):
 @pytest.mark.parametrize("name", ["", ".", "..", "../x", "a/b", "a\\b", "Foo", "FOO", "foo bar", "foo..", "x" * 65, "foo\x00", None, 5])
 def test_an_odd_name_deletes_nothing(tmp_path, lib, name):
     add(lib, "foo")
+    # real folders that a name which was NOT checked would reach: beside the library (`../x`), below it (`a/b`), and the library's own parent (`..`)
+    (tmp_path / "x" / "v1").mkdir(parents=True)
+    (lib.root / "a" / "b" / "v1").mkdir(parents=True)
     before = tree(tmp_path)
     with pytest.raises(LibraryError):
         lib.delete(name)
@@ -198,6 +201,17 @@ def test_a_stale_hidden_folder_is_swept_by_the_next_delete(lib):
     (stale / "left.txt").write_text("x", encoding="utf-8")
     lib.delete("bar")
     assert not stale.exists() and lib.names() == ["foo"]
+
+
+def test_remove_tree_refuses_a_link_itself_and_leaves_its_target_and_the_link(tmp_path):
+    root, target = tmp_path / "root", outside(tmp_path)
+    root.mkdir()
+    make_link(root / "linked", target)
+    with pytest.raises(LibraryError, match="link"):
+        remove_tree(root / "linked", root)
+    with pytest.raises(LibraryError, match="link"):
+        remove_tree(root / "linked", root, allow_inner_links=True)
+    assert (target / "precious.txt").read_text(encoding="utf-8") == "keep me" and (root / "linked").exists()
 
 
 def test_remove_tree_refuses_a_path_outside_its_root(tmp_path):

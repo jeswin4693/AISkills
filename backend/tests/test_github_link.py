@@ -449,7 +449,7 @@ def test_only_the_newest_two_snapshots_of_a_repository_are_kept(tmp_path):
     paths = []
     for _ in range(4):
         paths.append(snap(tmp_path, fetch=fetch, clock=clock, fresh=True).path)
-        clock.t += 100
+        clock.t += gh.USED_GRACE + 1  # a copy opened a moment ago is "in use" and is not pruned (see the grace tests below)
     assert [p.is_dir() for p in paths] == [False, False, True, True]
 
 
@@ -459,8 +459,80 @@ def test_only_a_limited_number_of_repositories_are_kept_oldest_first(tmp_path, m
     made = []
     for i in range(5):
         made.append(snap(tmp_path, f"https://github.com/acme/repo{i}", fetch, clock).path)
-        clock.t += 10
+        clock.t += gh.USED_GRACE + 1
     assert [p.is_dir() for p in made] == [False, False, True, True, True]
+
+
+def test_copies_made_within_the_grace_are_all_kept(tmp_path):
+    fetch, clock = Fetcher(), Tick()
+    paths = []
+    for _ in range(4):
+        paths.append(snap(tmp_path, fetch=fetch, clock=clock, fresh=True).path)
+        clock.t += 60
+    assert all(p.is_dir() for p in paths)
+
+
+def test_an_idle_snapshot_is_pruned_once_the_grace_has_passed(tmp_path):
+    fetch, clock = Fetcher(), Tick()
+    paths = []
+    for _ in range(3):
+        paths.append(snap(tmp_path, fetch=fetch, clock=clock, fresh=True).path)
+        clock.t += 60
+    clock.t += gh.USED_GRACE + 1
+    paths.append(snap(tmp_path, fetch=fetch, clock=clock, fresh=True).path)
+    assert [p.is_dir() for p in paths] == [False, False, True, True]
+
+
+def test_a_snapshot_read_a_moment_ago_survives_pruning_then_goes_when_idle(tmp_path):
+    fetch, clock = Fetcher(), Tick()
+    first = snap(tmp_path, fetch=fetch, clock=clock)
+    clock.t += 3600
+    snap(tmp_path, fetch=fetch, clock=clock, fresh=True)
+    clock.t += 3600
+    assert snap(tmp_path, fetch=fetch, clock=clock, stamp=first.stamp).path == first.path  # a read marks it used
+    clock.t += 60
+    snap(tmp_path, fetch=fetch, clock=clock, fresh=True)  # now three copies exist, one more than the newest two
+    assert first.path.is_dir()
+    clock.t += gh.USED_GRACE + 1
+    snap(tmp_path, fetch=fetch, clock=clock, fresh=True)
+    assert not first.path.is_dir()
+
+
+def test_a_repository_read_a_moment_ago_is_not_dropped_by_the_repository_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(gh, "MAX_REPOS", 1)
+    fetch, clock = Fetcher(), Tick()
+    a = snap(tmp_path, "https://github.com/acme/repo-a", fetch, clock)
+    clock.t += 3600
+    snap(tmp_path, "https://github.com/acme/repo-a", fetch, clock, max_age=None)  # a read: marked used
+    clock.t += 1
+    snap(tmp_path, "https://github.com/acme/repo-b", fetch, clock)
+    assert a.path.is_dir()
+    clock.t += gh.USED_GRACE + 1
+    snap(tmp_path, "https://github.com/acme/repo-b", fetch, clock, fresh=True)
+    assert not a.path.is_dir()
+
+
+def test_a_repository_whose_lock_is_held_is_left_alone_by_the_repository_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(gh, "MAX_REPOS", 1)
+    fetch, clock = Fetcher(), Tick()
+    a = snap(tmp_path, "https://github.com/acme/repo-a", fetch, clock)
+    clock.t += 10 * 3600  # long idle: only the lock protects it
+    lock = gh._lock_for(gh._key_dir(tmp_path / "snaps", gh.parse_link("https://github.com/acme/repo-a")))
+    with lock:
+        snap(tmp_path, "https://github.com/acme/repo-b", fetch, clock)
+        assert a.path.is_dir()
+    clock.t += 1
+    snap(tmp_path, "https://github.com/acme/repo-b", fetch, clock, fresh=True)
+    assert not a.path.is_dir()
+
+
+def test_a_marker_that_cannot_be_written_does_not_fail_the_read(tmp_path):
+    fetch, clock = Fetcher(), Tick()
+    first = snap(tmp_path, fetch=fetch, clock=clock)
+    marker = first.path.parent / "used"
+    marker.unlink()
+    marker.mkdir()  # writing a file there now raises an OSError
+    assert snap(tmp_path, fetch=fetch, clock=clock, max_age=None).path == first.path
 
 
 def test_a_failed_download_leaves_the_old_snapshot_usable_and_no_partial_folder(tmp_path):
@@ -735,6 +807,9 @@ def age_every_snapshot(seconds: float) -> int:
         meta = json.loads(meta_file.read_text(encoding="utf-8"))
         meta["epoch"] -= seconds
         meta_file.write_text(json.dumps(meta), encoding="utf-8")
+        used = meta_file.parent / "used"  # when the copy was last opened: pruning leaves a copy opened in the last 15 minutes alone
+        if used.is_file():
+            used.write_text(repr(float(used.read_text(encoding="utf-8")) - seconds), encoding="utf-8")
         changed += 1
     return changed
 
@@ -870,7 +945,7 @@ def test_asking_for_a_snapshot_that_is_gone_gives_the_newest_and_says_which_it_i
     fetch, clock = Fetcher(), Tick()
     first = newest = snap(tmp_path, fetch=fetch, clock=clock)
     for _ in range(3):
-        clock.t += 100
+        clock.t += gh.USED_GRACE + 1
         newest = snap(tmp_path, fetch=fetch, clock=clock, fresh=True)
     assert not first.path.is_dir()  # only the newest two are kept
     got = snap(tmp_path, fetch=fetch, clock=clock, max_age=None, stamp=first.stamp)

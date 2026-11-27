@@ -42,6 +42,9 @@ where, and how many.** No `git` program is run and no key is needed.
 * **Nothing is run.** The graph reads the files; nothing in the repository is executed, imported or built.
 * **Snapshots are bounded.** The newest two of each repository and branch are kept, and twelve repositories at most; half-made snapshots are cleaned away. A snapshot is **reused for 15 minutes** so reading, ideas and a build see the same code; a
   **recheck always downloads fresh** (what changed is its point). Simultaneous requests for one repository share one download.
+* **A copy that is being read is never pruned (slice AK).** Opening a copy writes a `used` marker with the time next to its `meta.json`; pruning (the newest two, the twelve repositories) skips any copy opened in the last **15 minutes**, so a long read is not cut off.
+  A few extra copies may therefore live a little longer. A repository whose lock is held (a request is opening or downloading it that moment) is left alone for that round, so the check and the delete cannot cross. A copy older than markers has none and is pruned as before.
+  What is **not** covered: a read that lasts longer than 15 minutes after the copy was opened.
 * **A build's evidence is looked up in the copy its idea was made from.** A suggestion run records the copy it read (its `snapshot` name), a build started from one of its ideas keeps that name in its seed, and the evidence is recorded from exactly that
   copy, however old, because its places must be looked up in the same code. Only the newest two copies of a repository are kept, so if that copy has been pruned the evidence is recorded from a newer one and the build's notes **say so**
   ("the code may differ"). (Until the review of 2026-11-25 this section said the same, but the code took the newest copy.) A folder has no copies: its evidence is always from the folder as it is when the build ends.

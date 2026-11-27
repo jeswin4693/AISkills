@@ -58,6 +58,7 @@ SNAPSHOT_TTL = 15 * 60  # seconds a snapshot is reused by a plain read
 KEEP_PER_REPO = 2  # snapshots of one repository kept
 MAX_REPOS = 12  # repositories (and branches) kept
 PARTIAL_AGE = 3600  # seconds after which a half-made snapshot is cleaned away
+USED_GRACE = 15 * 60  # seconds after a snapshot was last opened during which it is never pruned (a request may still be reading it)
 RENAME_TRIES = 8
 RENAME_DELAY = 0.15  # seconds, growing with each try
 USER_AGENT = "skillforge-repository-reader"
@@ -438,6 +439,31 @@ def snapshot_root() -> Path:
     return data_dir() / "github"
 
 
+def _lock_for(key_dir: Path) -> threading.Lock:
+    """The lock of one repository's folder: a request holds it while it opens or downloads a copy, and pruning will not delete under it."""
+    with _GUARD:
+        return _LOCKS.setdefault(str(key_dir), threading.Lock())
+
+
+def _mark_used(stamp_dir: Path, now: float) -> None:
+    """Write down that this copy was opened at `now`. Pruning skips a copy opened in the last USED_GRACE seconds, so a request that is still
+    reading the copy it was handed is not cut off. Failing to write it is logged and never fails the read: the copy is then pruned as before."""
+    try:
+        (stamp_dir / "used").write_text(repr(now), encoding="utf-8")
+    except OSError as exc:
+        log.warning("could not mark a snapshot as used: %s", exc)
+
+
+def _recently_used(stamp_dir: Path, now: float) -> bool:
+    """Whether the copy was opened less than USED_GRACE seconds ago. A time in the future (the clock moved back) counts as used; a missing or
+    damaged marker (a copy made before markers existed) counts as not used."""
+    try:
+        opened = float((stamp_dir / "used").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return now - opened < USED_GRACE
+
+
 def _digest(text: str, length: int) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:length]
 
@@ -516,10 +542,14 @@ def _move_into_place(partial: Path, final: Path) -> None:
             time.sleep(RENAME_DELAY * (attempt + 1))
 
 
-def _prune(root: Path, key_dir: Path, link: GithubLink) -> None:
-    """Keep the newest few snapshots of this repository and the newest few repositories, and clean away old half-made ones."""
+def _prune(root: Path, key_dir: Path, link: GithubLink, now: float) -> None:
+    """Keep the newest few snapshots of this repository and the newest few repositories, and clean away old half-made ones.
+
+    A copy opened in the last USED_GRACE seconds is never removed (a request may be reading it), so a few extra copies may live a little longer.
+    A repository whose lock is held (a request is opening or downloading it right now) is left alone for this round."""
     for old in _stamps(key_dir)[KEEP_PER_REPO:]:
-        shutil.rmtree(old, ignore_errors=True)
+        if not _recently_used(old, now):
+            shutil.rmtree(old, ignore_errors=True)
     entries: list[tuple[str, Path]] = []
     try:
         for leaf in root.iterdir():
@@ -535,7 +565,15 @@ def _prune(root: Path, key_dir: Path, link: GithubLink) -> None:
     entries.append((_stamps(key_dir)[0].name if _stamps(key_dir) else "", key_dir))
     entries.sort(key=lambda e: e[0], reverse=True)
     for _, ref in entries[MAX_REPOS:]:
-        shutil.rmtree(ref, ignore_errors=True)
+        if ref == key_dir or any(_recently_used(d, now) for d in _stamps(ref)):  # key_dir's lock is held by our caller and is not re-entrant
+            continue
+        lock = _lock_for(ref)
+        if not lock.acquire(blocking=False):  # a request is working on that repository: not now
+            continue
+        try:
+            shutil.rmtree(ref, ignore_errors=True)
+        finally:
+            lock.release()
         try:
             ref.parent.rmdir()  # the repository's folder, once no branch of it is left
         except OSError:
@@ -554,14 +592,15 @@ def open_snapshot(
     root = root if root is not None else snapshot_root()
     key_dir = _key_dir(root, link)
     key = str(key_dir)
+    lock = _lock_for(key_dir)
     with _GUARD:
-        lock = _LOCKS.setdefault(key, threading.Lock())
         generation = _GENERATION.get(key, 0)
     with lock:
         if stamp is not None:
             for d in _stamps(key_dir):
                 wanted = _read_meta(d, link) if d.name == stamp else None
                 if wanted is not None:
+                    _mark_used(d, now())
                     return _snapshot(d, link, wanted, True)
         found = next(((d, m) for d in _stamps(key_dir) if (m := _read_meta(d, link)) is not None), None)
         if found is not None:
@@ -569,6 +608,7 @@ def open_snapshot(
             with _GUARD:
                 fetched_meanwhile = _GENERATION.get(key, 0) != generation  # another request downloaded while this one waited
             if fetched_meanwhile or (not fresh and (max_age is None or now() - meta["epoch"] <= max_age)):
+                _mark_used(stamp_dir, now())
                 return _snapshot(stamp_dir, link, meta, True)
         data = (fetch or fetch_archive)(link)
         epoch = now()
@@ -605,5 +645,6 @@ def open_snapshot(
             raise
         with _GUARD:
             _GENERATION[key] = _GENERATION.get(key, 0) + 1
-        _prune(root, key_dir, link)
+        _mark_used(final, epoch)  # before pruning: the copy being handed out is in use, so it counts and is never the one removed
+        _prune(root, key_dir, link, epoch)
         return _snapshot(final, link, meta, False)

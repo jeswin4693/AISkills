@@ -42,6 +42,7 @@ from .model_access import ModelAccess, ModelOptions
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
 from .retention import UsageRetention, keep_days_from_env
+from .scans import ScanRuns
 from .suggestions import SuggestRuns
 from .usage import usage_summary
 
@@ -146,6 +147,11 @@ class Builder:
     def suggestions(self) -> SuggestRuns:
         """Suggestion runs for a repository, sharing this builder's database, job runner and model."""
         return SuggestRuns(self.db, self.runner, self.access.provider_for)
+
+    @property
+    def scans(self) -> ScanRuns:
+        """Behaviour scans of a skill or agent: its instructions run in a simulated agent loop in the background, sharing this builder's database, job runner, model and each person's library."""
+        return ScanRuns(self.db, self.runner, self.access.provider_for, self.library, self._library, self.space)
 
     @property
     def evals(self) -> EvalRuns:

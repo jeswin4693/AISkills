@@ -395,6 +395,15 @@ Click a function to look at that one next, **Back** to return, or start from the
 - **Tests:** backend 4,044 passed / 4 skipped (77 new), web 499 + a clean typecheck (29 new), **the browser suite 115 of 115** (5 new steps; the first run's one failure was my own ambiguous selector). **69 deliberate breaks, all caught** (the first round of each left 6, 4 and 3 survivors: weak tests of mine, now strengthened). **No independent review.**
 - **Limits:** only what the graph can prove (a callback, reflection or dynamic call is not seen), a function that calls itself is not drawn, two steps at most, and for a GitHub link each click uses the copy current at that moment. Details: [docs/function-graph.md](docs/function-graph.md).
 
+## The Task Plan page (slice AM)
+
+The command line's `python -m skillforge plan` ([the Task Conductor](docs/task-conductor.md), step C1) now has a page: **Task Plan** in the menu ([the design](docs/superpowers/specs/2026-11-27-task-plan-page-design.md)). Type a task, optionally name a folder or a public GitHub link, and read the plan before any work: what the request contains (with your own words as proof), what it leaves out (a blocking question is marked), how big the task is from the code graph, the phases and when it stops to ask, the rules that apply, and a token plan. It is the **same plan**: the page calls the same code and shows what the command prints, in the same order, with **Copy as Markdown** and **Download .md**.
+
+- **Nothing is saved, run or changed.** A plan made with **Don't use a model** sends nothing anywhere and says plainly that the request was **not read**. With a model, the page says before anything is sent what would leave: the task text, the names and places (never the contents) of the files and functions it mentions, file and language counts, and the lines of `CLAUDE.md` / `AGENTS.md`. A test pins that a string inside a function body and the folder's path never reach the model.
+- **Honest by construction.** Every rule says "not enforced yet", the token numbers are estimates, the plan's own *What was NOT checked* list is always shown, and a plan that does not fit its budget says so. The person's folder path is never in an answer; a GitHub link is shown as `owner/repo`.
+- **Tests:** backend 4,074 passed / 4 skipped (30 new), web 526 + a clean typecheck (27 new), **the browser suite 121 of 121** (6 new steps; its first run showed my new steps had left the browser on the wrong page for the older ones, and the product was right). **59 deliberate breaks, all caught** (the first round left 2). **No independent review.**
+- **Limits:** answering the plan's questions and approving it is not built (it would be a session, like the builder); nothing is saved, so copy a plan before leaving; a plan is as good as the model's reading (code checks the quotes and the named targets, not that the reading is complete); the size reflects only the code the request names; needs the local app. Details: [docs/task-plan-page.md](docs/task-plan-page.md).
+
 ## Run the local API (the web UI talks to it)
 
 ```powershell

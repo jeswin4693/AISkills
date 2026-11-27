@@ -1,7 +1,7 @@
 # Task Conductor: any task in, a planned, rule-checked, human-guided SDLC flow out
 
-**Status: step C1 (the read-only Task Plan) is built, see "Step C1: what is built" at the end. Everything after it is still
-design.** Written 2026-11-19 from your request:
+**Status: step C1 (the read-only Task Plan) is built, see "Step C1: what is built" at the end, and it has a web page since slice AM
+([task-plan-page.md](task-plan-page.md)). Everything after it is still design.** Written 2026-11-19 from your request:
 
 1. Read the prompt and plan what it **contains and what it does not**.
 2. Plan the **token use**: which existing files to read, which new files to create.
@@ -173,7 +173,7 @@ reading in estimated tokens; this repository, one run each):
 (The same files read whole would cost about 25,300 in the last row.) These are estimates at about 4 characters a token.
 The hint is a guess from names, and the savings come from reading less, not from the plan itself costing nothing.
 
-**Not built yet:** answering the questions and approving the plan (a session, like the builder), the web page, turning the
+**The web page** is built (slice AM, [task-plan-page.md](task-plan-page.md)): the same plan, nothing saved. **Not built yet:** answering the questions and approving the plan (a session, like the builder), turning the
 plan into skills (C2), enforcement by hooks (C3), the checked requirement-to-test chain (C4), and a runner (C5). The token
 numbers are estimates, and real token use is not recorded anywhere yet.
 

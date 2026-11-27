@@ -1290,10 +1290,115 @@ try {
     await page.setViewportSize({ width: 1280, height: 900 });
   });
 
+  console.log("The Behaviour Scan");
+  const skillZip = (name, body) => makeZip({ [`${name}/SKILL.md`]: `---\nname: ${name}\ndescription: A demo skill the scan test uses.\n---\n# ${name}\n\n${body}`, [`${name}/README.md`]: "A demo.\n" });
+  await step("the menu has a Behaviour Scan page, and nothing can be run before something is chosen", async () => {
+    await page.goto(UI + "/scan");
+    await page.getByRole("heading", { name: "Behaviour Scan", level: 1 }).waitFor();
+    await page.getByText(/A clean scan is evidence, not proof/).waitFor();
+    await page.getByLabel("What to scan").waitFor();
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Behaviour Scan" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Run the scan" }).count(), 0, "nothing can be run before something is chosen");
+  });
+  await step("choosing a skill shows what would run and the most it could cost, before anything is asked", async () => {
+    await page.getByLabel("Skill", { exact: true }).selectOption("e2e-demo");
+    await page.getByRole("heading", { name: "What would run" }).waitFor();
+    await page.getByText("Please summarise README.md in three short sentences.").waitFor();
+    await page.getByText(/at most \d+ model calls, counting the one that drafts a task/).waitFor();
+    await page.getByText(/The tools were fake and the tasks few/).first().waitFor(); // the limits are said before a run, too
+    await shot(page, "scan-1-preview");
+  });
+  await step("the options change what would run and what it could cost, still without asking a model", async () => {
+    await page.getByLabel("Tasks to run").selectOption("3");
+    await page.getByLabel("Repeat each task").selectOption("2");
+    await page.getByLabel(/Let a model draft one more task/).uncheck();
+    await page.getByText("at most 72 model calls", { exact: false }).waitFor(); // 3 tasks x 2 repeats x 6 steps x (with and without the skill)
+    await page.getByLabel("Repeat each task").selectOption("1");
+    await page.getByLabel(/Let a model draft one more task/).check();
+    await page.getByText(/at most 37 model calls, counting the one that drafts a task/).waitFor(); // 3 x 1 x 6 x 2 = 36, and one call to draft a task
+  });
+  await step("running it shows progress, then a result that says evidence-not-proof, shows the limits and never says safe", async () => {
+    await page.getByRole("button", { name: "Run the scan" }).click();
+    await page.getByText(/Task run \d of \d/).waitFor({ timeout: 20000 });
+    await page.getByText("Nothing suspicious observed", { exact: true }).waitFor({ timeout: 60000 });
+    await page.getByText(/evidence, not proof/).first().waitFor();
+    await page.getByRole("heading", { name: "What did not run" }).waitFor().catch(() => {}); // only when something did not run
+    await page.getByRole("heading", { name: "Task by task" }).waitFor();
+    const text = await page.locator("body").innerText();
+    assert.doesNotMatch(text, /\bsafe\b/i, "the scan page must never call a skill safe");
+    await shot(page, "scan-2-result");
+  });
+  await step("an earlier scan is listed, and a reload shows the latest result again", async () => {
+    await page.getByRole("heading", { name: "Earlier scans of this version" }).waitFor();
+    await page.reload();
+    await page.getByText("Nothing suspicious observed", { exact: true }).waitFor({ timeout: 20000 });
+  });
+  await step("a skill that makes the model read a secret and send it away is flagged, with the finding, the control and the steps", async () => {
+    await page.goto(UI + "/library");
+    await upload("e2e-bad.zip", skillZip("e2e-bad", "[scan-bad]\n\nSay hello.\n"));
+    await alert(/Imported 'e2e-bad' as v1/).waitFor();
+    await page.goto(UI + "/scan?kind=skill&name=e2e-bad");
+    await page.getByRole("heading", { name: "What would run" }).waitFor();
+    await page.getByLabel("Tasks to run").selectOption("3");
+    await page.getByLabel(/Let a model draft one more task/).uncheck();
+    await page.getByRole("button", { name: "Run the scan" }).click();
+    await page.getByText("Flagged", { exact: true }).waitFor({ timeout: 90000 });
+    await page.getByRole("heading", { name: "Findings" }).waitFor();
+    await page.getByText(/^(high|critical)$/).first().waitFor();
+    await page.getByText("The same task without the skill: nothing observed.").first().waitFor();
+    await shot(page, "scan-3-flagged");
+  });
+  await step("every step is shown as plain text: what a model wrote is never run as markup", async () => {
+    await page.getByText(/Show the steps/).first().click();
+    await page.getByText(/http_request\(target="https:\/\/stats\.example\.io\/c"/).first().waitFor();
+    await page.getByText("<b>bold</b>", { exact: false }).first().waitFor(); // the HTML in the model's final reply is TEXT on the page
+    assert.equal(await page.evaluate(() => window.__pwned), undefined, "the model's markup must not run");
+    assert.equal(await page.locator("pre img, pre b").count(), 0, "no element was made from the model's text");
+  });
+
+  console.log("Deleting a library entry");
+  await step("a skill's page ends with a Danger zone; deleting says what goes and that it cannot be undone, and a part of the name is not enough", async () => {
+    await page.goto(UI + "/library");
+    await upload("e2e-doomed.zip", skillZip("e2e-doomed", "Say goodbye.\n"));
+    await alert(/Imported 'e2e-doomed' as v1/).waitFor();
+    await page.goto(UI + "/library/e2e-doomed");
+    await page.getByRole("heading", { name: "Danger zone" }).waitFor();
+    await page.getByRole("button", { name: /Delete this skill/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete e2e-doomed?" });
+    await dialog.waitFor();
+    await dialog.getByText("This cannot be undone.").waitFor();
+    await dialog.getByText(/Plugins you already built keep their own copies/).waitFor();
+    const confirm = dialog.getByRole("button", { name: "Delete e2e-doomed for good" });
+    assert.equal(await confirm.isDisabled(), true, "nothing can be confirmed before the name is typed");
+    await dialog.getByLabel(/To confirm, type/).fill("e2e-doome");
+    assert.equal(await confirm.isDisabled(), true, "a part of the name is not enough");
+    await shot(page, "scan-4-delete-dialog");
+  });
+  await step("typing the exact name deletes it: the page says what went, and it is gone from the library and from the server", async () => {
+    const dialog = page.getByRole("dialog", { name: "Delete e2e-doomed?" });
+    await dialog.getByLabel(/To confirm, type/).fill("e2e-doomed");
+    await dialog.getByRole("button", { name: "Delete e2e-doomed for good" }).click();
+    await alert(/Deleted e2e-doomed: 1 version\./).waitFor();
+    await page.getByRole("link", { name: "Back to the library" }).click();
+    await page.getByRole("heading", { name: "Library", level: 1 }).waitFor();
+    assert.equal(await page.getByRole("link", { name: /e2e-doomed/ }).count(), 0, "the deleted skill is no longer listed");
+    const status = await page.evaluate((u) => fetch(u).then((r) => r.status), `${API}/api/library/e2e-doomed`);
+    assert.equal(status, 404, "the server no longer has it");
+  });
+  await step("the server itself refuses a delete without the right typed name, whatever the page does", async () => {
+    const codes = await page.evaluate(async (base) => {
+      const del = (q) => fetch(`${base}/api/library/e2e-demo${q}`, { method: "DELETE" }).then((r) => r.status);
+      return [await del(""), await del("?confirm=nope"), await del("?confirm=E2E-DEMO")];
+    }, API);
+    assert.deepEqual(codes, [400, 400, 400]);
+    await page.goto(UI + "/library/e2e-demo");
+    await page.getByRole("heading", { name: "e2e-demo", level: 1 }).waitFor(); // it is still there
+  });
+
   console.log("Looks and behaviour");
   await step("it works in a narrow phone-sized window without sideways scrolling", async () => {
     await page.setViewportSize({ width: 390, height: 800 });
-    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2", "/composer", "/settings"]) {
+    for (const url of ["/builder", convoPath, "/library", "/library/e2e-demo", "/library/e2e-demo/diff?from=1&to=2", "/composer", "/settings", "/scan?kind=skill&name=e2e-bad"]) {
       await page.goto(UI + url);
       await page.getByRole("heading", { level: 1 }).first().waitFor();
       await page.waitForTimeout(400);

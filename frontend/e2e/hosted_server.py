@@ -24,6 +24,7 @@ from skillforge.builder.keybox import KeyBox
 from skillforge.db import Database
 from skillforge.db.users import UserStore
 from skillforge.library import Library
+from skillforge.library.registry import Libraries
 from skillforge.providers import MockProvider, ProviderError
 from skillforge.settings import EnvSettings
 
@@ -62,6 +63,10 @@ def main() -> None:
     # tester@example.com is on the allow-list the check sets, which is what a real sign-in would have needed.
     person = UserStore(database).upsert_google("phone-check-sub", "tester@example.com", "Phone Tester")
     (DATA / "person-cookie.txt").write_text(make_cookie(hosted, user=User(person.id, person.email)), encoding="utf-8")
+    # Something of the person's own for the owner to erase: one skill in their library, put there through the product's own library code.
+    Libraries(library).for_user(person.id).add(
+        "phone-skill", {"SKILL.md": b"---\nname: phone-skill\ndescription: A skill the phone check erases.\n---\nSay hello.\n"}, source_kind="check", source_label="phone check",
+    )
     settings = EnvSettings(DATA / "phone.env", {})  # a throwaway file in an empty environment: never the real .env
     uvicorn.run(create_app(library, builder=builder, env_settings=settings, hosted=hosted), host="127.0.0.1", port=PORT, log_level="warning")
 

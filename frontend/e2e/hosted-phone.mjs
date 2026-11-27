@@ -300,6 +300,56 @@ try {
     () => note(false, "turning it back on gives the same session back, with everything kept"),
   );
 
+  // ---- slice AK: the owner erases a turned-off person's data, at phone size ----
+  // hosted_server.py put one skill, phone-skill, in the person's own library. Erasing must really remove it, through the real page, API and disk.
+  const asPerson = (p) => me.evaluate((u) => fetch(u).then((r) => r.json()), p);
+  const before = await asPerson("/api/library");
+  note(Array.isArray(before) && before.length === 1 && before[0].name === "phone-skill", "before the erase, the person has a skill of their own in their library", Array.isArray(before) ? before.map((s) => s.name).join(", ") : "no list");
+  await boss.reload();
+  await boss.getByRole("heading", { name: "Phone Tester" }).waitFor({ timeout: 15_000 });
+  note((await boss.getByRole("button", { name: /Erase their data/ }).count()) === 0, "a person who is not turned off has no Erase button");
+  await boss.getByRole("button", { name: "Turn off this account" }).tap();
+  await boss.getByRole("button", { name: "Yes, turn off" }).tap();
+  await boss.getByText("Turned off", { exact: true }).waitFor({ timeout: 10_000 });
+  const erase = boss.getByRole("button", { name: /Erase their data/ });
+  await erase.waitFor({ timeout: 10_000 });
+  const eraseBox = await erase.boundingBox();
+  note(eraseBox !== null && eraseBox.height >= 44, "the Erase button is a 44 px tap target", eraseBox ? `${Math.round(eraseBox.height)} px` : "not found");
+  await erase.tap();
+  const dialog = boss.getByRole("dialog", { name: /Erase the data of Phone Tester\?/ });
+  await dialog.waitFor({ timeout: 5_000 });
+  note(await dialog.getByText("This cannot be undone.").isVisible(), "the Erase dialog says it cannot be undone");
+  note((await dialog.getByText("This removes").isVisible()) && (await dialog.getByText("This keeps").isVisible()), "it lists what it removes and what it keeps");
+  note((await dialog.getByText(/stays turned off/).isVisible()) && (await dialog.getByText(/model calls/).isVisible()), "it says the account and the record of model calls stay, and why");
+  const dBox = await dialog.boundingBox();
+  note(dBox !== null && dBox.x >= 0 && dBox.x + dBox.width <= 390, "the dialog fits inside the phone's width", dBox ? `${Math.round(dBox.x)} to ${Math.round(dBox.x + dBox.width)} px of 390` : "not found");
+  const w7 = await boss.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  note(w7.scroll <= w7.inner, "the page does not scroll sideways with the dialog open", `${w7.scroll} px wide in a ${w7.inner} px window`);
+  const confirm = dialog.getByRole("button", { name: "Erase their data for good" });
+  const addressBox = dialog.getByLabel(/To confirm, type/);
+  note(await confirm.isDisabled(), "the confirm button is off until the address is typed");
+  const addressSize = await addressBox.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  note(addressSize >= 16, "the address box text is 16 px or larger (iPhone does not zoom in on focus)", `${addressSize}px`);
+  await addressBox.fill("someone@else.example");
+  note(await confirm.isDisabled(), "a different address does not enable it");
+  await addressBox.fill("TESTER@example.com");
+  note(!(await confirm.isDisabled()), "the right address, in any case, enables it");
+  const confirmBox = await confirm.boundingBox();
+  note(confirmBox !== null && confirmBox.height >= 44, "the confirm button is a 44 px tap target", confirmBox ? `${Math.round(confirmBox.height)} px` : "not found");
+  await shotOf(boss, "09-erase-dialog.png");
+  await confirm.tap();
+  await boss.getByText(/Erased: 0 builds, 0 suggestion runs, 0 test runs, 0 behaviour scans/).waitFor({ timeout: 10_000 }).then(
+    () => note(true, "erasing says what it erased"),
+    () => note(false, "erasing says what it erased"),
+  );
+  note(await boss.getByText(/Their files are gone\./).isVisible().catch(() => false), "the notice says their files are gone");
+  note(await boss.getByText("Turned off", { exact: true }).isVisible(), "the person is still turned off after the erase (the account stays)");
+  await boss.getByRole("button", { name: "Turn back on" }).tap();
+  await boss.getByRole("button", { name: "Turn off this account" }).waitFor({ timeout: 10_000 });
+  const after = await asPerson("/api/library");
+  note(Array.isArray(after) && after.length === 0, "turned back on, the person starts empty: their skill is really gone from the server", Array.isArray(after) ? `${after.length} skills` : "no list");
+  await shotOf(boss, "10-after-erase.png");
+
   // Google's own script logs its own complaints (a made-up Client ID, third-party cookies): only errors from OUR pages and API count.
   const ours = problems.filter((p) => !/accounts\.google\.com|gsi|googleusercontent|GSI_LOGGER|Failed to load resource/i.test(p));
   note(ours.length === 0, "no page errors or console errors of our own", ours.slice(0, 3).join(" | "));

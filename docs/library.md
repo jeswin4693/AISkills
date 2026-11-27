@@ -32,7 +32,7 @@ python -m skillforge library install my-skill --project                # or --pe
 | `list`, `versions` | The skills, and each version with its date, source, file count, content hash and check counts. |
 | `diff <name>` | Files added, removed or changed between two versions, with the changed lines. Long diffs are cut and say so. It starts with the **risk diff** (below). `import` prints the same risk section when it adds a version after another. |
 | `rescan [name]` | Runs **today's** static checks on versions already stored and says which are now worse than at import (below). Changes nothing; exit code 1 if a version fails today or is damaged. |
-| `rollback <name> --to N` | A **new** version with the content of vN. History only grows; nothing is deleted. |
+| `rollback <name> --to N` | A **new** version with the content of vN. History only grows; nothing is deleted. (Deleting a whole entry is a separate, deliberate act in the web app and the API: [data-removal.md](data-removal.md).) |
 | `export <name>` | A `.zip` holding one `<name>/` folder (the shape Claude and other agents accept). Same files, same bytes. Checked again first. Never overwrites a file without `--force`. `--without-spec` leaves out `spec.json`, which holds the requester's own words. |
 | `install <name>` | Copies a version to `<skills folder>/<name>`. You **must** say where: `--personal` (`~/.claude/skills`, every Claude Code session on this machine), `--project` (`.claude/skills` here), or `--to DIR`. Checked again first. An existing folder is left alone unless `--force`, and then it is copied to a backup first. |
 

@@ -53,8 +53,8 @@ The owner of a hosted server sees **People** in the menu (nobody else does). It 
 
 ## Limits (read these)
 
-- **No deleting a person's data from the admin page, no per-person custom limits** (one number for everybody), no limits on the owner, none in local mode.
-- **The library cannot be shrunk by a person**: there is no "delete a skill". A person whose library alone passes the disk limit is stuck until the owner raises the setting; discarding builds frees only the build folders.
+- **No per-person custom limits** (one number for everybody), no limits on the owner, none in local mode. (Erasing a turned-off person's data is now possible, slice AK: [data-removal.md](data-removal.md).)
+- **A person can now shrink their own library** (slice AK): *Delete this skill…* on an entry's page removes it with every version and backup ([data-removal.md](data-removal.md)); before that a person whose library alone passed the disk limit was stuck until the owner raised the setting.
 - The disk walk is bounded (it stops at the limit) but still a pass over up to about 128,000 entries for a person near the default limit, on each start, answer, approve, retry, save or import; the People page does one per person (reused for 5 seconds). It is meant for a small server.
 - **One person with several Google accounts gets several sets of limits** (the open allow-list is the owner's choice). A person can also repeat a limit-checked call as often as they like; there is no rate limit on any route.
 - `POST /api/library/import?test_scripts=true` (the sandbox runs inside the request) and the model checks (`/api/me/model/test`, `/api/provider/check`) are not counted as "runs working": they are requests, not background runs, and the hosted image has no container engine for the first.

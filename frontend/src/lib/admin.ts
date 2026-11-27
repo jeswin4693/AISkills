@@ -16,3 +16,10 @@ export function sinceText(iso: string, now: number = Date.now()): string {
 }
 
 export const personName = (p: { name: string; email: string }): string => p.name.trim() || p.email;
+
+/** Why the owner cannot erase this person's data right now, or null when they can: only a turned-off person with nothing running. (The server checks both again.) */
+export function eraseBlockedReason(p: { blocked: boolean; active: number }): string | null {
+  if (!p.blocked) return "Turn this account off first.";
+  if (p.active > 0) return "Wait for their running work to finish.";
+  return null;
+}

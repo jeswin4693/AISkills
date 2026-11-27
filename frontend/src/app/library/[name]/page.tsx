@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { CheckBadges, CheckList } from "@/components/CheckList";
+import { DeleteEntry } from "@/components/DeleteEntry";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { FileViewer } from "@/components/FileViewer";
 import { InstallDialog } from "@/components/InstallDialog";
@@ -173,7 +174,23 @@ export default function SkillPage() {
   const data = useAsync(() => api.versions(name, kind), `${kind}/${name}`);
   const [picked, setPicked] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [deleted, setDeleted] = useState<string | null>(null); // what was deleted, in words: the page shows only that and a way back
 
+  if (deleted) {
+    return (
+      <>
+        <PageHeader title={name} />
+        <Alert tone="ok" title="Deleted">
+          {deleted}
+        </Alert>
+        <p className="mt-4 text-sm">
+          <Link href={withKindParam("/library", kind)} className="text-accent underline">
+            Back to the library
+          </Link>
+        </p>
+      </>
+    );
+  }
   if (data.error) {
     return (
       <>
@@ -258,6 +275,7 @@ export default function SkillPage() {
           }}
         />
         <RescanPanel name={name} kind={kind} />
+        <DeleteEntry name={name} kind={kind} kindInfo={kindInfo} versions={versions.length} onDeleted={setDeleted} />
       </div>
     </>
   );

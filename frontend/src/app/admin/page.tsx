@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { EraseDialog } from "@/components/EraseDialog";
 import { Alert, Badge, Button, Card, Empty, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
-import { personName, sinceText } from "@/lib/admin";
+import { eraseBlockedReason, personName, sinceText } from "@/lib/admin";
 import { formatSize } from "@/lib/space";
 import type { AdminPerson } from "@/lib/types";
 import { useAsync } from "@/lib/useAsync";
 
 /**
  * The owner's People page: who has signed in to this hosted server, what each uses, and a reversible switch to turn an account off. Turning one off
- * signs them out on their very next request and refuses a new sign-in; everything they made is kept. A person who opens this page is told it is the owner's.
+ * signs them out on their very next request and refuses a new sign-in; everything they made is kept. For a turned-off person with nothing running there is also
+ * "Erase their data", which cannot be undone and keeps the account and the record of model calls (docs/data-removal.md). A person who opens this page is told it is the owner's.
  */
 export default function PeoplePage() {
   const loaded = useAsync(api.adminPeople, "admin-people");
   const [asking, setAsking] = useState<string | null>(null); // the person whose "turn off" is waiting for a second click
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [erasing, setErasing] = useState<AdminPerson | null>(null); // the turned-off person whose "erase" dialog is open
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function change(person: AdminPerson, off: boolean) {
     setBusy(person.id);
@@ -59,6 +63,20 @@ export default function PeoplePage() {
     <>
       {header}
       {error && <ErrorBox error={error} />}
+      {notice && (
+        <Alert tone="ok" title="Done" onDismiss={() => setNotice(null)}>
+          {notice}
+        </Alert>
+      )}
+      <EraseDialog
+        person={erasing}
+        onClose={() => setErasing(null)}
+        onErased={(text) => {
+          setErasing(null);
+          setNotice(text);
+          loaded.reload();
+        }}
+      />
       {total > people.length && (
         <Alert tone="info" title={`Showing ${people.length} of ${total} people`}>
           <p>Turned-off people come first, then the latest sign-ins.</p>
@@ -117,6 +135,14 @@ export default function PeoplePage() {
                     <Button variant="ghost" className="min-h-11" disabled={busy !== null} onClick={() => setAsking(p.id)}>
                       Turn off this account
                     </Button>
+                  )}
+                  {p.blocked && (
+                    <>
+                      <Button variant="danger" className="min-h-11" disabled={busy !== null || eraseBlockedReason(p) !== null} onClick={() => setErasing(p)}>
+                        Erase their data…
+                      </Button>
+                      {eraseBlockedReason(p) && <span className="text-xs text-muted">{eraseBlockedReason(p)}</span>}
+                    </>
                   )}
                 </div>
               </Card>

@@ -1,5 +1,5 @@
 import type {
-  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, DeleteReport, EraseReport, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, MyModelView, MySpace, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
   SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -103,6 +103,8 @@ export const api = {
   adminPeople: () => get<AdminPeople>("/api/admin/people"),
   blockPerson: (id: string) => post<{ blocked: boolean }>(`/api/admin/people/${encodeURIComponent(id)}/block`, {}),
   unblockPerson: (id: string) => post<{ blocked: boolean }>(`/api/admin/people/${encodeURIComponent(id)}/unblock`, {}),
+  /** Erase a turned-off person's data. `confirm` is the address the owner typed: the server checks it too. Cannot be undone. */
+  erasePerson: (id: string, confirm: string) => post<EraseReport>(`/api/admin/people/${encodeURIComponent(id)}/erase`, { confirm }),
   /** 200 is the new state; 400 says which fields were refused and why (never repeating the key). */
   async saveMyModel(choice: { provider: string; model: string; key: string }): Promise<SaveMyModelResult> {
     const res = await send("/api/me/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(choice) });
@@ -232,6 +234,11 @@ export const api = {
       body: JSON.stringify({ accept_draft: opts.acceptDraft ?? false, note: opts.note ?? "" }),
     });
     return json<SaveResult>(res, [422]);
+  },
+
+  /** Delete a library entry of any kind with every version and its backups. `confirm` is the name the person typed (the server checks it too). Cannot be undone. */
+  async deleteEntry(name: string, confirm: string, kind?: string): Promise<DeleteReport> {
+    return json<DeleteReport>(await send(withKind(`/api/library/${encodeURIComponent(name)}?confirm=${encodeURIComponent(confirm)}`, kind), { method: "DELETE" }));
   },
 
   async discardBuild(id: string): Promise<void> {

@@ -223,7 +223,27 @@ export interface AdminPeople {
   total?: number;
 }
 
-export type SaveMyModelResult = { ok: true; view: MyModelView } | { ok: false; detail: string; problems: { name: string; message: string }[] };
+/** What deleting a library entry did (DELETE /api/library/{name}): the versions and backups removed, and whether something could not be removed from the disk. */
+export interface DeleteReport {
+  deleted: boolean;
+  name: string;
+  kind: string;
+  versions: number;
+  backups: number;
+  leftover: boolean;
+}
+
+/** What erasing a person's data did (POST /api/admin/people/{id}/erase). */
+export interface EraseReport {
+  erased: boolean;
+  builds: number;
+  suggestion_runs: number;
+  lab_runs: number;
+  key_removed: boolean;
+  files_left: boolean;
+}
+
+export type SaveMyModelResult ={ ok: true; view: MyModelView } | { ok: false; detail: string; problems: { name: string; message: string }[] };
 
 // ---- settings (docs/settings.md) -----------------------------------------------------------------------
 

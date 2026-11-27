@@ -385,6 +385,16 @@ Six items, finished before the first deployment, each test-first and committed o
 - **Tests:** backend 3,967 passed / 4 skipped, web 470 + a clean typecheck, **the browser suite 110 of 110** (the scan page and the delete dialog are now driven in a real browser) and **the phone-size check 62 of 62** (the owner's erase dialog too, proving a person's skill is really gone from the server), and 59 deliberate breaks, all caught (one of them in the browser: a scan page that rendered a model's reply as HTML). **Three independent reviews** (the GitHub-link risks, deleting and erasing, and the kept item with the scan page): no Critical finding, 6 Important found and fixed test-first, the Minor ones listed in [the plans](docs/superpowers/plans/2026-11-27-completion-batch-task-6.md).
 - **Not tried:** a real model on the scan page (a scripted one was used), a real phone, a real Google sign-in, a real host. **Not built:** a command-line delete, limits set per person.
 
+## The function-level call graph (slice AL)
+
+Under the folder map, the **Repository** page has **Who calls what**: search a repository's functions, pick one, and see the functions that **call it** on the left and the functions **it calls** on the right, one step or two, as plain SVG ([the design](docs/superpowers/specs/2026-11-27-function-graph-design.md)).
+Click a function to look at that one next, **Back** to return, or start from the functions many others depend on. It is computed by code from the graph (no model, nothing is run), for a folder and for a public GitHub link, and is off in the hosted version.
+
+- **Only proven calls are drawn.** A call matched by name alone is counted and said, never drawn and never counted in a total. A language whose calls the graph does not read (the `basic` level) says **"not measured"**, never "called by 0". Test functions that call something are counted, not drawn. Caps (20 functions a side, then 10 and 5 neighbours) cut the weakest first and say how many.
+- **A real run found a slow click.** Each click took about **3 seconds** on this repository (the whole graph was read again, and with a focus folder the on-disk cache does not apply). The last two graphs are now kept in memory and used only while every file's name, size and modification time is unchanged: **0.2 to 0.3 seconds**.
+- **Tests:** backend 4,044 passed / 4 skipped (77 new), web 499 + a clean typecheck (29 new), **the browser suite 115 of 115** (5 new steps; the first run's one failure was my own ambiguous selector). **69 deliberate breaks, all caught** (the first round of each left 6, 4 and 3 survivors: weak tests of mine, now strengthened). **No independent review.**
+- **Limits:** only what the graph can prove (a callback, reflection or dynamic call is not seen), a function that calls itself is not drawn, two steps at most, and for a GitHub link each click uses the copy current at that moment. Details: [docs/function-graph.md](docs/function-graph.md).
+
 ## Run the local API (the web UI talks to it)
 
 ```powershell

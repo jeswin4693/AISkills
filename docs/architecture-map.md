@@ -54,7 +54,7 @@ page: `frontend/src/components/repository/ArchitectureMap.tsx` with the layout i
 - **A very connected codebase is still busy.** Arrows can pass behind boxes (they are straight between columns, not routed around boxes) and
   a wide map scrolls inside its frame. The 36-arrow cap, the ordering and click-to-highlight help; they do not make a dense project simple.
 - A box is one **folder level** (up to three); there is no zoom on the picture itself. To zoom, type a folder in "Only this folder inside it".
-- No function-level call graph, no history of how the structure changed, nothing is saved or exported as an image.
+- No history of how the structure changed, nothing is saved or exported as an image. The map is folders only; **who calls which function** is the next section of the page ([function-graph.md](function-graph.md), slice AL).
 - It reads the code as it was downloaded or read; it says nothing about a running system.
 - **Test scaffolding is recognised by a folder's whole name** (`e2e`, `fixtures`, `mocks`, `testing`, ...). A fake server or a helper in a folder with another name is still drawn as ordinary code.
 

@@ -136,3 +136,26 @@
 ### After the tasks
 
 No separate independent review: the approved design schedules one review of the whole batch (task 6), and its focus names the scan (point 3). The browser run of the new page and of the two dialogs of task 4 also happens in task 6.
+
+---
+
+## Outcome (2026-11-27)
+
+Built in `5062956` (storage and the hooks), `9f3ebf3` (`ScanRuns`), `2003e30` (`/api/scans`), `c9ab400` (the page) and `0b7afa9` (docs). Backend **3,962 passed / 4 skipped / 0 failed** (the 4 skips are symbolic-link tests this account cannot run); 43 new backend tests; web **464 passed** (24 new) and a clean type check.
+
+**Deliberate breaks:** 14 run, **14 caught**: reading, retrying and listing another person's run; using the owner's model for a person's run; skipping admission; `PersonSpace.active` and `Builder.working_for` ignoring scans; erase, the delete clean-up and restart recovery forgetting scans; a stored result that stops cutting long text; a stored outcome overwritten to `nothing_observed`; the second-click rule ignoring the person; a plugin being scannable; the route letting a person ask for any number of repeats.
+
+**What was built.** A page `/scan` and the routes `GET /api/scans/preview`, `POST /api/scans`, `GET /api/scans`, `GET /api/scans/{id}`, `POST /api/scans/{id}/retry`; the table `scan_runs` (migration 0010); `builder/scans.py::ScanRuns`, a near copy of the Testing Lab's `EvalRuns` around the existing engine. Scan runs now join every place that knows about running work, as the review of task 4 required: the limit on runs at once, `Builder.working_for` (so a delete and an erase wait for a scan), restart recovery (a run left working becomes failed and retryable), the erase of a person (the answer gained `scan_runs`) and the clean-up when a library entry is deleted (`drop_lab_runs` became `drop_runs_of`). The page never says "safe": the headline is written from the engine's outcome code, `nothing_observed` is shown as information and says "evidence, not proof", an unfinished task run is never shown as finished, and the limits sentence is shown with every result.
+
+**No separate independent review** (the approved design schedules one review of the whole batch in task 6, and its focus names the scan, point 3). **The page has not been run in a real browser**; that, and the two dialogs of task 4, are the batch's last task.
+
+**Mistakes made and caught on the way:** `limits.py` used `ScanRun` without importing it (many limit tests failed at once and said so); a test file that pins the exact list of tables the migrations create needed `scan_runs`; and a task's closing check once named a test file that does not exist (`test_evals.py`), so nothing was recorded until it was run again with the right one.
+
+**Rulings made while building:**
+1. The page caps repeats at 3 and tasks at 6 (the command line allows 5 and 8): a stored result holds every transcript. Cost if wrong: someone who wants more uses the command line.
+2. The page offers "let a model draft one more task from the description" (the command line's `--no-draft` inverted), on by default: it is the one option that changes which tasks run. Cost if wrong: one more model call by default.
+3. No separate independent review for this task (above). Cost if wrong: a defect is found at the end of the batch.
+4. `drop_lab_runs` was renamed `drop_runs_of` and also deletes scan runs: the same name-reuse problem applies to a deleted entry's scan verdict. Cost if wrong: none (an internal name).
+5. The browser run of the page is left to task 6, as for task 4's dialogs.
+
+**Not covered:** a real browser; scanning from a folder or with more than 3 repeats on the page (the command line does both); the corpus measurement on the page (`canary --measure` stays on the command line).

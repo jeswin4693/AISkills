@@ -13,6 +13,7 @@ background jobs the browser polls.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import uuid
@@ -38,6 +39,7 @@ from .limits import PersonLimits, PersonSpace
 from .model_access import ModelAccess, ModelOptions
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
+from .retention import UsageRetention, keep_days_from_env
 from .suggestions import SuggestRuns
 from .usage import usage_summary
 
@@ -53,6 +55,7 @@ class Builder:
         provider_factory: Callable[[], LLMProvider] = env_provider, runner: JobRunner | None = None,
         sandbox_note: Callable[[], str] = default_sandbox_note, script_runner: ScriptRunner | None = None,
         library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(), limits: PersonLimits = PersonLimits(),
+        usage_keep_days: int = 0,
     ) -> None:
         self.db = database
         self.library = library  # the owner's library
@@ -64,19 +67,28 @@ class Builder:
         self.script_runner = script_runner
         # Which model each person's calls use, and whether they may use it now (slice AI). It looks `provider_factory` up when asked, not once, because
         # the server's model can be changed while it runs (a fixed .env is seen at once).
-        self.access = ModelAccess(self.db, lambda: self.provider_factory(), model_options)
+        # Usage rows older than `usage_keep_days` are cleaned at most once a day (0: never; the real server sets it from the environment, see `default`).
+        # It is asked whenever a build, a suggestion run or a Lab run picks its model. Today's rows are never touched: they are the daily allowance.
+        self.retention = UsageRetention(self.db, usage_keep_days, model_options.clock)
+        self.access = ModelAccess(self.db, lambda: self.provider_factory(), model_options, housekeeping=self.retention.run_if_due)
         # What each person uses and may use (slice AJ): disk, kept builds, runs working at once. The owner is never limited.
         self.space = PersonSpace(self.db, limits, self._person_folders)
 
     @classmethod
     def default(
         cls, library: Library, library_for: Callable[[str], Library] | None = None, model_options: ModelOptions = ModelOptions(), limits: PersonLimits = PersonLimits(),
+        usage_keep_days: int | None = None,
     ) -> "Builder":
-        """The real thing: the SQLite file in the per-user data folder, migrated, with interrupted work marked."""
+        """The real thing: the SQLite file in the per-user data folder, migrated, with interrupted work marked, and old usage rows cleaned once.
+
+        `usage_keep_days` None reads SKILLFORGE_USAGE_KEEP_DAYS (default 90, 0 keeps everything): builder/retention.py."""
         db = Database()
         db.migrate()
         db.recover_interrupted()
-        return cls(db, library, data_dir() / "builds", library_for=library_for, model_options=model_options, limits=limits)
+        keep = keep_days_from_env(os.environ) if usage_keep_days is None else usage_keep_days
+        builder = cls(db, library, data_dir() / "builds", library_for=library_for, model_options=model_options, limits=limits, usage_keep_days=keep)
+        builder.retention.run_if_due()  # once at start; after this, at most once a day
+        return builder
 
     def _person_folders(self, user_id: str) -> list[Path]:
         """Where a person's files are: their own folder (their library of every kind sits in it) and the folder of each build they have."""

@@ -87,10 +87,14 @@ class _GivesBackASlot(DbUsageRecorder):
 
 
 class ModelAccess:
-    def __init__(self, db: Database, server_provider: Callable[[], LLMProvider], options: ModelOptions = ModelOptions()) -> None:
+    def __init__(
+        self, db: Database, server_provider: Callable[[], LLMProvider], options: ModelOptions = ModelOptions(),
+        housekeeping: Callable[[], object] | None = None,
+    ) -> None:
         self.db = db
         self.server_provider = server_provider  # the owner's model: the server's own settings (builder.provider.env_provider)
         self.options = options
+        self.housekeeping = housekeeping or (lambda: None)  # asked once per build, suggestion run or Lab run (builder/retention.py: it never raises)
         self.store = ModelStore(db)
         self._lock = threading.Lock()
         self._inflight: dict[str, list[float]] = {}  # per person: when each attempt that has passed the gate but not yet written its row began
@@ -99,6 +103,7 @@ class ModelAccess:
 
     def provider_for(self, user_id: str, *, session_id: str | None = None, job_id: int | None = None) -> LLMProvider:
         """The model this person's call should use, with the usage recorder attached. Raises ProviderError (retryable: adding a key or waiting helps)."""
+        self.housekeeping()
         if user_id == LOCAL_USER_ID:
             return self._recorded(self.server_provider(), user_id, session_id, job_id, "server", None)
         stored = self.store.get(user_id)

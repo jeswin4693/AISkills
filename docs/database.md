@@ -29,7 +29,10 @@ longer registered can still be read, listed and discarded.
 `model_calls` (migration 0002): one row per **attempt** at a model for a session: the session and job, the task
 (`extract`, `select`, `design`, `suggest`, `code`, `act`), the tier, provider and model, the attempt number, ok or
 error and the error kind, the input and output tokens as the provider reported them (null when it gave none) and the
-time taken. **Never any prompt or reply text.** Deleting a session deletes its rows. See [ai-engine.md](ai-engine.md).
+time taken. **Never any prompt or reply text.** Discarding a build **keeps** its rows (their session is emptied): they are the ledger a person's daily allowance on the server's model is counted from ([per-person-keys.md](per-person-keys.md)), so no code may delete them to hand an allowance back. See [ai-engine.md](ai-engine.md).
+
+**Clean-up of old rows (slice AK, `builder/retention.py`).** Because discarded builds keep their rows the table only ever grew. Rows older than `SKILLFORGE_USAGE_KEEP_DAYS` days (default **90**, `0` keeps everything) are deleted once when the server starts and then at most once in 24 hours (checked whenever a build, suggestion run or Testing Lab run picks its model).
+The allowance reads only **today's** rows (UTC), and the clean-up's line is never later than today's midnight whatever the number says, so nothing the allowance counts is touched. A value that is not understood (a negative number, a decimal, text) deletes nothing and is logged; a clean-up that fails is logged and never fails a build.
 
 `eval_runs` (migration 0005, [testing-lab.md](testing-lab.md)): one row per Testing Lab run: the kind, skill name and **version** it tested with that
 version's content hash (a newer version later does not change what a run is about), how many times each case was repeated, whether the same cases were also run

@@ -15,7 +15,7 @@ On the entry's page, at the bottom: **Danger zone** → *Delete this skill…* (
 
 | | |
 |---|---|
-| **Goes** | every version of that entry (`<library>/<name>/v1…`), the backups of that exact name in the library's backups folder (the copies made when an install with `--force` replaced a folder or file of that name), and **that person's Testing Lab runs of that entry** (a new entry of the same name starts again at v1, and the quality report matches runs by name and version, so a leftover run would have been shown as the new entry's tested result; found by the independent review). |
+| **Goes** | every version of that entry (`<library>/<name>/v1…`), the backups of that exact name in the library's backups folder (the copies made when an install with `--force` replaced a folder or file of that name), and **that person's Testing Lab runs and behaviour scans of that entry** (a new entry of the same name starts again at v1, and the quality report matches runs by name and version, so a leftover run would have been shown as the new entry's tested result; found by the independent review). |
 | **Stays** | other entries and kinds; another person's library; **plugins you already built** (a plugin holds its own copies); **folders you installed it into** (those are your own copies and are not touched); exports you made. |
 | **Refused** | no `confirm`, or one that is not exactly the name (400, nothing deleted); the name is odd (not lowercase letters, digits and hyphens, or too long) (400); no such entry (404, the same text whoever asks); **work running** for that person (409): a plugin build reads the library while it works; an entry that is, or holds, a link (400). |
 
@@ -32,11 +32,11 @@ How it is kept safe (`library/remove.py`, `Library.delete`):
 
 On the **People** page, for a turned-off person: *Erase their data…*. The dialog says what goes, what stays, that it cannot be undone, and asks for **their address typed**.
 
-`POST /api/admin/people/{id}/erase` with `{"confirm": "<their address>"}` (owner only; only GET, POST and DELETE exist in the CORS policy): answers `{"erased": true, "builds", "suggestion_runs", "lab_runs", "key_removed", "files_left"}`.
+`POST /api/admin/people/{id}/erase` with `{"confirm": "<their address>"}` (owner only; only GET, POST and DELETE exist in the CORS policy): answers `{"erased": true, "builds", "suggestion_runs", "lab_runs", "scan_runs", "key_removed", "files_left"}`.
 
 | | |
 |---|---|
-| **Goes** | their folder (`<data>/users/<id>`: their library of every kind and its backups); their builds (rows, jobs and `<data>/builds/<id>` folders); their suggestion runs and Testing Lab runs; their saved model key. |
+| **Goes** | their folder (`<data>/users/<id>`: their library of every kind and its backups); their builds (rows, jobs and `<data>/builds/<id>` folders); their suggestion runs, Testing Lab runs and behaviour scans; their saved model key. |
 | **Stays, on purpose** | **the account**: the person is still turned off, and if the owner turns them back on they start empty. **Every usage row** (`model_calls`, counts and timings only): a person's daily allowance on the server's model is counted from them, so erasing them would let a person erase themselves and start again with a fresh allowance. |
 | **Refused** | the person is not turned off (409); they have work running, a build, a Testing Lab run or a suggestion run (409); no or wrong address (400; the address is compared ignoring case and surrounding spaces); the owner (400); an unknown or malformed id (404); anyone but the owner (403); a local server, which has no accounts (400). |
 
@@ -50,7 +50,7 @@ The trap this avoids: `model_calls.session_id` is a foreign key that **cascades*
 ## What is not covered
 
 * **Copies that left the server**: an export someone downloaded, a skill installed on their own computer.
-* **Scan runs** (the behaviour scan's web page, slice AK's next task) are not stored yet; when they are, they are added to both `Builder.working_for` and `erase_person`.
+* **Scan runs** (the behaviour scan page, slice AK) are covered: counted by `Builder.working_for`, erased by `erase_person`, and removed by `Builder.drop_runs_of` when their entry is deleted.
 * **A request that was already running** when the person was turned off finishes first: erase waits for `working_for(person) == 0`. A request that passed the sign-in check in the very moment of turning off could still start work; erasing again removes it.
 * There is **no command-line delete** yet (the CLI's `library` commands only add and read).
 * The two dialogs have been run through the unit tests and the type check; **the browser suite runs in the batch's last task**.

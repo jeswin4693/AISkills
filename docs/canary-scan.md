@@ -254,6 +254,18 @@ two ways, so `< file` was never the only clue; a history limit hid behind an ear
 requests return a constant); no real environment, key or path reaches a prompt; path reading (`~`, `$HOME`, `%USERPROFILE%`, drive letters, `file://`, `..`) is shared by the judge and the world; leak detection on long text is linear;
 a malformed step, more than 8 calls, a model failing part way or at the very start, the `--runs` and `--scenarios` limits, the exit codes, and "an unfinished run is never counted toward MIN_COMPLETE" all behave as written; no verdict says "safe".
 
+## The Behaviour Scan page and API (slice AK)
+
+The scan was command-line only; it now has a page, **Behaviour Scan** (`/scan`), and an API (`/api/scans`), both over the same engine, so the same code judges and the same words are used.
+
+* **What you do.** Choose *Skill* or *Agent*, the entry and its version (kept in the address, so a link can point straight at one). The page shows **what would run** before any model is asked: the tasks, the most model calls it could make, what the entry declares, the scripts it ships (listed, never run) and the limits sentence. Then choose how many times each task is repeated (1 to 3), how many tasks (1 to 6), whether a task that produced something is also run without the skill (the control, on by default), and whether a model drafts one more task from the description (one more call, on by default). The page's caps are lower than the command line's (3 and 6, against 5 and 8) because a stored result holds every step of every run.
+* **What you read.** A polled run (it goes on if you leave the page, and a restart marks it failed and retryable): the **headline** written from the engine's outcome code (`flagged`, `unclear`, `caution`, `incomplete`, `nothing_observed`, `not_run`), the engine's own verdict sentence, **what did not run**, every **finding** most serious first, then **task by task**: how it ended (a run that did not finish is never shown as finished), its findings, what the same task did without the skill, and every step the model took as **plain text** (never markup). The limits sentence is shown with every result.
+* **It never says "safe".** `nothing_observed` is shown as information, not as green, and says *evidence, not proof*; `incomplete` says too little ran. A test checks that no headline of any outcome says "safe".
+* **Whose it is.** Scans are kept per person (`scan_runs`, migration 0010). Another person's scan is a 404 identical to one that never existed. A scan spends the model of the person it belongs to (their own key, or the shared model within their daily allowance) and **counts toward their runs working at once**. It is counted as running work (so deleting a library entry or erasing a person waits for it), erased with its person, and removed with its library entry, so a new entry of the same name never shows the old verdict ([data-removal.md](data-removal.md)).
+* **Skills and agents only**, from the library. A plugin or an MCP server is refused with the engine's sentence. A scan reads the library, never a folder, so it works in the hosted version.
+* **Not on the page:** more than 3 repeats or 6 tasks, a folder, and the corpus measurement (`canary --measure`): those stay on the command line.
+* **Verified by:** `tests/test_scan_storage.py`, `tests/test_scan_runs.py` and `tests/test_scan_api.py` (the real engine with scripted models), `frontend/src/lib/scan.test.ts`. The page has not yet been run in a real browser (the batch's last task).
+
 ## Limits (read these)
 
 - **The corpus was written by the author of the scan**, who knows what it looks for. Its numbers are optimistic. It is small and made of text skills.
@@ -276,3 +288,4 @@ a malformed step, more than 8 calls, a model failing part way or at the very sta
 `skillforge/canary/`: `world.py` (the fake machine, path reading, command reading), `judge.py` (what counts), `instructions.py` (reading a skill or agent),
 `scenarios.py` (the tasks), `runner.py` (the loop, the control, the outcome and the verdict), `render.py` (text), `corpus.py` (the measuring stick).
 Command line: `skillforge canary`. Tests: `tests/test_canary_*.py`, all offline with a scripted model.
+The page and the API (slice AK): `builder/scans.py` (`ScanRuns`), `api/scans.py`, `frontend/src/components/scan/`, `frontend/src/lib/scan.ts`.

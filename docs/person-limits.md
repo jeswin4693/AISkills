@@ -11,7 +11,7 @@ Only **signed-in people** on a **hosted** server are limited. **The owner (the a
 |---|---|---|
 | `SKILLFORGE_PERSON_DISK_MB` | **500** | the size of a person's folder (their library of every kind) plus the folders of their own builds |
 | `SKILLFORGE_PERSON_MAX_BUILDS` | **50** | builds a person may keep (discarding one makes room) |
-| `SKILLFORGE_PERSON_MAX_ACTIVE` | **2** | background runs working at the same moment, builds and Testing Lab runs together (the job pool has two workers and is shared by everybody) |
+| `SKILLFORGE_PERSON_MAX_ACTIVE` | **2** | background runs working at the same moment, builds, Testing Lab runs and behaviour scans together (the job pool has two workers and is shared by everybody) |
 
 Each is a whole number from 0 to 10,000,000, or the server refuses to start and names the setting.
 
@@ -37,7 +37,7 @@ Each is a whole number from 0 to 10,000,000, or the server refuses to start and 
 The owner of a hosted server sees **People** in the menu (nobody else does). It lists everybody who has signed in with: name, address, builds kept, disk used, model calls today (on the server's model / on their own key), last seen, whether they have a key of their own (never the key, never which model), and any runs working. Each card has **Turn off this account** (it asks first, and says what happens) and, once off, **Turn back on**.
 
 - **A turned-off person is signed out on their very next request**, even with a good session: the block is checked on every request, like the allow-list. Every call is refused with 403 "This account has been turned off on this server. Ask the person who runs it.", the sign-in screen says so, and a new Google sign-in is refused with the same words and **no session**.
-- **Nothing is deleted.** Their builds, library and key stay; turning the account back on gives the same session back. (Deleting a person's data is a separate, irreversible step that is **not** built.) A build that was already running when the account was turned off finishes (at most the "runs working" limit).
+- **Nothing is deleted.** Their builds, library and key stay; turning the account back on gives the same session back. (Erasing a person's data is a separate, irreversible step, slice AK: [data-removal.md](data-removal.md).) A build that was already running when the account was turned off finishes (at most the "runs working" limit).
 - **Only the owner** can list or turn off: a person gets 403, local mode says there are no accounts. The owner cannot be turned off; an id that is not one this server made is refused before any lookup, and an unknown one is a 404.
 - Routes: `GET /api/admin/people`, `POST /api/admin/people/{id}/block`, `POST /api/admin/people/{id}/unblock` (POST, not PATCH: the API's CORS policy allows GET, POST and DELETE only). The column is `users.blocked` (migration 0008, a plain `ADD COLUMN`; the downgrade keeps every person).
 

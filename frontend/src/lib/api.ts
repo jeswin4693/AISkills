@@ -1,5 +1,5 @@
 import type {
-  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, DeleteReport, EraseReport, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, DeleteReport, EraseReport, ScanPreview, ScanRun, ScanRunSummary, ScanStart, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, MyModelView, MySpace, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
   SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -181,6 +181,28 @@ export const api = {
     return get<EvalRunSummary[]>(`/api/evals${q.size ? `?${q}` : ""}`);
   },
   retryEval: (id: string) => post<EvalRun>(`/api/evals/${encodeURIComponent(id)}/retry`, {}),
+
+  // ---- the behaviour scan: a skill's or agent's instructions run on fake tools with planted fake secrets; code judges ----
+  /** The tasks a scan would run and the most model calls, before any model is asked. */
+  scanPreview: (o: { name: string; version?: number; kind?: string; runs?: number; scenarios?: number; control?: boolean; draft?: boolean }) => {
+    const q = new URLSearchParams({ name: o.name });
+    if (o.version) q.set("version", String(o.version));
+    if (o.kind && o.kind !== "skill") q.set("kind", o.kind);
+    if (o.runs !== undefined) q.set("runs", String(o.runs));
+    if (o.scenarios !== undefined) q.set("scenarios", String(o.scenarios));
+    if (o.control !== undefined) q.set("control", String(o.control));
+    if (o.draft !== undefined) q.set("draft", String(o.draft));
+    return get<ScanPreview>(`/api/scans/preview?${q}`);
+  },
+  startScan: (body: ScanStart) => post<ScanRun>("/api/scans", body),
+  scanRun: (id: string) => get<ScanRun>(`/api/scans/${encodeURIComponent(id)}`),
+  scanRuns: (o: { name?: string; version?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (o.name) q.set("name", o.name);
+    if (o.version) q.set("version", String(o.version));
+    return get<ScanRunSummary[]>(`/api/scans${q.size ? `?${q}` : ""}`);
+  },
+  retryScan: (id: string) => post<ScanRun>(`/api/scans/${encodeURIComponent(id)}/retry`, {}),
   /** Today's checks on one version, the requirement against its tests, the cost, the Lab's result, what did not run, and what to do next. A GET: no model, nothing run. */
   qualityReport: (name: string, version?: number) =>
     get<QualityReport>(`/api/library/${encodeURIComponent(name)}/quality${version ? `?version=${version}` : ""}`),

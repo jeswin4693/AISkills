@@ -899,6 +899,114 @@ export interface EvalRunSummary extends Omit<EvalRun, "result"> {
   summary: { outcome: EvalOutcome; with_skill: EvalTally; baseline: EvalTally | null; calls: number } | null;
 }
 
+// ---- the behaviour scan (docs/canary-scan.md) ------------------------------------------------------------
+
+/** What the engine decided, as a code. The page words it; nothing here ever means "safe". */
+export type ScanOutcome = "flagged" | "unclear" | "caution" | "incomplete" | "nothing_observed" | "not_run";
+
+export interface ScanTask {
+  id: string;
+  message: string;
+  source: string; // fixed, test case, or drafted from the description
+}
+
+/** What a scan would do, before any model is asked. */
+export interface ScanPreview {
+  name: string;
+  kind: string;
+  version: number;
+  tag: string;
+  content_hash: string;
+  tasks: ScanTask[];
+  runs: number;
+  scenarios: number;
+  control: boolean;
+  draft: boolean;
+  max_calls: number;
+  declared: string[] | null;
+  scripts: string[];
+  limits: { max_runs: number; max_scenarios: number; default_scenarios: number };
+  limits_text: string;
+}
+
+export interface ScanObservation {
+  kind: string;
+  severity: string; // info, medium, high, critical
+  detail: string;
+  tool: string;
+  evidence: string;
+  scenario: string;
+  turn: number;
+  subject: string;
+}
+
+export interface ScanTurn {
+  step: number;
+  call: Record<string, string>;
+  result: string;
+}
+
+/** One task run (with the skill, or the control without it). Every string a model wrote is plain text. */
+export interface ScanTaskRun {
+  scenario: ScanTask;
+  condition: string;
+  turns: ScanTurn[];
+  reply: string;
+  finished: boolean;
+  error: string;
+  observations: ScanObservation[];
+  model_calls: number;
+}
+
+export interface ScanResult {
+  outcome: ScanOutcome;
+  verdict: string;
+  limits: string;
+  skill: string;
+  kind: string;
+  runs: ScanTaskRun[];
+  controls: ScanTaskRun[];
+  not_run: string[];
+  calls: number;
+  runs_per_scenario: number;
+  controlled: boolean;
+}
+
+export interface ScanRun {
+  id: string;
+  status: RunStatus;
+  kind: string;
+  name: string;
+  version: number;
+  tag: string;
+  content_hash: string;
+  runs: number;
+  scenarios: number;
+  control: boolean;
+  draft: boolean;
+  progress: { done: number; total: number };
+  result: ScanResult | null;
+  error: string;
+  retryable: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScanRunSummary extends Omit<ScanRun, "result"> {
+  summary: { outcome: ScanOutcome; calls: number; findings: number; finished: number; total: number } | null;
+}
+
+/** What the page asks for when it starts a scan. */
+export interface ScanStart {
+  name: string;
+  version?: number;
+  kind?: string;
+  runs: number;
+  scenarios: number;
+  control: boolean;
+  draft: boolean;
+}
+
 /** The repository a build started from. The folder's name only: the path stays on the server. */
 export interface BuildSeed {
   repo: string;

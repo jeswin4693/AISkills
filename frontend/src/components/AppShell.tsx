@@ -15,6 +15,7 @@ const NAV = [
   { href: "/repository", label: "Repository", hint: "Read a repository and get ideas grounded in its code" },
   { href: "/library", label: "Library", hint: "Your skills and their versions" },
   { href: "/testing", label: "Testing Lab", hint: "Run a skill's test cases with the skill and without it" },
+  { href: "/scan", label: "Behaviour Scan", hint: "Run a skill or agent on fake tools with planted fake secrets and see what a model does" },
   { href: "/quality", label: "Quality Report", hint: "What the checks found on a skill, what did not run, and what to do next" },
   { href: "/composer", label: "Plugins", hint: "Combine skills and agents into a plugin" },
   { href: "/settings", label: "Settings", hint: "Choose your model and add its key" },

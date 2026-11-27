@@ -22,13 +22,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 from pydantic import ValidationError
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from ..build.models import RequirementSpec
 from ..build.pipeline import BuildError, apply_answers, check_description, sandbox_note as default_sandbox_note
 from ..build.requirements import Question
 from ..build.scripts import ScriptRunner
-from ..db import LOCAL_USER_ID, BuildSession, Database, Job, ModelCall, now_text
+from ..db import LOCAL_USER_ID, BuildSession, Database, EvalRun, Job, ModelCall, SuggestRun, now_text
 from ..graph.store import data_dir
 from ..kinds import UnknownKind, get_kind
 from ..library import ImportReport, Library, LibraryError, import_skill
@@ -114,6 +114,16 @@ class Builder:
         with self.db.session() as s:
             ids = s.execute(select(BuildSession.id).where(BuildSession.user_id == user_id)).scalars().all()
         return folders + [self.builds_root / sid for sid in ids if _ID.match(sid)]
+
+    def working_for(self, user_id: str) -> int:
+        """How many things of this person are working right now: builds, Testing Lab runs and suggestion runs. Deleting a library entry, or erasing a person,
+        waits until this is 0 (a plugin build reads the library while it works, and a run that writes its result after its rows are gone would leave a stray one).
+        This is not the limits' `active` count, which is about how many a person may run at once and does not include suggestion runs."""
+        with self.db.session() as s:
+            return sum(
+                s.execute(select(func.count()).select_from(model).where(model.user_id == user_id, model.status == "working")).scalar_one()
+                for model in (BuildSession, EvalRun, SuggestRun)
+            )
 
     def _library(self, user_id: str) -> Library:
         """The library of whoever owns a session. Fails closed: with no resolver only the owner has a library, never a shared one for everybody."""

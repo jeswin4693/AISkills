@@ -45,7 +45,7 @@ from .me import me_router
 from .plugins import plugins_router
 from .quality import quality_router
 from .repos import repos_router
-from .scope import user_library
+from .scope import user_id, user_library
 from .settings import settings_router
 from .security import LocalOnlyMiddleware, allowed_origins
 from .views import checks_view as _checks
@@ -254,6 +254,18 @@ def create_app(
         if not found:
             raise NotFound(f"There is no skill named '{name}' in the library.")
         return {"name": name, "versions": [_version(v) for v in reversed(found)]}
+
+    @api.delete("/library/{name}")
+    def delete_entry(name: str, request: Request, confirm: str = "", lib: Library = Depends(library_for)) -> dict:
+        """Delete one skill, agent, plugin or MCP server of the person asking, with every version and the backups made when an install replaced a folder of that
+        name. It cannot be undone (docs/data-removal.md). The typed name is checked HERE, not by the page: a request without it is refused. Nothing is deleted while the
+        person has work running (a plugin build reads the library while it works). Plugins already built keep their own copies."""
+        if confirm != name:
+            raise HTTPException(400, "Type the name to confirm: nothing was deleted.")
+        if get_builder(request.app).working_for(user_id(request)):
+            raise Conflict("You have work running. Wait for it to finish, then delete.")
+        report = lib.delete(name)
+        return {"deleted": True, "name": report.name, "kind": lib.kind, "versions": report.versions, "backups": report.backups, "leftover": report.leftover}
 
     @api.get("/library/{name}/diff")
     def diff(name: str, frm: int | None = None, to: int | None = None, lib: Library = Depends(library_for)) -> dict:

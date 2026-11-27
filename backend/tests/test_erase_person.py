@@ -233,7 +233,35 @@ def test_erasing_twice_is_harmless(ew):
     assert again.status_code == 200 and again.json() == {"erased": True, "builds": 0, "suggestion_runs": 0, "lab_runs": 0, "key_removed": False, "files_left": False}
 
 
-def test_a_folder_that_cannot_be_removed_is_reported_and_the_rows_are_still_gone(ew, monkeypatch):
+def test_a_build_folder_that_cannot_be_removed_keeps_its_row_so_erasing_again_finishes_the_job(ew, monkeypatch):
+    """The review's Important finding: the build ids came from rows that were already deleted, so a folder the disk would not give up was lost for good and a second
+    erase said "Their files are gone" while private files remained. The row of such a build now stays, so the next erase finds the folder again."""
+    w = ew()
+    w.person(1)
+    a = seed_person(w, 1)
+    (a["folder"] / "secret.txt").write_text("private", encoding="utf-8")
+    owner = w.owner()
+    block(owner, a["uid"])
+    real, calls = shutil.rmtree, []
+
+    def flaky(path, *args, **kwargs):
+        calls.append(str(path))
+        if len(calls) == 1:  # the first removal is the build folder: the disk will not give it up this time
+            return None
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(remove_module.shutil, "rmtree", flaky)
+    first = erase(owner, a["uid"], "p1@example.com").json()
+    assert first["files_left"] is True and first["builds"] == 0
+    assert (a["folder"] / "secret.txt").exists() and counts(w, a["uid"])["builds"] == 1  # the row stays: it is how the folder is found again
+    monkeypatch.undo()
+    second = erase(owner, a["uid"], "p1@example.com").json()
+    assert second["files_left"] is False and second["builds"] == 1
+    assert not a["folder"].exists() and counts(w, a["uid"])["builds"] == 0
+    assert counts(w, a["uid"])["usage"] == 3  # the usage rows were never touched, before or after
+
+
+def test_a_folder_that_cannot_be_removed_is_reported_and_what_has_no_folder_is_still_erased(ew, monkeypatch):
     w = ew()
     w.person(1)
     a = seed_person(w, 1)
@@ -242,7 +270,8 @@ def test_a_folder_that_cannot_be_removed_is_reported_and_the_rows_are_still_gone
     monkeypatch.setattr(remove_module.shutil, "rmtree", lambda *args, **kwargs: None)
     r = erase(owner, a["uid"], "p1@example.com")
     assert r.status_code == 200 and r.json()["files_left"] is True
-    assert counts(w, a["uid"])["builds"] == 0 and counts(w, a["uid"])["keys"] == 0 and str(w.tmp) not in r.text
+    assert counts(w, a["uid"])["keys"] == 0 and counts(w, a["uid"])["suggestions"] == 0 and counts(w, a["uid"])["labs"] == 0 and str(w.tmp) not in r.text
+    assert counts(w, a["uid"])["builds"] == 1 and r.json()["builds"] == 0  # the build whose folder is still there keeps its row, so erasing again can find it
 
 
 def test_a_link_inside_the_persons_folder_is_removed_as_a_link_and_never_followed(ew, tmp_path):

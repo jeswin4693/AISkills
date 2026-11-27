@@ -49,7 +49,7 @@ export function erasedNotice(r: EraseReport): string {
   const counted = [plural(r.builds, "build"), plural(r.suggestion_runs, "suggestion run"), plural(r.lab_runs, "test run")].join(", ");
   const key = r.key_removed ? ", and their saved model key" : "";
   const files = r.files_left
-    ? " Some files could not be removed from the disk (a program may be holding them); they no longer belong to anything, so try again later."
+    ? " Some files could not be removed from the disk (a program may be holding them). Erase again to try once more: nothing is reported gone while it is not."
     : " Their files are gone.";
   return `Erased: ${counted}${key}.${files}`;
 }

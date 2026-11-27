@@ -262,9 +262,11 @@ def create_app(
         person has work running (a plugin build reads the library while it works). Plugins already built keep their own copies."""
         if confirm != name:
             raise HTTPException(400, "Type the name to confirm: nothing was deleted.")
-        if get_builder(request.app).working_for(user_id(request)):
+        builder, person = get_builder(request.app), user_id(request)
+        if builder.working_for(person):
             raise Conflict("You have work running. Wait for it to finish, then delete.")
         report = lib.delete(name)
+        builder.drop_lab_runs(person, lib.kind, name)  # a new entry of this name must not inherit the deleted one's test results
         return {"deleted": True, "name": report.name, "kind": lib.kind, "versions": report.versions, "backups": report.backups, "leftover": report.leftover}
 
     @api.get("/library/{name}/diff")

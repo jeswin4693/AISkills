@@ -15,7 +15,7 @@ On the entry's page, at the bottom: **Danger zone** → *Delete this skill…* (
 
 | | |
 |---|---|
-| **Goes** | every version of that entry (`<library>/<name>/v1…`), and the backups of that exact name in the library's backups folder (the copies made when an install with `--force` replaced a folder or file of that name). |
+| **Goes** | every version of that entry (`<library>/<name>/v1…`), the backups of that exact name in the library's backups folder (the copies made when an install with `--force` replaced a folder or file of that name), and **that person's Testing Lab runs of that entry** (a new entry of the same name starts again at v1, and the quality report matches runs by name and version, so a leftover run would have been shown as the new entry's tested result; found by the independent review). |
 | **Stays** | other entries and kinds; another person's library; **plugins you already built** (a plugin holds its own copies); **folders you installed it into** (those are your own copies and are not touched); exports you made. |
 | **Refused** | no `confirm`, or one that is not exactly the name (400, nothing deleted); the name is odd (not lowercase letters, digits and hyphens, or too long) (400); no such entry (404, the same text whoever asks); **work running** for that person (409): a plugin build reads the library while it works; an entry that is, or holds, a link (400). |
 
@@ -42,7 +42,7 @@ On the **People** page, for a turned-off person: *Erase their data…*. The dial
 
 The trap this avoids: `model_calls.session_id` is a foreign key that **cascades** from a build, so deleting a person's builds in one go would have deleted their usage rows (the same bug the review of slice AI found for *Discard*). Erase first empties those `session_id`s, and a test counts the usage rows before and after.
 
-* One database transaction removes the rows; the files follow once it has committed. A disk that will not give a file up does not undo the rows: it is reported (`files_left`), and the files no longer belong to anything.
+* **Build folders go first, then the rows** (one transaction), then the person's own folder. A disk that will not give a build folder up keeps THAT build's row, so the next erase finds the folder again; the report says `files_left` and the page says to erase again. (The first version deleted the rows first, which lost such a folder for good while a second erase said "Their files are gone": found by the independent review.) The person's own folder is found again by its path.
 * A link inside the person's folder is removed as a link and never followed; their folder being itself a link is left alone and reported. Every folder is named by an id this server made (32 hex characters), checked, and removed only from strictly inside the folder it belongs to.
 * Erasing twice is harmless.
 * The People page's disk number is measured again straight after.

@@ -8,7 +8,8 @@ What stays, on purpose:
   someone erase themselves and start again with a fresh allowance. They are tied to a build by a foreign key that CASCADES, so the builds' rows must not be deleted until
   those ids are emptied (the same thing `Builder.discard` does, and the bug its review found).
 
-The database part is one transaction; the files follow once it has committed (a disk that cannot give a file up must not undo the rows, and is reported instead). Nothing is
+The build folders are removed first and the rows after, in one transaction; the person's own folder follows once that has committed (a path made from their id, so it can always be
+found again). A disk that will not give a build folder up keeps THAT build's row, so erasing again finds it, and `files_left` says so; nothing is ever reported gone while it is not. Nothing is
 built from text: the folders are named by ids this server made, checked as 32 hex characters, and each removal goes through `remove_tree`, which never follows a link.
 """
 
@@ -68,8 +69,13 @@ def erase_person(builder: "Builder", user_id: str) -> EraseReport:
 
     with builder.db.session() as s:
         ids = list(s.execute(select(BuildSession.id).where(BuildSession.user_id == user_id)).scalars())
-        for start in range(0, len(ids), _CHUNK):
-            chunk = ids[start:start + _CHUNK]
+    # The build folders go FIRST, while their rows still say whose they are. A folder the disk will not give up keeps its row: that row is the only way to find the
+    # folder again, so the next erase tries it once more (deleting the row first lost the folder for good, and a second erase then said "Their files are gone").
+    erasable = [sid for sid in ids if not _HEX32.match(sid) or _gone(builder.builds_root / sid, builder.builds_root)]  # anything not made by this server is not touched
+    files_left = len(erasable) < len(ids)
+    with builder.db.session() as s:
+        for start in range(0, len(erasable), _CHUNK):
+            chunk = erasable[start:start + _CHUNK]
             # Usage rows are kept: first let go of the builds they were tied to, or the foreign key's cascade would delete them with the builds.
             s.execute(update(ModelCall).where(ModelCall.session_id.in_(chunk)).values(session_id=None))
             s.execute(delete(Job).where(Job.session_id.in_(chunk)))
@@ -78,10 +84,6 @@ def erase_person(builder: "Builder", user_id: str) -> EraseReport:
         labs = s.execute(delete(EvalRun).where(EvalRun.user_id == user_id)).rowcount
         key = s.execute(delete(UserModelRow).where(UserModelRow.user_id == user_id)).rowcount == 1
 
-    files_left = False
-    for sid in ids:
-        if _HEX32.match(sid):  # always, for a session this server made; anything else is not touched
-            files_left |= not _gone(builder.builds_root / sid, builder.builds_root)
     if builder.library_for is not None:
         try:
             folder = builder.library_for(user_id).root.parent  # <data>/users/<id>: the library of every kind and its backups
@@ -92,4 +94,4 @@ def erase_person(builder: "Builder", user_id: str) -> EraseReport:
         elif folder is not None:
             files_left = True  # not laid out as expected: nothing was guessed at, and it is said
     builder.space.forget(user_id)
-    return EraseReport(len(ids), suggestions, labs, key, files_left)
+    return EraseReport(len(erasable), suggestions, labs, key, files_left)

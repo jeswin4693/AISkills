@@ -125,6 +125,13 @@ class Builder:
                 for model in (BuildSession, EvalRun, SuggestRun)
             )
 
+    def drop_lab_runs(self, user_id: str, kind: str, name: str) -> int:
+        """Delete this person's Testing Lab runs of one library entry of one kind, once that entry is deleted. A new entry of the same name starts again at v1, and the
+        quality report matches Lab runs by name and version, so a finished run of the deleted entry would otherwise be shown as the new one's tested result.
+        (The usage rows of those runs are not tied to them and stay: they are the allowance's ledger.)"""
+        with self.db.session() as s:
+            return s.execute(delete(EvalRun).where(EvalRun.user_id == user_id, EvalRun.kind == kind, EvalRun.name == name)).rowcount
+
     def _library(self, user_id: str) -> Library:
         """The library of whoever owns a session. Fails closed: with no resolver only the owner has a library, never a shared one for everybody."""
         if self.library_for is not None:

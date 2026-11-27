@@ -74,6 +74,8 @@ describe("the words of the erase dialog", () => {
     const text = erasedNotice({ ...done, key_removed: false, files_left: true });
     expect(text).not.toContain("model key");
     expect(text).toContain("could not be removed from the disk");
+    expect(text).toContain("Erase again");
+    expect(text).not.toContain("Their files are gone");
   });
 });
 

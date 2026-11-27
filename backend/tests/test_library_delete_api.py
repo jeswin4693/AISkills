@@ -7,6 +7,7 @@ while that person has work running. The hosted-world helpers are those of the is
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 from test_accounts_isolation import World, world  # noqa: F401  (world is a pytest fixture)
 from test_builder import make  # noqa: F401  (make is a pytest fixture)
 
@@ -42,10 +43,10 @@ def add_build(w: World, uid: str, sid: str, status: str = "working") -> None:
                            error="", retryable=False, model_calls=0, notes=[], saved_name="", saved_version="", user_id=uid))
 
 
-def add_lab_run(w: World, uid: str, rid: str, status: str = "working") -> None:
+def add_lab_run(w: World, uid: str, rid: str, status: str = "working", name: str = "foo", kind: str = "skill") -> None:
     stamp = now_text()
     with w.db.session() as s:
-        s.add(EvalRun(id=rid, created_at=stamp, updated_at=stamp, status=status, kind="skill", name="foo", version=1, content_hash="h", runs=1, baseline=True,
+        s.add(EvalRun(id=rid, created_at=stamp, updated_at=stamp, status=status, kind=kind, name=name, version=1, content_hash="h", runs=1, baseline=True,
                       cases_total=1, cases_done=0, result=None, error="", retryable=False, user_id=uid))
 
 
@@ -147,6 +148,29 @@ def test_working_for_counts_builds_lab_runs_and_suggestion_runs_of_that_person_o
     add_suggest_run(w, ada, "f" * 32)
     add_build(w, bob, "1" * 32)
     assert (w.builder.working_for(ada), w.builder.working_for(bob), w.builder.working_for("local")) == (4, 1, 0)
+
+
+def lab_ids(w: World, uid: str, name: str, kind: str = "skill") -> list[str]:
+    with w.db.session() as s:
+        return sorted(s.execute(select(EvalRun.id).where(EvalRun.user_id == uid, EvalRun.name == name, EvalRun.kind == kind)).scalars())
+
+
+def test_deleting_an_entry_removes_its_testing_lab_runs_so_a_new_entry_of_that_name_starts_clean(world):
+    """The review's Important finding: version numbers start again at v1 for a new entry of the same name, and the quality report matches Lab runs by name and
+    version, so a finished run of the DELETED entry would have been shown as the new entry's tested result."""
+    w = world()
+    w.person(1)
+    owner = w.owner()
+    put(w.library, "foo")
+    put(w.library.for_kind("agent"), "foo")
+    add_lab_run(w, "local", "d" * 32, status="done")
+    add_lab_run(w, "local", "e" * 32, status="failed")
+    add_lab_run(w, "local", "f" * 32, status="done", name="bar")
+    add_lab_run(w, w.uid(1), "1" * 32, status="done")  # another person's run of THEIR foo
+    assert delete(owner, "foo", "foo", kind="agent").status_code == 200  # another kind's foo: the skill's runs are not its runs
+    assert lab_ids(w, "local", "foo") == ["d" * 32, "e" * 32]
+    assert delete(owner, "foo", "foo").status_code == 200
+    assert lab_ids(w, "local", "foo") == [] and lab_ids(w, "local", "bar") == ["f" * 32] and lab_ids(w, w.uid(1), "foo") == ["1" * 32]
 
 
 def test_a_local_server_with_no_sign_in_deletes_too(make):

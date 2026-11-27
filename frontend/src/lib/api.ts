@@ -1,6 +1,6 @@
 import type {
   AdminPeople, AuthStatus, BuildSession, BuildSummary, CallGraph, CasesView, FunctionSearch, DeleteReport, EraseReport, ScanPreview, ScanRun, ScanRunSummary, ScanStart, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  ModelCheckReport, MyModelView, MySpace, Person, PlanRequest, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
+  ModelCheckReport, MyModelView, MySpace, Person, PlanAnswersRequest, PlanApproveResult, PlanRequest, PlanSessionView, PlanSummary, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
   SkillSummary, SuggestRun, SuggestRunSummary, TaskPlan, VersionInfo,
 } from "./types";
 
@@ -170,6 +170,21 @@ export const api = {
     post<CallGraph>("/api/repos/calls", { path, focus: focus || null, symbol, depth }),
   /** A request planned before any work. One or two model calls unless `no_ai`; nothing is saved and nothing in the repository is changed or run. */
   planTask: (body: PlanRequest) => post<TaskPlan>("/api/plan", body),
+  /** Make a plan and keep it, so its questions can be answered and it can be approved. Same body as `planTask`. */
+  keepPlan: (body: PlanRequest) => post<PlanSessionView>("/api/plans", body),
+  keptPlans: () => get<PlanSummary[]>("/api/plans"),
+  keptPlan: (id: string) => get<PlanSessionView>(`/api/plans/${encodeURIComponent(id)}`),
+  /** Replace the answers and decisions. 409 means the plan changed in another window (or is approved): the message says so. */
+  savePlanAnswers: (id: string, body: PlanAnswersRequest) => post<PlanSessionView>(`/api/plans/${encodeURIComponent(id)}/answers`, body),
+  /** 200 is the approved plan; 409 is a refusal, with what is missing when something is. Anything else is an error. */
+  async approvePlan(id: string, rev: number): Promise<PlanApproveResult> {
+    const res = await send(`/api/plans/${encodeURIComponent(id)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rev }) });
+    const body = await json<PlanSessionView & { detail?: unknown; missing?: unknown }>(res, [409]);
+    if (res.status === 409) return { ok: false, detail: detailOf(body, "This plan could not be approved."), missing: Array.isArray(body.missing) ? body.missing.map(String) : [] };
+    return { ok: true, view: body };
+  },
+  reopenPlan: (id: string) => post<PlanSessionView>(`/api/plans/${encodeURIComponent(id)}/reopen`, {}),
+  deletePlan: async (id: string) => json<{ deleted: boolean }>(await send(`/api/plans/${encodeURIComponent(id)}`, { method: "DELETE" })),
   startSuggest: (path: string, focus: string | undefined, withIdeas: boolean) =>
     post<SuggestRun>("/api/suggestions", { path, focus: focus || null, with_ideas: withIdeas }),
   suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),

@@ -887,6 +887,89 @@ export interface TaskPlan {
   source: RepoSource | { kind: "none" };
 }
 
+// ---- a kept plan: answered and approved (slice AN) ----
+
+export type PlanDecision = "approve" | "reject";
+
+/** A question of the plan, with the person's answer (null: none yet). `index` is its place in the plan's own list, which is how an answer is sent. */
+export interface PlanQuestion {
+  index: number;
+  question: string;
+  why: string;
+  blocking: boolean;
+  source: "model" | "code";
+  answer: string | null;
+}
+
+export interface PlanAssumptionState {
+  index: number;
+  text: string;
+  why: string;
+  /** null: not decided yet. No assumption is used until it is approved. */
+  decision: PlanDecision | null;
+}
+
+export interface PlanApproval {
+  approved_at: string;
+  /** SHA-256 of the plan with the answers. It names a record in this app; it is not a signature. */
+  fingerprint: string;
+  tier: number;
+  /** False when the kept plan or answers no longer make the fingerprint: they were changed after the approval. */
+  intact: boolean;
+}
+
+export interface PlanEvent {
+  at: string;
+  what: "made" | "answers saved" | "approved" | "reopened";
+}
+
+/** A kept plan as the page reads it. `plan` is the answer of the plain plan route, and its Markdown holds the answers and the approval. */
+export interface PlanSessionView {
+  id: string;
+  status: "open" | "approved";
+  created_at: string;
+  updated_at: string;
+  /** The state of the answers: a save and an approval say which state the person was looking at. */
+  rev: number;
+  plan: TaskPlan;
+  questions: PlanQuestion[];
+  assumptions: PlanAssumptionState[];
+  /** What stops an approval, each starting "Answer: " (a blocking question) or "Decide: " (an assumption). */
+  missing: string[];
+  /** Questions that are not blocking and have no answer. */
+  unanswered: string[];
+  can_approve: boolean;
+  approval: PlanApproval | null;
+  events: PlanEvent[];
+}
+
+/** What the list of kept plans shows. `readable` is false for a plan an older version made. */
+export interface PlanSummary {
+  id: string;
+  status: "open" | "approved";
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  task: string;
+  repo: string;
+  mode: string;
+  readable: boolean;
+  tier?: number;
+  tier_name?: string;
+  questions?: { total: number; blocking: number; answered: number; blocking_answered: number };
+  assumptions?: { total: number; decided: number };
+}
+
+/** The answers and decisions of a plan, all of them (a blank answer or a null decision removes one). Keys are the questions' and assumptions' `index`. */
+export interface PlanAnswersRequest {
+  rev: number;
+  questions: Record<string, string>;
+  assumptions: Record<string, PlanDecision | null>;
+}
+
+/** What an approval answers: the plan, or why it was refused (409), with each thing that is missing when that is the reason. */
+export type PlanApproveResult = { ok: true; view: PlanSessionView } | { ok: false; detail: string; missing: string[] };
+
 // ---- the guide: how a project works, read from its README and docs (every quote checked by code) ----
 
 /**

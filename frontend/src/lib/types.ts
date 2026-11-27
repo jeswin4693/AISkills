@@ -734,6 +734,159 @@ export interface CallGraph {
   left_out: { guess: number; from_tests: number; over_limit: number };
 }
 
+// ---- the task plan: a request planned before any work (the command line's `plan`, as a page) ----
+
+export type PlanKind = "feature" | "bugfix" | "refactor" | "migration" | "docs" | "investigation" | "other";
+
+/** What the page sends: the same options the command line has (except lowering a tier, which is a deliberate act of the command line). */
+export interface PlanRequest {
+  task: string;
+  /** A folder on this computer or a public GitHub link; null for no repository. */
+  repo: string | null;
+  /** Send nothing to a model: only what the code can measure is planned. */
+  no_ai: boolean;
+  kind: PlanKind | null;
+  /** A tier can only be raised here. */
+  tier: number | null;
+  budget: number | null;
+  sensitive: string[];
+}
+
+/** Something the person asked for, with the words that say so (checked by code: the quote is really in their text). */
+export interface PlanItem {
+  text: string;
+  quote: string;
+}
+
+export interface PlanGap {
+  question: string;
+  why: string;
+  blocking: boolean;
+  /** `code`: found by the graph, not by the model. */
+  source: "model" | "code";
+}
+
+export interface PlanAssumption {
+  text: string;
+  why: string;
+}
+
+export interface PlanReading {
+  task_type: string;
+  summary: string;
+  stated: PlanItem[];
+  constraints: PlanItem[];
+  out_of_scope: PlanItem[];
+  declared_risks: PlanItem[];
+  gaps: PlanGap[];
+  assumptions: PlanAssumption[];
+}
+
+export interface PlanMention {
+  kind: "file" | "symbol";
+  text: string;
+  target: string;
+  file: string;
+  line: number | null;
+  candidates: number;
+  ambiguous: boolean;
+  source: "prompt" | "model";
+  options: string[];
+}
+
+export interface PlanSignal {
+  name: string;
+  /** The lowest tier this signal allows. */
+  floor: number;
+  evidence: string;
+}
+
+export interface PlanTier {
+  tier: number;
+  baseline: number;
+  signals: PlanSignal[];
+  measured: boolean;
+  note: string;
+}
+
+export interface PlanPhase {
+  id: string;
+  title: string;
+  reads: string;
+  writes: string;
+  gate: string;
+  approval: boolean;
+}
+
+export interface PlanRule {
+  id: string;
+  /** A file name, or "your prompt". */
+  source: string;
+  line: number;
+  text: string;
+  why: string;
+  quote: string;
+  enforcement: string;
+}
+
+export interface PlanReadItem {
+  kind: "slice" | "file";
+  path: string;
+  symbol: string;
+  /** "12-40", or "" for a whole file. */
+  lines: string;
+  tokens: number;
+  whole_file_tokens: number;
+  why: string;
+  priority: number;
+}
+
+export interface PlanCreateItem {
+  path: string;
+  purpose: string;
+  size: string;
+  tokens: number;
+}
+
+export interface PlanTokens {
+  budget: number;
+  reads: PlanReadItem[];
+  dropped: PlanReadItem[];
+  read_total: number;
+  whole_files_total: number;
+  create: PlanCreateItem[];
+  create_total: number;
+  /** True only when everything wanted fitted the budget: it is false when something was dropped for being over it. */
+  fits_budget: boolean;
+  method: string;
+}
+
+/** A Task Plan: what a request contains and does not say, its size from the code graph, the process, the rules and the tokens. Nothing in it was run. */
+export interface TaskPlan {
+  created_at: string;
+  prompt: string;
+  /** "model" or "facts only". */
+  mode: string;
+  model: string;
+  /** The repository's name (`owner/repo` for a GitHub link); "" for none. Never a path. */
+  repo: string;
+  reading: PlanReading;
+  mentions: PlanMention[];
+  tier: PlanTier;
+  tier_name: string;
+  phases: PlanPhase[];
+  stop_triggers: string[];
+  rules: PlanRule[];
+  rules_found: number;
+  token_plan: PlanTokens;
+  notes: string[];
+  not_checked: string[];
+  model_calls: number;
+  /** The same plan as the command prints it, for pasting. */
+  markdown: string;
+  source: RepoSource | { kind: "none" };
+}
+
 // ---- the guide: how a project works, read from its README and docs (every quote checked by code) ----
 
 /**

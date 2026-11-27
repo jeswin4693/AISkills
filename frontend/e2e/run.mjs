@@ -782,6 +782,68 @@ try {
     await page.setViewportSize({ width: 1280, height: 900 });
   });
 
+  console.log("The Task Plan page");
+  // The fake model (mock_server.py, task_reading) quotes the first two sentences of this request word for word; the real checking code looks each quote up.
+  const PLAN_TASK = "Make `route` in `api/routes.py` return the tax too. Do not change anything in pricing.";
+  await step("a request is planned with a model: what it says with the quote behind it, a blocking question, the tier, the rules and the token plan", async () => {
+    await page.goto(UI + "/plan");
+    await page.getByRole("heading", { name: "Task Plan", level: 1 }).waitFor();
+    await page.getByLabel("What should be done?").fill(PLAN_TASK);
+    await page.getByLabel("Folder or GitHub link (optional)").fill(mapDir);
+    await page.getByText(/Sent to the model: your task text, the names and places \(not the contents\)/).waitFor();
+    await page.getByRole("button", { name: "Plan it" }).click();
+    await page.getByRole("heading", { name: "Task plan", level: 2 }).waitFor();
+    await page.getByText("Read by a model", { exact: true }).waitFor();
+    await page.getByText(/route returns the tax as well/).waitFor();
+    await page.getByText("“Make `route` in `api/routes.py` return the tax too.”").waitFor();
+    await page.getByText("What should route return when the tax is zero?").waitFor();
+    await page.getByText("Blocking", { exact: true }).waitFor();
+    await page.getByText(/route → api\/routes\.py:\d+/).first().waitFor();
+    await page.getByText(/^Tier \d: /).waitFor();
+    await page.getByText(/None is enforced yet/).waitFor();
+    await page.getByRole("heading", { name: "5. Token plan (estimates)" }).waitFor();
+    await page.getByRole("heading", { name: "What was NOT checked" }).waitFor();
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the plan must not show the folder's path");
+    await shot(page, "34r-task-plan");
+  });
+  await step("with no model nothing is sent, and the plan says the request was not read", async () => {
+    await page.getByLabel("Don't use a model (plan from facts only)").check();
+    await page.getByText("Nothing is sent to a model. Only what the code can measure is planned.").waitFor();
+    await page.getByRole("button", { name: "Plan it" }).click();
+    await page.getByText("Facts only", { exact: true }).waitFor();
+    await page.getByText(/Not read\. No model was used/).waitFor();
+    await page.getByText(/route → api\/routes\.py:\d+/).first().waitFor(); // the code the request names is still found by the graph
+    await shot(page, "34s-task-plan-facts-only");
+  });
+  await step("a plan can be saved as Markdown, the same text the command prints, and copied", async () => {
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download .md" }).click()]);
+    assert.equal(download.suggestedFilename(), "task-plan-shop-map.md");
+    const text = fs.readFileSync(await download.path(), "utf8");
+    assert.ok(text.startsWith("# Task plan") && text.includes("## What was NOT checked"), "the file is the command's Markdown");
+    assert.ok(!text.includes(scratch), "the file must not hold the folder's path");
+    await page.getByRole("button", { name: "Copy as Markdown" }).click();
+    await page.getByText(/^(Copied\.|The browser did not allow copying)/).waitFor(); // a browser may refuse the clipboard: then it says so and Download still works
+  });
+  await step("a task that is too short is refused in words before anything is sent", async () => {
+    await page.getByLabel("What should be done?").fill("fix it");
+    await page.getByText("Describe the task in at least a sentence.").waitFor();
+    assert.ok(await page.getByRole("button", { name: "Plan it" }).isDisabled(), "a task that cannot be planned must not be sendable");
+  });
+  await step("the plan never makes the page scroll sideways at phone width", async () => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the plan makes the page scroll sideways by ${overflow}px`);
+    await shot(page, "34t-task-plan-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+  await step("back on the Repository page the map's repository is read again, which is where the guide's steps begin", async () => {
+    await page.goto(UI + "/repository");
+    await folderBox().fill(mapDir);
+    await page.getByRole("button", { name: "Read the repository" }).click();
+    await page.getByRole("heading", { name: "How the code is laid out" }).waitFor();
+  });
+
   console.log("How it works (the guide)");
   // The sentences the fake model quotes (mock_server.py, guide_draft). The real checking code looks each one up in this README.
   const GUIDE_README = [

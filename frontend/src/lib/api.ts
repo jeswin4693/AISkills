@@ -1,7 +1,7 @@
 import type {
   AdminPeople, AuthStatus, BuildSession, BuildSummary, CallGraph, CasesView, FunctionSearch, DeleteReport, EraseReport, ScanPreview, ScanRun, ScanRunSummary, ScanStart, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
-  ModelCheckReport, MyModelView, MySpace, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
-  SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
+  ModelCheckReport, MyModelView, MySpace, Person, PlanRequest, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
+  SkillSummary, SuggestRun, SuggestRunSummary, TaskPlan, VersionInfo,
 } from "./types";
 
 import { SIGNED_OUT_EVENT } from "./auth";
@@ -168,6 +168,8 @@ export const api = {
   /** One function with who calls it and what it calls (proven calls only), one step or two. No model. */
   callGraph: (path: string, focus: string | undefined, symbol: string, depth: 1 | 2) =>
     post<CallGraph>("/api/repos/calls", { path, focus: focus || null, symbol, depth }),
+  /** A request planned before any work. One or two model calls unless `no_ai`; nothing is saved and nothing in the repository is changed or run. */
+  planTask: (body: PlanRequest) => post<TaskPlan>("/api/plan", body),
   startSuggest: (path: string, focus: string | undefined, withIdeas: boolean) =>
     post<SuggestRun>("/api/suggestions", { path, focus: focus || null, with_ideas: withIdeas }),
   suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),

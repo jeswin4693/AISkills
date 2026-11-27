@@ -28,6 +28,7 @@ from skillforge.api import create_app
 from skillforge.build.models import Extraction, IOField, SkillDraft, SkillTest, Slot, Step
 from skillforge.canary.runner import Step as ScanStep
 from skillforge.canary.scenarios import Tasks
+from skillforge.conductor.models import AssumptionMade, GapAsked, Quoted, RuleSelection, TaskReading
 from skillforge.canary.world import ToolCall
 from skillforge.builder import Builder, JobRunner
 from skillforge.builder import github
@@ -184,8 +185,28 @@ def scan_step(prompt: str, system: str | None) -> ScanStep:
     return ScanStep(calls=[], reply="Here is the summary.", done=True)
 
 
+def task_reading() -> TaskReading:
+    """The Task Plan page's request (PLAN_TASK in frontend/e2e/run.mjs): the fake model quotes two whole sentences of it, word for word, as an honest model would.
+    The real checking code looks each quote up in the person's words, so a quote that was not typed would be dropped."""
+    return TaskReading(
+        task_type="feature", summary="Make route return the tax too.",
+        stated=[Quoted(text="route returns the tax as well", quote="Make `route` in `api/routes.py` return the tax too.")], constraints=[],
+        out_of_scope=[Quoted(text="leave the pricing folder alone", quote="Do not change anything in pricing.")], declared_risks=[],
+        named_targets=["route", "api/routes.py"],
+        gaps=[
+            GapAsked(question="What should route return when the tax is zero?", why="Without it the zero case cannot be tested.", blocking=True),
+            GapAsked(question="Should the tax be shown on its own line?", why="It changes the output format.", blocking=False),
+        ],
+        assumptions=[AssumptionMade(text="Prices are whole cents.", why="The request does not say.")], files_to_create=[],
+    )
+
+
 def respond(schema, prompt, system):
     time.sleep(DELAY)
+    if schema is TaskReading:  # the Task Plan page: what the request contains
+        return task_reading()
+    if schema is RuleSelection:  # ... and which of the repository's rules apply (the browser test's repository has none, so it is rarely asked)
+        return RuleSelection(applicable=[])
     if schema is Ping:  # the Settings page's "Test my models"
         return Ping(reply="ok")
     if schema is Reply:  # a Testing Lab message

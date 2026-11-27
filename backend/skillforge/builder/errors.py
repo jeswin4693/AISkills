@@ -19,5 +19,13 @@ class BadRequest(BuilderError):
     pass
 
 
+class ApprovalBlocked(WrongState):
+    """A plan cannot be approved yet. `missing` lists what stops it, in the plan's own order, so a page can point at each one."""
+
+    def __init__(self, message: str, missing: list[str]) -> None:
+        super().__init__(message)
+        self.missing = list(missing)
+
+
 class UpstreamError(BuilderError):
     """A service the request depends on (GitHub) could not be reached or refused. The request was fine: trying again later can help."""

@@ -169,6 +169,31 @@ class ScanRun(Base):
     user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
 
 
+class PlanSession(Base):
+    """One Task Plan that is kept (slice AN, docs/plan-approval.md): the plan exactly as it was made, the person's answers and decisions, and an approval of exactly that.
+
+    The plan never changes. Answers are kept by position in the plan's own question and assumption lists, `rev` counts the saves that changed them (so a save or an approval
+    can say which state the person was looking at), and `approval` holds the fingerprint of what was approved. It holds the request and the plan, never a file's contents,
+    and never the repository's folder: only its name."""
+
+    __tablename__ = "plan_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), index=True)  # open or approved
+    task: Mapped[str] = mapped_column(Text)  # the request as planned (trimmed)
+    repo_name: Mapped[str] = mapped_column(String(200), default="")
+    mode: Mapped[str] = mapped_column(String(16))  # "model" or "facts only"
+    plan: Mapped[dict] = mapped_column(JSON)  # the plan as `plan_task` made it, without the Markdown (that is written again when it is read)
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"questions": {"0": text}, "assumptions": {"0": "approve" | "reject"}}
+    rev: Mapped[int] = mapped_column(Integer, default=0)
+    approved_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    approval: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"fingerprint", "tier", "rev", "approved_at"} while approved
+    events: Mapped[list] = mapped_column(JSON, default=list)  # [{"at", "what"}]: made, answers saved, approved, reopened
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
+
+
 class ModelCall(Base):
     """One HTTP attempt at a model, for the session that asked for it. Counts and timings only: never a prompt or a reply."""
 

@@ -39,6 +39,7 @@ from .evals import EvalRuns
 from .jobs import JobRunner
 from .limits import PersonLimits, PersonSpace
 from .model_access import ModelAccess, ModelOptions
+from .plan_sessions import PlanSessions
 from .provider import env_provider
 from .repository import check_seed, record_evidence, seed_view
 from .retention import UsageRetention, keep_days_from_env
@@ -147,6 +148,11 @@ class Builder:
     def suggestions(self) -> SuggestRuns:
         """Suggestion runs for a repository, sharing this builder's database, job runner and model."""
         return SuggestRuns(self.db, self.runner, self.access.provider_for)
+
+    @property
+    def plans(self) -> PlanSessions:
+        """Kept Task Plans: a plan made, answered and approved by a person (slice AN). Nothing runs in the background and no model is asked after the plan is made."""
+        return PlanSessions(self.db)
 
     @property
     def scans(self) -> ScanRuns:

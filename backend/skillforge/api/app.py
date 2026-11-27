@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .. import __version__
-from ..builder import Builder, BuilderError, LimitReached, SessionNotFound, UpstreamError, WrongState
+from ..builder import ApprovalBlocked, Builder, BuilderError, LimitReached, SessionNotFound, UpstreamError, WrongState
 from ..builder.repository import check_repo
 from ..evidence import EvidenceError, read_evidence
 from ..graph import languages
@@ -44,7 +44,7 @@ from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .me import me_router
 from .plugins import plugins_router
 from .quality import quality_router
-from .plan import plan_router
+from .plan import plan_router, plans_router
 from .repos import repos_router
 from .scans import scans_router
 from .scope import user_id, user_library
@@ -163,6 +163,10 @@ def create_app(
     @app.exception_handler(SessionNotFound)
     async def session_not_found(_: Request, exc: SessionNotFound) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=404)
+
+    @app.exception_handler(ApprovalBlocked)  # a plan that is not ready to approve (slice AN): the page points at each thing that is missing
+    async def approval_blocked(_: Request, exc: ApprovalBlocked) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "missing": exc.missing}, status_code=409)
 
     @app.exception_handler(WrongState)
     async def wrong_state(_: Request, exc: WrongState) -> JSONResponse:
@@ -362,6 +366,7 @@ def create_app(
     api.include_router(quality_router())
     api.include_router(repos_router())
     api.include_router(plan_router())
+    api.include_router(plans_router())
     api.include_router(settings_router())
     api.include_router(plugins_router())
     app.include_router(api)

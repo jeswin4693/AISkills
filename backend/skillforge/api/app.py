@@ -44,6 +44,7 @@ from .hosted import AuthMiddleware, Hosted, LoginGuard, auth_router
 from .me import me_router
 from .plugins import plugins_router
 from .quality import quality_router
+from .plan import plan_router
 from .repos import repos_router
 from .scans import scans_router
 from .scope import user_id, user_library
@@ -360,6 +361,7 @@ def create_app(
     api.include_router(scans_router())
     api.include_router(quality_router())
     api.include_router(repos_router())
+    api.include_router(plan_router())
     api.include_router(settings_router())
     api.include_router(plugins_router())
     app.include_router(api)

@@ -49,14 +49,21 @@ def _reach(g, mentions: list[Mention]) -> list[Reach]:
     return out
 
 
+def check_task(prompt: str) -> str:
+    """The task as it will be planned (trimmed), or PlanError when it is too short to plan. Callers that do something costly first (a download, a
+    model) ask this first, so a one-word task is refused before it is paid for."""
+    words = prompt.strip()
+    if len(words.split()) < 3 or len(words) < MIN_WORDS:
+        raise PlanError("Describe the task in at least a sentence.")
+    return words
+
+
 def make_plan(
     prompt: str, *, provider: LLMProvider | None = None, repo: str | Path | None = None, task_type: str | None = None,
     tier: int | None = None, allow_lower: bool = False, budget: int | None = None, sensitive: tuple[str, ...] = (),
     now: datetime | None = None,
 ) -> TaskPlan:
-    words = prompt.strip()
-    if len(words.split()) < 3 or len(words) < MIN_WORDS:
-        raise PlanError("Describe the task in at least a sentence.")
+    words = check_task(prompt)
     if tier is not None and not 0 <= tier <= 3:
         raise PlanError("The tier must be 0, 1, 2 or 3.")
     notes: list[str] = []

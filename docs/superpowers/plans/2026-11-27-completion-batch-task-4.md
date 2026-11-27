@@ -191,3 +191,30 @@ def test_the_response_and_errors_never_contain_a_path():
 ### After the tasks
 
 One independent review of this task (irreversible deletes, as the design says): read the plan's Review Focus and the break results first.
+
+---
+
+## Outcome (2026-11-27)
+
+Built in `2d2db6a` (`Library.delete` and `remove_tree`), `8eb12a4` (the delete route and `Builder.working_for`), `1229ca1` (erase), `e08d1f9` (the two web dialogs), `f2fcdbe` (docs) and `fbcc429` (the review's two Important fixes). Backend **3,919 passed / 4 skipped / 0 failed** (the 4 skips are symbolic-link tests this account cannot run; this task's own link tests ran, with junctions); 73 new backend tests; web **440 passed** (16 new) and a clean type check.
+
+**Deliberate breaks:** 15 run, **15 caught** (name check, prefix-matched backups, the link refusal, the strictly-inside check, the library lock, the typed name on each route, the running-work check on each route, the cascade step that keeps the usage rows, deleting the account row, the turned-off check, forgetting suggestion runs, removing the whole builds folder, and refusing links inside a person's folder). Before the run two weak tests were strengthened (a missing name hid a missing name check behind `NotFound`; the helper's own link refusal was not pinned).
+
+**One independent review** (fresh context, most capable model, with probes using real junctions): no Critical, 2 Important, 7 Minor; it could not make either feature delete a wrong thing or reach another person's data.
+- **Important 1, fixed test-first:** a deleted entry's Testing Lab runs would have been shown for a new entry of the same name (versions restart at v1; the quality report matches runs by name and version). Deleting an entry now deletes that person's Lab runs of that entry and kind (`Builder.drop_lab_runs`).
+- **Important 2, fixed test-first:** erase deleted the build rows first, so a build folder the disk would not give up was lost for good and a second erase said "Their files are gone". Build folders are now removed first and a build whose folder is still there keeps its row, so erasing again finds it; the notice says to erase again.
+- **Minor, deferred (not fixed):** (1) `_BACKUP_TAIL` uses `\d`, which matches Unicode digits; use `[0-9]`. (2) A plain file named like an entry makes delete raise `NotADirectoryError` (a 500, nothing deleted); refuse a non-folder. (3) `Library.delete` holds the process-wide lock through the removals; only the rename needs it. (4) `working_for` and the delete are two steps, saves inside a request are not counted, and the lock is per process (a command-line import in another process could leave an entry holding only `v3`): worth a line in the doc. (5) `eraseBlockedReason` ignores suggestion runs, so the button can be enabled when the server answers 409 (cosmetic). (6) A dialog closed with Escape while its request is in flight loses a late error. (7) `is_link` cannot see a junction before Python 3.12 (the real-path check still refuses it); no `requires-python` is declared.
+
+**Rulings made while building:**
+1. Delete and erase are refused while the person has ANY work running (`Builder.working_for` counts builds, Lab runs and suggestion runs), not only a run of that entry: a plugin build reads the library while it works. Cost if wrong: waiting for a running build before deleting.
+2. The browser (e2e) checks of the two dialogs are left to the batch's last task, where the full browser run is planned. Cost if wrong: a UI defect surfaces there instead of now. (The reviewer agrees, on condition that task runs them.)
+3. This task got its own independent review (irreversible deletes), unlike task 3.
+4. `remove_tree` takes `allow_inner_links`: a library entry holding a link is refused (nothing here writes one), but a backup and an erased person's folder may hold links and have them removed as links, never followed; one that is itself a link is left alone and reported. Cost if wrong: a backup that held a link is removed as a copy.
+5. Erase originally deleted rows first and reported `files_left`; **the review disagreed for build folders and was right** (Important 2); the order is now folders first for builds.
+6. The delete route compares the typed name exactly; erase compares the address ignoring case and surrounding spaces. Cost if wrong: a script with a stray space is refused.
+7. The reviewer's second guard for Important 1 (require `content_hash` equality in the quality report and in a retry) was not done: deleting the runs removes the only way a name and version can be reused through this application, and changing how the report matches is a wider change. Cost if wrong: a library folder deleted by hand could still reuse a version number.
+8. The Lab-run deletion is in the route, after `Library.delete` succeeds, not inside `Library.delete`: the library layer does not know the database.
+
+**For the behaviour-scan task:** when scan runs are stored they must be added to `Builder.working_for`, to `erase_person` and to the cleanup that deletes a deleted entry's runs (the same name-reuse problem applies to them).
+
+**Not covered:** a real browser (the batch's last task), a command-line delete, copies of the files that left the server.

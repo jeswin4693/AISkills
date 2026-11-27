@@ -6,6 +6,8 @@ import itertools
 import subprocess
 from pathlib import Path
 
+from .gitenv import git_env
+
 MAX_COMMITS = 1500
 MAX_FILES_PER_COMMIT = 40  # bigger commits (mass renames, formatting) say nothing about coupling
 MIN_SHARED = 2
@@ -23,7 +25,7 @@ def collect(
         out = subprocess.run(
             ["git", "-c", "core.quotepath=false", "-C", str(root), "log", "--no-merges", "--relative",
              "--name-only", "--pretty=format:%x00", "-n", str(MAX_COMMITS)],
-            capture_output=True, timeout=120,
+            capture_output=True, timeout=120, env=git_env(root),
         )
     except (OSError, subprocess.SubprocessError):
         return None, {}, []

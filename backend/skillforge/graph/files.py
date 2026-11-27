@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path, PurePosixPath
 
+from .gitenv import git_env
 from .languages import language_of_path
 
 SKIP_DIRS = {
@@ -53,17 +54,18 @@ def is_test_support_path(path: str) -> bool:
 
 
 def _git_files(root: Path) -> list[str] | None:
+    env = git_env(root)  # a folder inside the data folder never sees a repository above it
     try:
         inside = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, env=env,
         )
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             return None
         out = subprocess.run(
             ["git", "-c", "core.quotepath=false", "-C", str(root), "ls-files", "-z", "--cached", "--others",
              "--exclude-standard"],
-            capture_output=True, timeout=120,
+            capture_output=True, timeout=120, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None

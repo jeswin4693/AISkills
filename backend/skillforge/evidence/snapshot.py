@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..graph import languages, query
+from ..graph.gitenv import git_env
 from ..graph.model import RepoGraph, Symbol
 from .model import MAX_LIST, Evidence, Ref
 
@@ -63,7 +64,7 @@ def resolve_ref(g: RepoGraph, text: str) -> Resolved:
 def git_head(root: str | Path) -> str | None:
     """The short id of the repository's current commit, None outside git or when git is not there."""
     try:
-        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=12", "HEAD"], capture_output=True, timeout=15)
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=12", "HEAD"], capture_output=True, timeout=15, env=git_env(root))
     except (OSError, subprocess.SubprocessError):
         return None
     text = out.stdout.decode("utf-8", errors="replace").strip()
@@ -73,7 +74,7 @@ def git_head(root: str | Path) -> str | None:
 def git_dirty(root: str | Path) -> bool:
     """Whether the folder has uncommitted changes (untracked files count: the graph reads them too). False outside git."""
     try:
-        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "."], capture_output=True, timeout=60)
+        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "."], capture_output=True, timeout=60, env=git_env(root))
     except (OSError, subprocess.SubprocessError):
         return False
     return out.returncode == 0 and bool(out.stdout.strip())

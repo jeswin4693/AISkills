@@ -266,7 +266,7 @@ def create_app(
         if builder.working_for(person):
             raise Conflict("You have work running. Wait for it to finish, then delete.")
         report = lib.delete(name)
-        builder.drop_lab_runs(person, lib.kind, name)  # a new entry of this name must not inherit the deleted one's test results
+        builder.drop_runs_of(person, lib.kind, name)  # a new entry of this name must not inherit the deleted one's test results or scan verdict
         return {"deleted": True, "name": report.name, "kind": lib.kind, "versions": report.versions, "backups": report.backups, "leftover": report.leftover}
 
     @api.get("/library/{name}/diff")

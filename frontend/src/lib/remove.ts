@@ -46,7 +46,7 @@ export function eraseWords(): { removes: string[]; keeps: string[] } {
 
 /** "Erased: 3 builds, 1 suggestion run, 2 test runs, and their saved model key. Their files are gone." */
 export function erasedNotice(r: EraseReport): string {
-  const counted = [plural(r.builds, "build"), plural(r.suggestion_runs, "suggestion run"), plural(r.lab_runs, "test run")].join(", ");
+  const counted = [plural(r.builds, "build"), plural(r.suggestion_runs, "suggestion run"), plural(r.lab_runs, "test run"), plural(r.scan_runs, "behaviour scan")].join(", ");
   const key = r.key_removed ? ", and their saved model key" : "";
   const files = r.files_left
     ? " Some files could not be removed from the disk (a program may be holding them). Erase again to try once more: nothing is reported gone while it is not."

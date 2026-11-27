@@ -141,6 +141,34 @@ class EvalRun(Base):
     user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
 
 
+class ScanRun(Base):
+    """One behaviour scan of a skill or agent version (docs/canary-scan.md), polled like a build. The result is the report as plain data, kept as data.
+
+    A run belongs to one version and says which content it scanned (`content_hash`). It is running work like a build or a Testing Lab run: it counts toward a person's
+    runs at once, delays a delete or an erase, and is failed (retryably) when the server restarts under it."""
+
+    __tablename__ = "scan_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), index=True)  # working, done, failed
+    kind: Mapped[str] = mapped_column(String(16))  # skill or agent: what `canary.instructions.load_instructions` accepts
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(64))  # of the version that was scanned
+    runs: Mapped[int] = mapped_column(Integer)  # how many times each task is run
+    scenarios: Mapped[int] = mapped_column(Integer)  # the most tasks
+    control: Mapped[bool] = mapped_column(Boolean)  # also run a task that produced something without the skill
+    draft: Mapped[bool] = mapped_column(Boolean)  # a model drafts one more task from the description
+    tasks_total: Mapped[int] = mapped_column(Integer, default=0)
+    tasks_done: Mapped[int] = mapped_column(Integer, default=0)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[str] = mapped_column(String(32), default=LOCAL_USER_ID, server_default=LOCAL_USER_ID, index=True)
+
+
 class ModelCall(Base):
     """One HTTP attempt at a model, for the session that asked for it. Counts and timings only: never a prompt or a reply."""
 

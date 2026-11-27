@@ -11,7 +11,7 @@ from sqlalchemy import select
 from test_accounts_isolation import World, world  # noqa: F401  (world is a pytest fixture)
 from test_builder import make  # noqa: F401  (make is a pytest fixture)
 
-from skillforge.db import BuildSession, EvalRun, SuggestRun, now_text
+from skillforge.db import BuildSession, EvalRun, ScanRun, SuggestRun, now_text
 from skillforge.library import Library
 
 
@@ -48,6 +48,13 @@ def add_lab_run(w: World, uid: str, rid: str, status: str = "working", name: str
     with w.db.session() as s:
         s.add(EvalRun(id=rid, created_at=stamp, updated_at=stamp, status=status, kind=kind, name=name, version=1, content_hash="h", runs=1, baseline=True,
                       cases_total=1, cases_done=0, result=None, error="", retryable=False, user_id=uid))
+
+
+def add_scan_run(w: World, uid: str, rid: str, status: str = "working", name: str = "foo", kind: str = "skill") -> None:
+    stamp = now_text()
+    with w.db.session() as s:
+        s.add(ScanRun(id=rid, created_at=stamp, updated_at=stamp, status=status, kind=kind, name=name, version=1, content_hash="h", runs=1, scenarios=5, control=True,
+                      draft=True, tasks_total=5, tasks_done=0, result=None, error="", retryable=False, user_id=uid))
 
 
 def add_suggest_run(w: World, uid: str, rid: str, status: str = "working") -> None:
@@ -135,7 +142,7 @@ def test_an_odd_name_or_an_unknown_kind_is_a_400_and_deletes_nothing(world, name
     assert names(owner) == ["foo"]
 
 
-def test_working_for_counts_builds_lab_runs_and_suggestion_runs_of_that_person_only(world):
+def test_working_for_counts_builds_lab_runs_suggestion_runs_and_scan_runs_of_that_person_only(world):
     w = world()
     w.person(1)
     w.person(2)
@@ -146,8 +153,10 @@ def test_working_for_counts_builds_lab_runs_and_suggestion_runs_of_that_person_o
     add_lab_run(w, ada, "d" * 32)
     add_lab_run(w, ada, "e" * 32, status="failed")
     add_suggest_run(w, ada, "f" * 32)
+    add_scan_run(w, ada, "9" * 32)
+    add_scan_run(w, ada, "8" * 32, status="done")
     add_build(w, bob, "1" * 32)
-    assert (w.builder.working_for(ada), w.builder.working_for(bob), w.builder.working_for("local")) == (4, 1, 0)
+    assert (w.builder.working_for(ada), w.builder.working_for(bob), w.builder.working_for("local")) == (5, 1, 0)
 
 
 def lab_ids(w: World, uid: str, name: str, kind: str = "skill") -> list[str]:
@@ -155,7 +164,12 @@ def lab_ids(w: World, uid: str, name: str, kind: str = "skill") -> list[str]:
         return sorted(s.execute(select(EvalRun.id).where(EvalRun.user_id == uid, EvalRun.name == name, EvalRun.kind == kind)).scalars())
 
 
-def test_deleting_an_entry_removes_its_testing_lab_runs_so_a_new_entry_of_that_name_starts_clean(world):
+def scan_ids(w: World, uid: str, name: str, kind: str) -> list[str]:
+    with w.db.session() as s:
+        return sorted(s.execute(select(ScanRun.id).where(ScanRun.user_id == uid, ScanRun.name == name, ScanRun.kind == kind)).scalars())
+
+
+def test_deleting_an_entry_removes_its_testing_lab_and_scan_runs_so_a_new_entry_of_that_name_starts_clean(world):
     """The review's Important finding: version numbers start again at v1 for a new entry of the same name, and the quality report matches Lab runs by name and
     version, so a finished run of the DELETED entry would have been shown as the new entry's tested result."""
     w = world()
@@ -167,10 +181,16 @@ def test_deleting_an_entry_removes_its_testing_lab_runs_so_a_new_entry_of_that_n
     add_lab_run(w, "local", "e" * 32, status="failed")
     add_lab_run(w, "local", "f" * 32, status="done", name="bar")
     add_lab_run(w, w.uid(1), "1" * 32, status="done")  # another person's run of THEIR foo
+    add_scan_run(w, "local", "5" * 32, status="done")  # the behaviour scan's runs have the same problem: a new entry must not show the old verdict
+    add_scan_run(w, "local", "6" * 32, status="done", kind="agent")
+    add_scan_run(w, "local", "7" * 32, status="done", name="bar")
+    add_scan_run(w, w.uid(1), "4" * 32, status="done")
     assert delete(owner, "foo", "foo", kind="agent").status_code == 200  # another kind's foo: the skill's runs are not its runs
     assert lab_ids(w, "local", "foo") == ["d" * 32, "e" * 32]
+    assert scan_ids(w, "local", "foo", "skill") == ["5" * 32] and scan_ids(w, "local", "foo", "agent") == []
     assert delete(owner, "foo", "foo").status_code == 200
     assert lab_ids(w, "local", "foo") == [] and lab_ids(w, "local", "bar") == ["f" * 32] and lab_ids(w, w.uid(1), "foo") == ["1" * 32]
+    assert scan_ids(w, "local", "foo", "skill") == [] and scan_ids(w, "local", "bar", "skill") == ["7" * 32] and scan_ids(w, w.uid(1), "foo", "skill") == ["4" * 32]
 
 
 def test_a_local_server_with_no_sign_in_deletes_too(make):

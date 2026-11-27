@@ -1,6 +1,6 @@
 """Erasing a person's data (slice AK, docs/data-removal.md). The owner's act, for an account that is already turned off.
 
-What goes: the person's folder (their library of every kind and its backups), their builds (rows, jobs and folders), suggestion runs, Testing Lab runs and their saved model key.
+What goes: the person's folder (their library of every kind and its backups), their builds (rows, jobs and folders), suggestion runs, Testing Lab runs, behaviour scans and their saved model key.
 What stays, on purpose:
 
 * **the account row**: the person is still turned off afterwards, and if the owner turns them back on they start empty;
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, select, update
 
-from ..db import LOCAL_USER_ID, BuildSession, EvalRun, Job, ModelCall, SuggestRun
+from ..db import LOCAL_USER_ID, BuildSession, EvalRun, Job, ModelCall, ScanRun, SuggestRun
 from ..db.models import UserModelRow
 from ..db.users import UserStore
 from ..library.package import LibraryError
@@ -41,6 +41,7 @@ class EraseReport:
     builds: int
     suggestion_runs: int
     lab_runs: int
+    scan_runs: int
     key_removed: bool
     files_left: bool  # something could not be removed from the disk (it no longer belongs to anything)
 
@@ -82,6 +83,7 @@ def erase_person(builder: "Builder", user_id: str) -> EraseReport:
             s.execute(delete(BuildSession).where(BuildSession.id.in_(chunk)))
         suggestions = s.execute(delete(SuggestRun).where(SuggestRun.user_id == user_id)).rowcount
         labs = s.execute(delete(EvalRun).where(EvalRun.user_id == user_id)).rowcount
+        scans = s.execute(delete(ScanRun).where(ScanRun.user_id == user_id)).rowcount
         key = s.execute(delete(UserModelRow).where(UserModelRow.user_id == user_id)).rowcount == 1
 
     if builder.library_for is not None:
@@ -94,4 +96,4 @@ def erase_person(builder: "Builder", user_id: str) -> EraseReport:
         elif folder is not None:
             files_left = True  # not laid out as expected: nothing was guessed at, and it is said
     builder.space.forget(user_id)
-    return EraseReport(len(erasable), suggestions, labs, key, files_left)
+    return EraseReport(len(erasable), suggestions, labs, scans, key, files_left)

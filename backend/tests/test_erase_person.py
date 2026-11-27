@@ -13,9 +13,9 @@ import pytest
 from sqlalchemy import func, select
 from test_accounts_isolation import World
 from test_library_delete import make_link, outside
-from test_library_delete_api import add_build, add_lab_run, add_suggest_run, put
+from test_library_delete_api import add_build, add_lab_run, add_scan_run, add_suggest_run, put
 
-from skillforge.db import BuildSession, EvalRun, Job, ModelCall, SuggestRun, now_text
+from skillforge.db import BuildSession, EvalRun, Job, ModelCall, ScanRun, SuggestRun, now_text
 from skillforge.db.models import UserModelRow, UserRow
 from skillforge.db.user_models import ModelStore
 from skillforge.library import remove as remove_module
@@ -65,6 +65,7 @@ def seed_person(w: World, n: int) -> dict:
     (folder / "SKILL.md").write_text("built", encoding="utf-8")
     add_suggest_run(w, uid, f"s{n}".ljust(32, "0"), status="done")
     add_lab_run(w, uid, f"e{n}".ljust(32, "0"), status="done")
+    add_scan_run(w, uid, f"c{n}".ljust(32, "0"), status="done")
     ModelStore(w.db).put(uid, "groq", "model-x", b"sealed", b"n" * 12)
     with w.db.session() as s:
         s.add(Job(session_id=sid, kind="build", status="succeeded", created_at=now_text(), events=[], error=""))
@@ -81,14 +82,14 @@ def counts(w: World, uid: str) -> dict[str, int]:
 
         return {
             "builds": n(BuildSession, BuildSession.user_id), "suggestions": n(SuggestRun, SuggestRun.user_id), "labs": n(EvalRun, EvalRun.user_id),
-            "keys": n(UserModelRow, UserModelRow.user_id), "users": n(UserRow, UserRow.id), "usage": n(ModelCall, ModelCall.user_id),
+            "scans": n(ScanRun, ScanRun.user_id), "keys": n(UserModelRow, UserModelRow.user_id), "users": n(UserRow, UserRow.id), "usage": n(ModelCall, ModelCall.user_id),
         }
 
 
 def untouched(w: World, a: dict) -> bool:
     """Whether everything of this seeded person is still there."""
     return (w.libraries.users_root / a["uid"]).exists() and a["folder"].exists() and counts(w, a["uid"]) == {
-        "builds": 1, "suggestions": 1, "labs": 1, "keys": 1, "users": 1, "usage": 3,
+        "builds": 1, "suggestions": 1, "labs": 1, "scans": 1, "keys": 1, "users": 1, "usage": 3,
     }
 
 
@@ -102,10 +103,10 @@ def test_erasing_removes_the_persons_folder_builds_runs_and_key_and_nothing_of_a
     block(owner, a["uid"])
     r = erase(owner, a["uid"], "p1@example.com")
     assert r.status_code == 200, r.text
-    assert r.json() == {"erased": True, "builds": 1, "suggestion_runs": 1, "lab_runs": 1, "key_removed": True, "files_left": False}
+    assert r.json() == {"erased": True, "builds": 1, "suggestion_runs": 1, "lab_runs": 1, "scan_runs": 1, "key_removed": True, "files_left": False}
     assert str(w.tmp) not in r.text
     assert not (w.libraries.users_root / a["uid"]).exists() and not a["folder"].exists()
-    assert counts(w, a["uid"]) == {"builds": 0, "suggestions": 0, "labs": 0, "keys": 0, "users": 1, "usage": 3}
+    assert counts(w, a["uid"]) == {"builds": 0, "suggestions": 0, "labs": 0, "scans": 0, "keys": 0, "users": 1, "usage": 3}
     with w.db.session() as s:
         assert s.execute(select(func.count()).select_from(Job).where(Job.session_id == a["sid"])).scalar_one() == 0
     assert untouched(w, b) and b["lib"].names() == ["foo"] and w.library.names() == ["foo"]
@@ -150,7 +151,7 @@ def test_a_person_who_is_not_turned_off_is_refused_and_nothing_is_touched(ew):
     assert untouched(w, a)
 
 
-@pytest.mark.parametrize("adder", [add_build, add_lab_run, add_suggest_run])
+@pytest.mark.parametrize("adder", [add_build, add_lab_run, add_suggest_run, add_scan_run])
 def test_a_person_with_work_running_is_refused_and_nothing_is_touched(ew, adder):
     w = ew()
     w.person(1)
@@ -230,7 +231,7 @@ def test_erasing_twice_is_harmless(ew):
     block(owner, a["uid"])
     assert erase(owner, a["uid"], "p1@example.com").status_code == 200
     again = erase(owner, a["uid"], "p1@example.com")
-    assert again.status_code == 200 and again.json() == {"erased": True, "builds": 0, "suggestion_runs": 0, "lab_runs": 0, "key_removed": False, "files_left": False}
+    assert again.status_code == 200 and again.json() == {"erased": True, "builds": 0, "suggestion_runs": 0, "lab_runs": 0, "scan_runs": 0, "key_removed": False, "files_left": False}
 
 
 def test_a_build_folder_that_cannot_be_removed_keeps_its_row_so_erasing_again_finishes_the_job(ew, monkeypatch):
@@ -270,7 +271,7 @@ def test_a_folder_that_cannot_be_removed_is_reported_and_what_has_no_folder_is_s
     monkeypatch.setattr(remove_module.shutil, "rmtree", lambda *args, **kwargs: None)
     r = erase(owner, a["uid"], "p1@example.com")
     assert r.status_code == 200 and r.json()["files_left"] is True
-    assert counts(w, a["uid"])["keys"] == 0 and counts(w, a["uid"])["suggestions"] == 0 and counts(w, a["uid"])["labs"] == 0 and str(w.tmp) not in r.text
+    assert counts(w, a["uid"])["keys"] == 0 and counts(w, a["uid"])["suggestions"] == 0 and counts(w, a["uid"])["labs"] == 0 and counts(w, a["uid"])["scans"] == 0 and str(w.tmp) not in r.text
     assert counts(w, a["uid"])["builds"] == 1 and r.json()["builds"] == 0  # the build whose folder is still there keeps its row, so erasing again can find it
 
 

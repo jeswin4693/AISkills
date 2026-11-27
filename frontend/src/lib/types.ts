@@ -239,6 +239,7 @@ export interface EraseReport {
   builds: number;
   suggestion_runs: number;
   lab_runs: number;
+  scan_runs: number;
   key_removed: boolean;
   files_left: boolean;
 }

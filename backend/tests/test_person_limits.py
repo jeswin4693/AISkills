@@ -19,7 +19,7 @@ from skillforge.api import create_app
 from skillforge.api.hosted import Hosted, HostedConfigError
 from skillforge.builder import Builder, JobRunner
 from skillforge.builder.limits import LimitReached, PersonLimits
-from skillforge.db import BuildSession, EvalRun, now_text
+from skillforge.db import BuildSession, EvalRun, ScanRun, now_text
 
 MB = 1024 * 1024
 
@@ -253,6 +253,16 @@ def test_a_working_testing_lab_run_counts_toward_the_active_cap(lw):
     assert post_build(ada).status_code == 429  # a Lab run is working, so there is no place for a build
     refused = ada.post("/api/evals", json={"name": "commit-writer"})
     assert refused.status_code == 429 and refused.json()["limit"] == "active"
+
+
+def test_a_working_scan_run_counts_toward_the_active_cap(lw):
+    w = lw(runner=Parked(), limits=PersonLimits(max_active=1))
+    ada = w.person(1)
+    stamp = now_text()
+    with w.db.session() as s:
+        s.add(ScanRun(id="f" * 32, created_at=stamp, updated_at=stamp, status="working", kind="skill", name="other-skill", version=1, content_hash="h", runs=1, scenarios=5,
+                      control=True, draft=True, tasks_total=5, tasks_done=0, result=None, error="", retryable=False, user_id=w.uid(1)))
+    assert post_build(ada).status_code == 429  # a behaviour scan is working, so there is no place for a build
 
 
 def test_a_second_click_on_the_same_lab_run_still_gets_that_run_and_is_not_a_new_one(lw):

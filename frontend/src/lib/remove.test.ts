@@ -61,12 +61,13 @@ describe("the words of the erase dialog", () => {
     expect(keeps.join(" ")).toContain("stays turned off");
     expect(keeps.join(" ")).toContain("model calls");
   });
-  const done: EraseReport = { erased: true, builds: 3, suggestion_runs: 1, lab_runs: 2, key_removed: true, files_left: false };
+  const done: EraseReport = { erased: true, builds: 3, suggestion_runs: 1, lab_runs: 2, scan_runs: 1, key_removed: true, files_left: false };
   it("counts what was erased", () => {
     const text = erasedNotice(done);
     expect(text).toContain("3 builds");
     expect(text).toContain("1 suggestion run");
     expect(text).toContain("2 test runs");
+    expect(text).toContain("1 behaviour scan");
     expect(text).toContain("saved model key");
     expect(text).toContain("files are gone");
   });
@@ -104,7 +105,7 @@ describe("the two calls", () => {
     await expect(api.deleteEntry("commit-writer", "commit-writer")).rejects.toMatchObject({ status: 409, message: "You have work running. Wait for it to finish, then delete." });
   });
   it("erases with POST and the typed address in the body", async () => {
-    const f = vi.fn().mockResolvedValue(reply(200, { erased: true, builds: 0, suggestion_runs: 0, lab_runs: 0, key_removed: false, files_left: false }));
+    const f = vi.fn().mockResolvedValue(reply(200, { erased: true, builds: 0, suggestion_runs: 0, lab_runs: 0, scan_runs: 0, key_removed: false, files_left: false }));
     vi.stubGlobal("fetch", f);
     await api.erasePerson("a".repeat(32), "ada@example.com");
     expect(f.mock.calls[0][1].method).toBe("POST");

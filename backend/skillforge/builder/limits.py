@@ -20,7 +20,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
-from ..db import LOCAL_USER_ID, BuildSession, Database, EvalRun
+from ..db import LOCAL_USER_ID, BuildSession, Database, EvalRun, ScanRun
 
 MB = 1024 * 1024
 BLOCK = 4096  # what the smallest file or folder takes on a disk
@@ -134,7 +134,8 @@ class PersonSpace:
         with self.db.session() as s:
             builds = s.execute(select(func.count()).select_from(BuildSession).where(BuildSession.user_id == user, BuildSession.status == "working")).scalar_one()
             runs = s.execute(select(func.count()).select_from(EvalRun).where(EvalRun.user_id == user, EvalRun.status == "working")).scalar_one()
-        return builds + runs
+            scans = s.execute(select(func.count()).select_from(ScanRun).where(ScanRun.user_id == user, ScanRun.status == "working")).scalar_one()
+        return builds + runs + scans
 
     # ---- refusing ---------------------------------------------------------------------------------------------------
 

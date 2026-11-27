@@ -565,12 +565,16 @@ def _prune(root: Path, key_dir: Path, link: GithubLink, now: float) -> None:
     entries.append((_stamps(key_dir)[0].name if _stamps(key_dir) else "", key_dir))
     entries.sort(key=lambda e: e[0], reverse=True)
     for _, ref in entries[MAX_REPOS:]:
-        if ref == key_dir or any(_recently_used(d, now) for d in _stamps(ref)):  # key_dir's lock is held by our caller and is not re-entrant
+        if ref == key_dir:  # its lock is held by our caller and is not re-entrant
             continue
         lock = _lock_for(ref)
         if not lock.acquire(blocking=False):  # a request is working on that repository: not now
             continue
         try:
+            # Asked UNDER the lock: a request that opens this repository from here on waits for us, and one that opened it before has already marked it.
+            # (Asked before taking the lock, a request could open it in between and be handed a folder deleted a moment later.)
+            if any(_recently_used(d, now) for d in _stamps(ref)):
+                continue
             shutil.rmtree(ref, ignore_errors=True)
         finally:
             lock.release()

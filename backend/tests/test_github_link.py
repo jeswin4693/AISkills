@@ -526,6 +526,37 @@ def test_a_repository_whose_lock_is_held_is_left_alone_by_the_repository_limit(t
     assert not a.path.is_dir()
 
 
+def test_a_request_that_opens_a_repository_between_the_check_and_the_delete_is_not_cut_off(tmp_path, monkeypatch):
+    """The independent review's Important finding: `_prune` asked "was it used lately?" BEFORE taking the repository's lock, so a request that opened
+    the repository in that gap was handed a folder that was then deleted. The question is now asked under the lock. A reader is started from inside the
+    check, at exactly that moment; whatever it is handed must still exist afterwards."""
+    monkeypatch.setattr(gh, "MAX_REPOS", 1)
+    fetch, clock = Fetcher(), Tick()
+    link_a = "https://github.com/acme/repo-a"
+    snap(tmp_path, link_a, fetch, clock)
+    clock.t += 10 * 3600  # idle: only a read could protect it
+    key_a = str(gh._key_dir(tmp_path / "snaps", gh.parse_link(link_a)))
+    real, handed, fired = gh._recently_used, {}, []
+
+    def reader():
+        handed["snapshot"] = snap(tmp_path, link_a, fetch, clock, max_age=None)
+
+    def checked(stamp_dir, now):
+        answer = real(stamp_dir, now)
+        if not fired and str(stamp_dir).startswith(key_a):
+            thread = threading.Thread(target=reader)
+            fired.append(thread)
+            thread.start()
+            thread.join(0.5)  # before the fix it finishes here, marks the copy used, and still loses it; after, it waits for the lock
+        return answer
+
+    monkeypatch.setattr(gh, "_recently_used", checked)
+    snap(tmp_path, "https://github.com/acme/repo-b", fetch, clock)  # its prune looks at repository A
+    assert fired, "the check on repository A never ran"
+    fired[0].join(10)
+    assert handed["snapshot"].path.is_dir()
+
+
 def test_a_marker_that_cannot_be_written_does_not_fail_the_read(tmp_path):
     fetch, clock = Fetcher(), Tick()
     first = snap(tmp_path, fetch=fetch, clock=clock)

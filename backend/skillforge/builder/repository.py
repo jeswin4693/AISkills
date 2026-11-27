@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from ..evidence import EVIDENCE_FILE, MAX_REFS, collect, evidence_bytes, fit, safe
-from ..graph import query
+from ..graph import callgraph, query
 from ..graph.architecture import architecture
 from ..graph.build import build_graph
-from . import github
+from . import github, graphcache
 from .errors import BadRequest, BuilderError
 
 EVIDENCE_KINDS = ("skill", "agent")  # text about code: an MCP server or a plugin makes no claims about a repository
@@ -110,6 +110,38 @@ def analyze_repo(path: object, focus: object = None) -> dict[str, Any]:
         "dead_code": {"internal": len(dead["internal"]), "exported": len(dead["exported"]), "note": dead.get("note", "")},
         "architecture": architecture(g),  # folders as boxes, proven imports as arrows; repository-relative names only
     }
+
+
+def _read_graph(path: object, focus: object) -> tuple[Repo, str | None, Any]:
+    """The repository a person named, read into the graph, and the focus folder as text. The function explorer asks many times about one repository,
+    so the graph comes from `graphcache` (kept in memory while no file has changed) and is read without git history, which it does not use."""
+    repo, focus_text = resolve_repo(path), clean_focus(focus)
+    try:
+        return repo, focus_text, graphcache.graph_for(repo.folder, focus_text)
+    except (OSError, ValueError) as exc:
+        raise BadRequest(read_failure(exc)) from exc
+
+
+def find_functions(path: object, focus: object, text: object) -> dict[str, Any]:
+    """Slice AL: functions, methods and classes of a repository whose name contains the text, with what helps to choose one. No model."""
+    query_text = text.strip() if isinstance(text, str) else ""
+    if not query_text:
+        raise BadRequest("Type part of a function's name to search for it.")
+    repo, focus_text, g = _read_graph(path, focus)
+    return {"name": display_name(source_of(repo)), "focus": focus_text, "query": query_text, **callgraph.search_functions(g, query_text)}
+
+
+def explore_calls(path: object, focus: object, symbol: object, depth: object = 1) -> dict[str, Any]:
+    """Slice AL: one function's callers and callees (proven calls only), one level or two. Names and ids are relative to the repository: the
+    person's own path is never in the answer. No model, nothing is run."""
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise BadRequest("Say which function to draw: pick one from the search.")
+    repo, focus_text, g = _read_graph(path, focus)
+    try:
+        found = callgraph.call_graph(g, symbol.strip(), depth if isinstance(depth, int) else 1)
+    except query.QueryError as exc:
+        raise BadRequest(str(exc)) from exc
+    return {"name": display_name(source_of(repo)), "focus": focus_text, **found}
 
 
 def source_view(repo: Repo) -> dict[str, Any]:

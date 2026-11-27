@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..builder.guides import guide_repo
-from ..builder.repository import analyze_repo
+from ..builder.repository import analyze_repo, explore_calls, find_functions
 from .builds import get_builder
 from .scope import user_id
 
@@ -30,6 +30,15 @@ class SuggestBody(AnalyzeBody):
     with_ideas: bool = True  # False: only the review pass (half the model calls)
 
 
+class FunctionSearchBody(AnalyzeBody):
+    query: str = Field(max_length=200)  # part of a function's name
+
+
+class CallsBody(AnalyzeBody):
+    symbol: str = Field(max_length=1000)  # a graph id from the search, such as `core.py::shared`
+    depth: int = Field(default=1, ge=1, le=2)  # steps to follow: the functions around it, or those around those
+
+
 def repos_router() -> APIRouter:
     r = APIRouter()
 
@@ -42,6 +51,18 @@ def repos_router() -> APIRouter:
         """The graph's facts about a folder: size, languages and their honest levels, hotspots, dead-code candidates. No model."""
         local_only(request)
         return await run_in_threadpool(analyze_repo, body.path, body.focus)
+
+    @r.post("/repos/functions")
+    async def functions(body: FunctionSearchBody, request: Request) -> dict:
+        """Search a repository's functions by name, to pick one to draw. No model. The graph is the same cached read as `analyze`."""
+        local_only(request)
+        return await run_in_threadpool(find_functions, body.path, body.focus, body.query)
+
+    @r.post("/repos/calls")
+    async def calls(body: CallsBody, request: Request) -> dict:
+        """One function drawn with who calls it and what it calls (proven calls only), one step or two. No model, nothing is run."""
+        local_only(request)
+        return await run_in_threadpool(explore_calls, body.path, body.focus, body.symbol, body.depth)
 
     @r.post("/repos/guide")
     async def guide(body: AnalyzeBody, request: Request) -> dict:

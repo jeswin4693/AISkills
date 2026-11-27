@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from ..build.models import RequirementSpec
 from ..build.pipeline import BuildError, Round
 from ..build.scripts import ScriptRunner
 from ..providers.base import LLMProvider
@@ -33,7 +34,9 @@ class PluginKind(Kind):
     def personal_dir(self) -> Path:
         raise ValueError("A plugin is installed from a folder you choose.")
 
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
+    def understand(
+        self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None,
+    ) -> Round:
         raise BuildError(COMPOSED)
 
     def build(

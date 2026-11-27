@@ -41,6 +41,12 @@ An item with no verifiable quote counts as not answered, and you are
 asked about it. "None" counts as an answer for inputs and constraints, but only if you said so. A request that
 is a prompt, tool or agent rather than a skill is refused with an explanation.
 
+**An answered item is kept between rounds (slice AK).** Each round the model reads all of your words again, and a model that answers a little differently the second time can leave out an item it backed in the
+round before (a real build lost "constraints" this way and asked for it again). Code now keeps such an item, but only when its quote is **still** your own words: the old quote is checked again against the words as they are now,
+with the same rule as every quote. An item the new reading backed is never replaced (the new reading wins), and the round's note says which items were kept (`constraints: kept from the previous round ...`).
+The requirement as far as it was answered is kept on the session after every round that still has questions (`partial_spec`, [database.md](database.md)); it is never shown as the requirement and never built from, and a damaged record keeps
+nothing and fails nothing. It works for every conversational kind (skill, agent, MCP server in Python and in Node) and for the command line. Code: `keep_verified` in `build/requirements.py`, `tests/test_keep_answered.py`.
+
 Up to three rounds of questions, then it stops and names what is still missing. Nothing is built until you
 approve the requirement. `spec.json` keeps your own words next to each item as evidence.
 

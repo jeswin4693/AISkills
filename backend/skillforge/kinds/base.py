@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # only names for the annotations: the builder, not this module, runs the pipeline
+    from ..build.models import RequirementSpec
     from ..build.pipeline import Round
     from ..build.scripts import ScriptRunner
     from ..providers.base import LLMProvider
@@ -62,8 +63,11 @@ class Kind(ABC):
         """The folder that "install for me" writes into."""
 
     @abstractmethod
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
-        """One round of reading the person's words against this kind's checklist."""
+    def understand(
+        self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None,
+    ) -> Round:
+        """One round of reading the person's words against this kind's checklist. `previous` is the partial requirement of the round before:
+        an item it had answered that this reading does not repeat is kept when its quote is still in the person's words."""
 
     @abstractmethod
     def build(

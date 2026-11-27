@@ -77,8 +77,10 @@ class SkillKind(Kind):
     def personal_dir(self) -> Path:
         return Path.home() / ".claude" / "skills"  # worked out per call, so a test (or a changed HOME) is honoured
 
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
-        return understand_round(provider, words, round_no, max_rounds)
+    def understand(
+        self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None,
+    ) -> Round:
+        return understand_round(provider, words, round_no, max_rounds, previous=previous)
 
     def build(
         self, spec: dict, provider: LLMProvider, *, out_root: Path, with_scripts: bool, script_runner: ScriptRunner | None,

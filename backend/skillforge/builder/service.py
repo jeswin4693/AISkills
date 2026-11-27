@@ -21,8 +21,10 @@ from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 
+from ..build.models import RequirementSpec
 from ..build.pipeline import BuildError, apply_answers, check_description, sandbox_note as default_sandbox_note
 from ..build.requirements import Question
 from ..build.scripts import ScriptRunner
@@ -47,6 +49,17 @@ MAX_ROUNDS = 3
 MAX_EVENTS = 50
 _ID = re.compile(r"^[0-9a-f]{32}\Z")
 log = logging.getLogger(__name__)
+
+
+def partial_of(stored: object) -> RequirementSpec | None:
+    """The partial requirement the last round left on a session, or None when there is none or the record is damaged. A damaged record keeps nothing and
+    fails nothing: the round simply reads the person's words as it always did. (What it holds is checked again against the words before any of it is kept.)"""
+    if not isinstance(stored, dict):
+        return None
+    try:
+        return RequirementSpec.model_validate(stored)
+    except ValidationError:
+        return None
 
 
 class Builder:
@@ -359,10 +372,11 @@ class Builder:
         with self.db.session() as s:
             row = self._row(s, sid, None)  # a background job acts for the session's own owner
             words, round_no, kind_key, owner = row.words, row.round, row.kind, row.user_id
+            previous = partial_of(row.partial_spec)
         kind = get_kind(kind_key)  # before the model is set up: a kind that is gone is not a missing key
         provider = self._provider(sid, job_id, owner)
         progress(f"Round {round_no}: reading your words and filling in the checklist")
-        r = kind.understand(provider, words, round_no, MAX_ROUNDS)
+        r = kind.understand(provider, words, round_no, MAX_ROUNDS, previous=previous)
         with self.db.session() as s:
             row = self._row(s, sid, None)
             row.model_calls += r.calls
@@ -372,6 +386,7 @@ class Builder:
                 row.spec, row.questions, row.status = r.spec.model_dump(), [], "awaiting_approval"
             elif r.state == "questions":
                 row.questions, row.status = [asdict(q) for q in r.questions], "awaiting_answers"
+                row.partial_spec = r.spec.model_dump()  # the next round keeps from this whatever its model does not repeat (and the words still say)
         if r.state in ("blocked", "incomplete"):
             raise BuildError(r.message)
 

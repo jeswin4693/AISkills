@@ -38,10 +38,13 @@ class McpNodeKind(Kind):
     def personal_dir(self) -> Path:
         raise ValueError("An MCP server is installed into a folder you choose; adding it to Claude Code is a command you run.")
 
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
+    def understand(
+        self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None,
+    ) -> Round:
         # the person chose to build a server, so what the extraction calls the request never blocks it
         return understand_round(
             provider, words, round_no, max_rounds, questions=MCP_QUESTIONS, extract_system=MCP_EXTRACT_SYSTEM, skill_only=False,
+            previous=previous,
         )
 
     def build(

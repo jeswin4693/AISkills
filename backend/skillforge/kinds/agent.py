@@ -57,10 +57,13 @@ class AgentKind(Kind):
     def personal_dir(self) -> Path:
         return Path.home() / ".claude" / "agents"  # worked out per call, so a test (or a changed HOME) is honoured
 
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
+    def understand(
+        self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None,
+    ) -> Round:
         # the person chose to build an agent, so what the extraction calls the request never blocks it
         return understand_round(
             provider, words, round_no, max_rounds, questions=AGENT_QUESTIONS, extract_system=AGENT_EXTRACT_SYSTEM, skill_only=False,
+            previous=previous,
         )
 
     def build(

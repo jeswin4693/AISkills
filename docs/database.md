@@ -23,6 +23,10 @@ Migration 0003 added `kind` (a key of the kind registry; `skill` by default, so 
 (for a plugin's child builds, later; no foreign key, because SQLite cannot add one to an existing table). A session whose kind is no
 longer registered can still be read, listed and discarded.
 
+Migration 0009 (slice AK) added `partial_spec` (JSON, nullable): the requirement as far as it was answered after a round that still had questions. The next round keeps an item from it that the model
+does not repeat and whose quote is still in the person's words ([build.md](build.md)). It is **not** the approved requirement (`spec` is that and is still set only when the checklist is complete), it is never returned by the API,
+and a record that cannot be read as a requirement keeps nothing. A plain `ADD COLUMN`; the downgrade is a plain `DROP COLUMN`.
+
 `jobs`: a sequence id (a higher id is a later job), the session, kind (`understand` or `build`), status
 (`queued`, `running`, `succeeded`, `failed`), times, the progress events the UI shows, and the error.
 

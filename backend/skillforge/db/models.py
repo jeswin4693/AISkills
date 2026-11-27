@@ -34,6 +34,9 @@ class BuildSession(Base):
     with_scripts: Mapped[bool] = mapped_column(Boolean, default=False)
     questions: Mapped[list] = mapped_column(JSON, default=list)  # [{"slot", "text"}] while awaiting answers
     spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # the RequirementSpec awaiting approval
+    # The requirement as far as it was answered after a round that still had questions: the next round keeps an item from it that the model does not repeat
+    # and whose quote is still in the person's words. Never the approved requirement, never built from, never shown by the API.
+    partial_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # a summary of the build, when it is done
     error: Mapped[str] = mapped_column(Text, default="")
     retryable: Mapped[bool] = mapped_column(Boolean, default=False)  # True when running the same step again can help

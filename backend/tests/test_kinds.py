@@ -50,7 +50,7 @@ class FakeKind(Kind):
     def personal_dir(self) -> Path:
         return Path(tempfile.gettempdir()) / "skillforge-fake-note-kind"
 
-    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int) -> Round:
+    def understand(self, provider: LLMProvider, words: str, round_no: int, max_rounds: int, previous: RequirementSpec | None = None) -> Round:
         """Always complete in one round, and never asks the model."""
         self.calls.append(("understand", words, round_no))
         return Round("complete", RequirementSpec(goal=words, user_words=words), [], 0)

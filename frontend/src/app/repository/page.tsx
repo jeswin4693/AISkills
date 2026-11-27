@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArchitectureMap } from "@/components/repository/ArchitectureMap";
+import { FunctionExplorer } from "@/components/repository/FunctionExplorer";
 import { HowItWorks } from "@/components/repository/HowItWorks";
 import { IdeaCard } from "@/components/repository/IdeaCard";
 import { RepoSummary } from "@/components/repository/RepoSummary";
@@ -37,6 +38,7 @@ export default function RepositoryPage() {
   const [guideError, setGuideError] = useState<string | null>(null);
   // What was last read: the guide is drawn for that, not for whatever the box says now. The counter lets an answer that comes back after another read be ignored.
   const [lastRead, setLastRead] = useState<{ path: string; focus: string } | null>(null);
+  const [readCount, setReadCount] = useState(0); // every read starts the function explorer afresh: it belongs to the code as it was read
   const guideSeq = useRef(0);
 
   useEffect(() => {
@@ -89,6 +91,7 @@ export default function RepositoryPage() {
       remember({ path: path.trim(), focus: focus.trim() });
       setAnalysis(a);
       setLastRead({ path: path.trim(), focus: focus.trim() });
+      setReadCount((n) => n + 1);
     } catch (err) {
       setAnalysis(null);
       setLastRead(null);
@@ -198,6 +201,7 @@ export default function RepositoryPage() {
         {readError && <ErrorBox error={readError} onRetry={() => void read()} />}
         {analysis && <RepoSummary analysis={analysis} />}
         {analysis && <ArchitectureMap architecture={analysis.architecture} />}
+        {analysis && lastRead && <FunctionExplorer key={readCount} path={lastRead.path} focus={lastRead.focus} starters={analysis.hotspots.core_symbols} />}
 
         {analysis && (
           <section className="space-y-3">

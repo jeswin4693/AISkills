@@ -666,6 +666,74 @@ export interface RepoAnalysis {
   architecture?: Architecture;
 }
 
+// ---- the function-level call graph: one function, who calls it and what it calls (proven calls only, no model) ----
+
+/** One result of searching a repository's functions, with what helps to choose it. */
+export interface FunctionMatch {
+  /** A graph id, `file::name`: what to ask the call graph about. */
+  id: string;
+  name: string;
+  kind: string;
+  file: string;
+  line: number;
+  test: boolean;
+  /** Proven callers (test functions not counted), and proven callees. */
+  callers: number;
+  callees: number;
+  /** False when the graph does not read calls in this function's language: the two numbers above are then not "none", they are unknown. */
+  measured: boolean;
+}
+
+export interface FunctionSearch {
+  name: string;
+  focus: string | null;
+  query: string;
+  matches: FunctionMatch[];
+  /** How many functions matched in all (the list holds the first few). */
+  total: number;
+}
+
+export interface CallNode {
+  id: string;
+  name: string;
+  kind: string;
+  file: string;
+  line: number;
+  lines: number;
+  test: boolean;
+  /** `both`: it calls the chosen function and is called by it; it is drawn once, on the callee side. */
+  role: "subject" | "caller" | "callee" | "both";
+  /** Steps from the chosen function: negative for what calls it, positive for what it calls. */
+  column: number;
+  /** The function's own proven neighbours (test callers are in `tests_total`), so the page can say how many are not drawn. */
+  callers_total: number;
+  tests_total: number;
+  callees_total: number;
+}
+
+export interface CallEdge {
+  from: string;
+  to: string;
+  /** Call sites written. */
+  count: number;
+}
+
+export interface CallGraph {
+  name: string;
+  focus: string | null;
+  subject: CallNode;
+  nodes: CallNode[];
+  edges: CallEdge[];
+  depth: 1 | 2;
+  /** False for a language whose calls the graph does not read (the basic level): the picture is then just the function, and says it is not measured. */
+  measured: boolean;
+  language: string;
+  level: string;
+  /** Call sites written in the chosen function, and how many of them are tied to a function in the repository. */
+  calls: { written: number; tied: number };
+  left_out: { guess: number; from_tests: number; over_limit: number };
+}
+
 // ---- the guide: how a project works, read from its README and docs (every quote checked by code) ----
 
 /**

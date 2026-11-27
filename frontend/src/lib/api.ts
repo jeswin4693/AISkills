@@ -1,5 +1,5 @@
 import type {
-  AdminPeople, AuthStatus, BuildSession, BuildSummary, CasesView, DeleteReport, EraseReport, ScanPreview, ScanRun, ScanRunSummary, ScanStart, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
+  AdminPeople, AuthStatus, BuildSession, BuildSummary, CallGraph, CasesView, FunctionSearch, DeleteReport, EraseReport, ScanPreview, ScanRun, ScanRunSummary, ScanStart, QualityReport, DiffResult, EvalPreview, EvalRun, EvalRunSummary, EvidenceDoc, FileText, Guide, Health, HookInfo, ImportResult, InstallRequest, InstallResult, KindInfo, PluginPreview, PluginRequest, PluginSaveResult, ProviderStatus,
   ModelCheckReport, MyModelView, MySpace, Person, RecheckReport, RepoAnalysis, RescanResult, SandboxStatus, SaveMyModelResult, SaveResult, SaveSettingsResult, SettingsView,
   SkillSummary, SuggestRun, SuggestRunSummary, VersionInfo,
 } from "./types";
@@ -162,6 +162,12 @@ export const api = {
   analyzeRepo: (path: string, focus?: string) => post<RepoAnalysis>("/api/repos/analyze", { path, focus: focus || null }),
   /** How the project works, from its README and docs. One model call: this waits for it (up to a minute or so) and nothing is saved. */
   guideRepo: (path: string, focus?: string) => post<Guide>("/api/repos/guide", { path, focus: focus || null }),
+  /** Functions of a repository whose name contains the text. No model. */
+  searchFunctions: (path: string, focus: string | undefined, query: string) =>
+    post<FunctionSearch>("/api/repos/functions", { path, focus: focus || null, query }),
+  /** One function with who calls it and what it calls (proven calls only), one step or two. No model. */
+  callGraph: (path: string, focus: string | undefined, symbol: string, depth: 1 | 2) =>
+    post<CallGraph>("/api/repos/calls", { path, focus: focus || null, symbol, depth }),
   startSuggest: (path: string, focus: string | undefined, withIdeas: boolean) =>
     post<SuggestRun>("/api/suggestions", { path, focus: focus || null, with_ideas: withIdeas }),
   suggestRun: (id: string) => get<SuggestRun>(`/api/suggestions/${encodeURIComponent(id)}`),

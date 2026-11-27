@@ -728,6 +728,60 @@ try {
     await page.setViewportSize({ width: 1280, height: 900 });
   });
 
+  console.log("The function explorer (who calls what)");
+  // The same small repository as the map: web.page and pricing.audit call api.route, which calls pricing.tax.
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const callNode = (name, file) => page.getByRole("button", { name: new RegExp(`^${escapeRe(name)}, ${escapeRe(file)}:`) });
+  const resultFor = (file) => page.locator("ul button", { hasText: new RegExp(`${escapeRe(file)}:\\d+`) }); // a search result (an HTML button), not a drawn function
+  const findFunction = async (text) => {
+    await page.getByLabel("Find a function").fill(text);
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+  };
+  await step("the page also draws who calls a function, and nothing in it shows the folder's path", async () => {
+    await page.getByRole("heading", { name: "Who calls what" }).waitFor();
+    await page.getByText("No function is shown yet.").waitFor();
+    await findFunction("route");
+    await resultFor("api/routes.py").click();
+    await page.getByText("route is called by 2 functions and calls 1 function.").waitFor();
+    for (const [name, file] of [["page", "web/app.py"], ["audit", "pricing/audit.py"], ["route", "api/routes.py"], ["tax", "pricing/core.py"]]) await callNode(name, file).waitFor();
+    await page.getByText(/Only calls the graph proves are drawn: it ties each call/).waitFor(); // the note under the picture (the intro says it more shortly)
+    assert.ok(!(await page.locator("main").innerText()).includes(scratch), "the explorer must not show the folder's path");
+    await shot(page, "34o-function-explorer");
+  });
+  await step("clicking a drawn function moves the view to it, and Back returns to the one before", async () => {
+    await callNode("page", "web/app.py").click();
+    await page.getByText("page is called by 0 functions and calls 1 function.").waitFor();
+    await page.getByRole("button", { name: "← Back" }).click();
+    await page.getByText("route is called by 2 functions and calls 1 function.").waitFor();
+    assert.ok(await page.getByRole("button", { name: "← Back" }).isDisabled(), "after going back to the first function there is nowhere further back");
+  });
+  await step("two steps follow the calls one step further, and a search that matches nothing says so", async () => {
+    await findFunction("tax");
+    await resultFor("pricing/core.py").click();
+    await page.getByText("tax is called by 1 function and calls 0 functions.").waitFor();
+    assert.equal(await callNode("page", "web/app.py").count(), 0, "one step does not reach web.page");
+    await page.getByRole("button", { name: "Two steps" }).click();
+    await callNode("page", "web/app.py").waitFor();
+    await callNode("audit", "pricing/audit.py").waitFor();
+    await shot(page, "34p-function-explorer-two-steps");
+    await findFunction("zzz_no_such_function");
+    await page.getByText('No function matches "zzz_no_such_function".').waitFor();
+  });
+  await step("the picture is also a list of sentences", async () => {
+    await page.getByText("The calls as a list").click();
+    await page.getByText("page calls route").waitFor();
+    await page.getByText("route calls tax").waitFor();
+  });
+  await step("the explorer never makes the page scroll sideways at phone width", async () => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForTimeout(300);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(overflow <= 1, `the explorer makes the page scroll sideways by ${overflow}px`);
+    await callNode("tax", "pricing/core.py").scrollIntoViewIfNeeded();
+    await shot(page, "34q-function-explorer-phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
+  });
+
   console.log("How it works (the guide)");
   // The sentences the fake model quotes (mock_server.py, guide_draft). The real checking code looks each one up in this README.
   const GUIDE_README = [

@@ -53,7 +53,7 @@ export function arrowWidth(count: number): number {
 
 /** One arrow as a curve. Between columns it runs from the source's right edge to the target's left edge. Inside one column it bulges out to
  * the right (further when it goes up, so an arrow and its opposite do not lie on top of each other). Backwards it runs between the facing edges. */
-function curve(s: Placed, t: Placed): { d: string; x: number; y: number } {
+export function curve(s: Placed, t: Placed): { d: string; x: number; y: number } {
   let sy = s.y + s.h / 2;
   let ty = t.y + t.h / 2;
   let sx: number;

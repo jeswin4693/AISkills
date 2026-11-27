@@ -45,6 +45,7 @@ from .me import me_router
 from .plugins import plugins_router
 from .quality import quality_router
 from .repos import repos_router
+from .scans import scans_router
 from .scope import user_id, user_library
 from .settings import settings_router
 from .security import LocalOnlyMiddleware, allowed_origins
@@ -356,6 +357,7 @@ def create_app(
     api.include_router(me_router())
     api.include_router(admin_router())
     api.include_router(evals_router())
+    api.include_router(scans_router())
     api.include_router(quality_router())
     api.include_router(repos_router())
     api.include_router(settings_router())

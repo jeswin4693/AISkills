@@ -113,6 +113,30 @@ def verify_extraction(ext: Extraction, user_words: str, rounds: int) -> tuple[Re
     return spec, notes
 
 
+def keep_verified(spec: RequirementSpec, previous: RequirementSpec | None, user_words: str) -> tuple[RequirementSpec, list[str]]:
+    """Keep an item that an earlier round backed and this round's reading did not repeat, if its quote is STILL the person's own words.
+
+    Each round the model reads all of the words again, and a model that answers a little differently the second time can drop an item it backed the first
+    time (a real build lost "constraints" this way and asked for it again). The words only ever grow, so the old quote is normally still there; it is checked
+    again against the words as they are NOW with the same rule as every quote (`quote_is_theirs`), so nothing is kept on the model's say-so, and a record that
+    was damaged or edited keeps nothing. An item this round DID back is never replaced: the new reading wins. `spec` is filled in and returned; the notes
+    have no round prefix, like `verify_extraction`'s."""
+    notes: list[str] = []
+    if previous is None:
+        return spec, notes
+    source = normalise(user_words)
+    for slot in SLOTS:
+        if slot in spec.quotes:
+            continue
+        value, quote = getattr(previous, slot), previous.quotes.get(slot, "")
+        if not value or not quote_is_theirs(quote, source):
+            continue
+        setattr(spec, slot, list(value) if isinstance(value, list) else value)
+        spec.quotes[slot] = quote
+        notes.append(f"{slot}: kept from the previous round (your words still say it; the new reading did not repeat it).")
+    return spec, notes
+
+
 def extract_spec(
     provider: LLMProvider, user_words: str, rounds: int = 1, system: str = EXTRACT_SYSTEM,
 ) -> tuple[RequirementSpec, list[str], int]:

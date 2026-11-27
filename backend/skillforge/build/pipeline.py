@@ -16,7 +16,7 @@ from .quality import TokenCost, clean_triggers, compose_description, quality_che
 from ..sandbox import probe_sandbox
 from ..validate import validate_files
 from .render import MAX_NAME, render_files, render_report, slugify, write_files
-from .requirements import EXTRACT_SYSTEM, Question, check_completeness, extract_spec, questions_for
+from .requirements import EXTRACT_SYSTEM, Question, check_completeness, extract_spec, keep_verified, questions_for
 from .scripts import ScriptReport, ScriptRunner, build_scripts, check_scripts, run_script_tests
 
 
@@ -185,13 +185,18 @@ class Round:
 def understand_round(
     provider: LLMProvider, words: str, round_no: int, max_rounds: int, *,
     questions: Mapping[str, str] | None = None, extract_system: str | None = None, skill_only: bool = True,
+    previous: RequirementSpec | None = None,
 ) -> Round:
     """One extraction plus the checklist. Completeness is decided here, by code; the model only extracts.
 
     The keyword arguments are how another kind of builder gives its own question wording and extraction prompt and turns
-    off the skill-only refusal. With none of them this is exactly the skill builder."""
+    off the skill-only refusal. With none of them this is exactly the skill builder.
+
+    `previous` is the partial requirement of the round before (None in round one): an item it had answered that this round's reading
+    did not repeat is kept when its quote is still in the person's words (`keep_verified`), and the notes say so."""
     spec, extract_notes, used = extract_spec(provider, words, round_no, extract_system or EXTRACT_SYSTEM)
-    notes = [f"round {round_no}: {n}" for n in extract_notes]
+    spec, kept_notes = keep_verified(spec, previous, words)
+    notes = [f"round {round_no}: {n}" for n in [*extract_notes, *kept_notes]]
     comp = check_completeness(spec, skill_only=skill_only)
     if comp.blockers:
         return Round("blocked", spec, notes, used, message=" ".join(comp.blockers))
@@ -221,14 +226,16 @@ def gather_spec(
     words = check_description(description)
     calls = 0
     notes: list[str] = []
+    previous: RequirementSpec | None = None  # what the round before had answered, so an item it backed is not lost to a different reading
     for round_no in range(1, max_rounds + 1):
-        r = understand_round(provider, words, round_no, max_rounds)
+        r = understand_round(provider, words, round_no, max_rounds, previous=previous)
         calls += r.calls
         notes += r.notes
         if r.state in ("blocked", "incomplete"):
             raise BuildError(r.message)
         if r.state == "complete":
             return r.spec, calls, notes
+        previous = r.spec
         words = apply_answers(words, r.questions, ask(r.questions))
     raise BuildError("unreachable")  # pragma: no cover
 
